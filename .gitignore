@@ -1,0 +1,13 @@
+node_modules/
+out/
+*.sqlite
+__pycache__/
+*.pyc
+.env
+debug-main.js
+test-main.js
+src/main/
+src/preload/
+electron.vite.config.ts
+tsconfig.node.json
+tsconfig.web.json
