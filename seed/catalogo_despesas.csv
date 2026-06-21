@@ -1,0 +1,46 @@
+﻿conta_norm,exemplo_nome,categoria_sugerida,padrao,n_meses,ultimo_mes,media,previsao_jul26
+financ imob,Financ imob,Financiamento imóvel,reajuste anual,37,2026-06,"21,751.53","24,141.05"
+convenio pai e mae,Convênio pai e mãe,Saúde,variavel nao-sazonal,13,2026-06,"5,763.68","11,325.56"
+cartao black,Cartão black,Cartões,variavel nao-sazonal,37,2026-06,"5,027.05","7,067.01"
+condominio,Condominio,Casa/Utilidades,variavel nao-sazonal,31,2026-06,"4,748.53","5,122.92"
+ipva,IPVA,Casa/Utilidades,variavel nao-sazonal,6,2025-01,"4,534.13","5,399.66"
+convenio sogra,Convênio sogra,Saúde,variavel nao-sazonal,40,2026-06,"4,219.20","4,720.00"
+iptu casa,IPTU casa,Casa/Utilidades,fixa,9,2025-06,"3,950.36","3,944.16"
+escola maju,Escola Maju,Filhos/Educação,reajuste anual,40,2026-06,"3,063.01","3,466.54"
+iptu apto,iptu apto,Casa/Utilidades,fixa,14,2026-06,"2,753.99","2,924.94"
+escola malu,Escola Malu,Filhos/Educação,reajuste anual,40,2026-06,"2,641.06","2,951.55"
+pagto thalita,Pagto Thalita (automático),Funcionária (Deusa),reajuste anual,40,2026-06,"1,880.00","2,200.00"
+reforma thiago,Reforma Thiago,Outros,variavel sazonal,9,2023-12,"1,812.48","1,826.67"
+cartao porto,Cartao Porto,Cartões,variavel sazonal,29,2026-03,"1,673.70",481.00
+convenio marco antonio,Convênio marco Antônio,Saúde,variavel nao-sazonal,38,2026-06,"1,548.29","1,976.38"
+escola musica,Escola música,Filhos/Educação,fixa,8,2023-12,"1,350.00","1,350.00"
+adiantamento deusa,Adiantamento Deusa,Funcionária (Deusa),reajuste anual,37,2026-06,"1,231.42","1,312.50"
+conta luz,Conta luz (CASA),Casa/Utilidades,variavel sazonal,13,2024-03,"1,190.50","1,400.00"
+salario deusa,Salário Deusa,Funcionária (Deusa),variavel nao-sazonal,29,2026-05,991.88,"1,083.90"
+esocial deusa,Esocial Deusa,Funcionária (Deusa),variavel sazonal,13,2026-06,791.43,738.48
+comgas,Comgas,Casa/Utilidades,variavel nao-sazonal,29,2026-06,787.43,986.72
+gps deusa,GPS Zezé,Funcionária (Deusa),variavel nao-sazonal,27,2025-05,752.26,430.40
+conta agua,Conta água,Casa/Utilidades,variavel sazonal,10,2023-12,728.03,719.58
+conta luz apto,Conta Luz apto,Casa/Utilidades,variavel nao-sazonal,28,2026-06,514.81,612.56
+natacao,Natação,Filhos/Educação,fixa,15,2025-07,488.00,480.00
+escola musica maju,Escola música MAJU,Filhos/Educação,fixa,28,2026-06,487.86,510.00
+escola musica malu,Escola música MALU,Filhos/Educação,fixa,28,2026-06,487.86,510.00
+bilingue malu,Bilingue Malu,Filhos/Educação,variavel nao-sazonal,30,2025-12,411.99,304.19
+bilingue maju,Bilingue Maju,Filhos/Educação,variavel nao-sazonal,19,2025-12,381.33,304.19
+net,Net (automático),Casa/Utilidades,variavel nao-sazonal,40,2026-06,362.91,501.71
+gps jeorge,GPS Jeorge,Funcionária (Deusa),fixa,10,2023-12,261.00,261.00
+ingles,Inglês,Filhos/Educação,variavel sazonal,7,2024-12,260.00,280.00
+vivo,Vivo,Casa/Utilidades,variavel nao-sazonal,28,2026-06,257.85,99.99
+vale transporte deusa,Vale Transporte Deusa,Funcionária (Deusa),fixa,9,2026-06,253.77,262.43
+pagto vicente,Pagto Vicente,Filhos/Educação,fixa,10,2023-12,250.00,250.00
+vaga garagem chacara monteverde,Vaga garagem Chacara Monteverde,Casa/Utilidades,fixa,9,2026-06,250.00,250.00
+pagto sr mariano,Pagto Sr Mariano,Funcionária (Deusa),variavel sazonal,10,2023-12,237.50,250.00
+aluguel vaga garagem,Aluguel vaga garagem,Casa/Utilidades,fixa,23,2025-09,236.09,250.00
+estacionamento allianz,Estacionamento Allianz,Casa/Utilidades,reajuste anual,38,2026-06,216.84,260.00
+contador mcvsw,Contador MCVSW,Outros,variavel nao-sazonal,11,2026-06,182.95,162.50
+estacionamento batista,Estacionamento Batista,Casa/Utilidades,fixa,11,2024-10,100.00,100.00
+pagto jeorge,Pagto Jeorge,Funcionária (Deusa),variavel sazonal,10,2023-12,65.00,50.00
+cartao xp,Cartão XP,Cartões,variavel sazonal,36,2026-02,60.20,16.57
+mesada maju,Mesada MAJU,Filhos/Educação,reajuste anual,26,2026-06,53.08,60.00
+seguro cartoes,SEGURO CARTOES,Cartões,fixa,15,2026-06,51.06,52.28
+pagto ipen beto,Pagto IPEN Beto (automático),Funcionária (Deusa),fixa,40,2026-06,30.00,30.00

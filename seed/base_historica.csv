@@ -1,0 +1,1220 @@
+﻿ano_mes,dia,conta_raw,conta_norm,valor
+2023-02,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-02,,Bilingue Maju,bilingue maju,377.30
+2023-02,,Bilingue Malu,bilingue malu,377.30
+2023-02,1,Cartão azul (blindagem),cartao azul,"11,116.60"
+2023-02,,Cartão azul (reforma),cartao azul,"3,988.85"
+2023-02,1,Cartão black,cartao black,"6,944.04"
+2023-02,8,Cartão Porto,cartao porto,"3,038.04"
+2023-02,1,Cartão XP,cartao xp,118.90
+2023-02,10,Clube,clube,263.00
+2023-02,12,Conta água,conta agua,825.22
+2023-02,26,Conta luz,conta luz,865.98
+2023-02,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-02,1,Convênio sogra,convenio sogra,"2,217.18"
+2023-02,1,Escola Maju,escola maju,"2,688.00"
+2023-02,1,Escola Malu,escola malu,"2,168.00"
+2023-02,1,Financ imob,financ imob,"5,641.25"
+2023-02,1,GPS Zezé,gps deusa,781.02
+2023-02,1,GPS Jeorge,gps jeorge,261.00
+2023-02,,ipva,ipva,"3,668.61"
+2023-02,5,Net (automático),net,455.79
+2023-02,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-02,1,Pagto Jeorge,pagto jeorge,50.00
+2023-02,1,Pagto Sr Mariano,pagto sr mariano,125.00
+2023-02,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-02,1,Pagto Vicente,pagto vicente,250.00
+2023-02,1,Salário Zezé,salario deusa,793.98
+2023-03,1,Bilingue Maju,bilingue maju,430.22
+2023-03,1,Bilingue Malu,bilingue malu,430.22
+2023-03,24,BKI IPVA-SPEJH0D90PARC03,bki ipva-spejh0d90parc03,"2,230.77"
+2023-03,20,BKI IPVA-SPFBY0J86PARC03,bki ipva-spfby0j86parc03,"1,437.84"
+2023-03,,Cartão azul (reforma),cartao azul,650.06
+2023-03,1,Cartão black,cartao black,"6,844.23"
+2023-03,8,Cartão Porto,cartao porto,"3,038.04"
+2023-03,1,Cartão XP,cartao xp,14.00
+2023-03,,Cartões de Crédito,cartoes de credito,"16,488.43"
+2023-03,,"Casa (água, luz, Internet)",casa,"2,072.88"
+2023-03,10,Clube,clube,263.00
+2023-03,,Clube + IPEN,clube + ipen,293.00
+2023-03,12,Conta água,conta agua,617.11
+2023-03,26,Conta luz (ESTIMATIVA),conta luz,"1,000.00"
+2023-03,,"Contas mensais (estimativa, sem IPVA):",contas mensais :,"43,200.02"
+2023-03,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-03,1,Convênio sogra,convenio sogra,"2,217.18"
+2023-03,,Empregada,empregada,"2,887.50"
+2023-03,,Escola,escola,"5,955.46"
+2023-03,1,Escola Maju,escola maju,"2,801.82"
+2023-03,1,Escola Malu,escola malu,"2,293.20"
+2023-03,1,Financ imob,financ imob,"5,636.53"
+2023-03,1,GPS Zezé,gps deusa,905.59
+2023-03,1,GPS Jeorge,gps jeorge,261.00
+2023-03,1,IPTU sogra,iptu sogra,75.76
+2023-03,,IPVA,ipva,"3,668.61"
+2023-03,5,Net (automático),net,455.77
+2023-03,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-03,1,Pagto Jeorge,pagto jeorge,50.00
+2023-03,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-03,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-03,1,Pagto Vicente,pagto vicente,250.00
+2023-03,1,Parcelamentos acabando,parcelamentos acabando,"4,505.05"
+2023-03,,Prestadores de serviço,prestadores de servico,811.00
+2023-03,,Reforma Thiago,reforma thiago,"2,896.81"
+2023-03,1,Salário Zezé - FÉRIAS,salario deusa - ferias,"3,470.23"
+2023-03,,Saúde,saude,"4,417.18"
+2023-03,,Seguros,seguros,"3,038.04"
+2023-03,,Thalita,thalita,"1,600.00"
+2023-04,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-04,1,Bilingue Maju,bilingue maju,430.22
+2023-04,1,Bilingue Malu,bilingue malu,430.22
+2023-04,24,BKI IPVA-SPEJH0D90PARC03,bki ipva-spejh0d90parc03,"2,230.77"
+2023-04,20,BKI IPVA-SPFBY0J86PARC03,bki ipva-spfby0j86parc03,"1,437.84"
+2023-04,1,Cartão black,cartao black,733.59
+2023-04,8,Cartão Porto,cartao porto,"3,038.04"
+2023-04,1,Cartão XP,cartao xp,15.25
+2023-04,,Cartões de Crédito,cartoes de credito,"15,523.86"
+2023-04,,"Casa (água, luz, Internet)",casa,"2,188.80"
+2023-04,10,Clube,clube,263.00
+2023-04,,Clube + IPEN,clube + ipen,293.00
+2023-04,12,Conta água,conta agua,631.26
+2023-04,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-04,,"Contas mensais (estimativa, sem IPVA):",contas mensais :,"43,639.60"
+2023-04,31,Convênio marco Antônio,convenio marco antonio,811.11
+2023-04,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-04,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-04,,Eletrodomésticos Thiago,eletrodomesticos thiago,"11,926.00"
+2023-04,,Empregada,empregada,"2,758.80"
+2023-04,,Escola,escola,"5,955.46"
+2023-04,1,Escola Maju,escola maju,"2,801.82"
+2023-04,1,Escola Malu,escola malu,"2,293.20"
+2023-04,1,Escola música,escola musica,"1,350.00"
+2023-04,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-04,1,Financ imob,financ imob,"5,633.95"
+2023-04,1,GPS Zezé,gps deusa,999.21
+2023-04,1,GPS Jeorge,gps jeorge,261.00
+2023-04,,IPVA,ipva,"3,668.61"
+2023-04,5,Net (automático),net,455.78
+2023-04,,Outros,outros,620.00
+2023-04,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-04,1,Pagto Jeorge,pagto jeorge,50.00
+2023-04,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-04,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-04,1,Pagto Vicente,pagto vicente,250.00
+2023-04,1,Parcelamentos acabando,parcelamentos acabando,430.00
+2023-04,,Prestadores de serviço,prestadores de servico,811.00
+2023-04,,Reforma Thiago,reforma thiago,"1,112.46"
+2023-04,,Resgate mensal,resgate mensal,"21,939.60"
+2023-04,,Salário,salario,"21,700.00"
+2023-04,1,Salário Zezé - FÉRIAS,salario deusa - ferias,447.09
+2023-04,,Saúde,saude,"5,216.69"
+2023-04,,Seguros,seguros,"3,038.04"
+2023-04,,Thalita,thalita,"1,600.00"
+2023-05,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-05,1,Bilingue Maju,bilingue maju,430.22
+2023-05,1,Bilingue Malu,bilingue malu,430.22
+2023-05,24,BKI IPVA-SPEJH0D90PARC03,bki ipva-spejh0d90parc03,"2,230.77"
+2023-05,20,BKI IPVA-SPFBY0J86PARC03,bki ipva-spfby0j86parc03,"1,437.84"
+2023-05,1,Cartão black,cartao black,129.93
+2023-05,8,Cartão Porto,cartao porto,"2,544.43"
+2023-05,1,Cartão XP,cartao xp,14.96
+2023-05,,Cartões de Crédito,cartoes de credito,"12,773.65"
+2023-05,,"Casa (água, luz, Internet)",casa,"2,291.55"
+2023-05,10,Clube,clube,263.00
+2023-05,,Clube + IPEN,clube + ipen,293.00
+2023-05,12,Conta água,conta agua,734.01
+2023-05,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-05,,"Contas mensais (estimativa, sem IPVA):",contas mensais :,"42,265.96"
+2023-05,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-05,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-05,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-05,,dentista,dentista,960.00
+2023-05,,dr ricardo,dr ricardo,"1,200.00"
+2023-05,,Empregada,empregada,"3,150.00"
+2023-05,,Escola,escola,"5,955.46"
+2023-05,1,Escola Maju,escola maju,"2,801.82"
+2023-05,1,Escola Malu,escola malu,"2,293.20"
+2023-05,1,Escola música,escola musica,"1,350.00"
+2023-05,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-05,1,Financ imob,financ imob,"5,633.95"
+2023-05,1,GPS Zezé,gps deusa,781.02
+2023-05,1,GPS Jeorge,gps jeorge,261.00
+2023-05,,IPVA,ipva,"3,668.61"
+2023-05,5,Net (automático),net,455.78
+2023-05,1,Niver meninas,niver meninas,"1,822.38"
+2023-05,,Outros,outros,"2,012.38"
+2023-05,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-05,1,Pagto Jeorge,pagto jeorge,50.00
+2023-05,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-05,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-05,1,Pagto Vicente,pagto vicente,250.00
+2023-05,,Prestadores de serviço,prestadores de servico,811.00
+2023-05,,Reforma Thiago,reforma thiago,"1,214.85"
+2023-05,,Resgate mensal,resgate mensal,"20,565.96"
+2023-05,,Salário,salario,"21,700.00"
+2023-05,1,Salário Zezé,salario deusa,"1,056.48"
+2023-05,,Saúde,saude,"5,200.54"
+2023-05,,Seguros,seguros,"2,544.43"
+2023-05,,Thalita,thalita,"1,600.00"
+2023-06,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-06,1,Bilingue Maju,bilingue maju,430.22
+2023-06,1,Bilingue Malu,bilingue malu,430.22
+2023-06,24,BKI IPVA-SPEJH0D90PARC03,bki ipva-spejh0d90parc03,"2,230.77"
+2023-06,20,BKI IPVA-SPFBY0J86PARC03,bki ipva-spfby0j86parc03,"1,437.84"
+2023-06,1,Cartão black,cartao black,129.93
+2023-06,8,Cartão Porto,cartao porto,"2,544.43"
+2023-06,1,Cartão XP,cartao xp,14.96
+2023-06,,Cartões de Crédito,cartoes de credito,"12,773.65"
+2023-06,,"Casa (água, luz, Internet)",casa,"2,291.55"
+2023-06,10,Clube,clube,263.00
+2023-06,,Clube + IPEN,clube + ipen,293.00
+2023-06,12,Conta água,conta agua,734.01
+2023-06,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-06,,Contas mensais,contas mensais,"42,265.96"
+2023-06,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-06,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-06,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-06,,dentista,dentista,960.00
+2023-06,,dr ricardo,dr ricardo,"1,200.00"
+2023-06,,Empregada,empregada,"3,150.00"
+2023-06,,Escola,escola,"5,955.46"
+2023-06,1,Escola Maju,escola maju,"2,801.82"
+2023-06,1,Escola Malu,escola malu,"2,293.20"
+2023-06,1,Escola música,escola musica,"1,350.00"
+2023-06,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-06,1,Financ imob,financ imob,"5,633.95"
+2023-06,1,GPS Zezé,gps deusa,781.02
+2023-06,1,GPS Jeorge,gps jeorge,261.00
+2023-06,,IPVA,ipva,"3,668.61"
+2023-06,5,Net (automático),net,455.78
+2023-06,1,Niver meninas,niver meninas,"1,822.38"
+2023-06,,Outros,outros,"2,012.38"
+2023-06,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-06,1,Pagto Jeorge,pagto jeorge,50.00
+2023-06,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-06,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-06,1,Pagto Vicente,pagto vicente,250.00
+2023-06,,Prestadores de serviço,prestadores de servico,811.00
+2023-06,,Reforma Thiago,reforma thiago,"1,214.85"
+2023-06,,Resgate mensal,resgate mensal,"20,565.96"
+2023-06,,Salário,salario,"21,700.00"
+2023-06,1,Salário Zezé,salario deusa,"1,056.48"
+2023-06,,Saúde,saude,"5,200.54"
+2023-06,,Seguros,seguros,"2,544.43"
+2023-06,,Thalita,thalita,"1,600.00"
+2023-07,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-07,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2023-07,1,Bilingue Maju,bilingue maju,430.22
+2023-07,1,Bilingue Malu,bilingue malu,430.22
+2023-07,1,Cartão black,cartao black,113.00
+2023-07,8,Cartão Porto,cartao porto,901.11
+2023-07,1,Cartão XP,cartao xp,14.90
+2023-07,,Cartões de Crédito,cartoes de credito,"12,604.63"
+2023-07,,"Casa (água, luz, Internet)",casa,"2,595.18"
+2023-07,5,Conta água,conta agua,719.58
+2023-07,26,Conta luz (ESTIMATIVA),conta luz,"1,400.00"
+2023-07,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-07,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-07,1,Convênio sogra,convenio sogra,"2,942.00"
+2023-07,,Empregada,empregada,"3,150.00"
+2023-07,,Entradas,entradas,"1,826.67"
+2023-07,,Escola,escola,"7,305.46"
+2023-07,1,Escola Maju,escola maju,"2,801.82"
+2023-07,1,Escola Malu,escola malu,"2,293.20"
+2023-07,1,Escola música,escola musica,"1,350.00"
+2023-07,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-07,,Estimativa - 01 a 08/07,estimativa - 01 a 08/07,"36,308.68"
+2023-07,1,Férias,ferias,"10,282.64"
+2023-07,13,Financ imob,financ imob,"25,443.87"
+2023-07,1,GPS Zezé,gps deusa,743.05
+2023-07,1,GPS Jeorge,gps jeorge,261.00
+2023-07,5,Net (automático),net,475.60
+2023-07,,Outros,outros,"10,472.64"
+2023-07,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-07,1,Pagto Jeorge,pagto jeorge,50.00
+2023-07,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-07,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-07,1,Pagto Vicente,pagto vicente,250.00
+2023-07,,Prestadores de serviço,prestadores de servico,811.00
+2023-07,,Reforma Thiago,reforma thiago,"1,826.67"
+2023-07,,Salário,salario,"21,700.00"
+2023-07,1,Salário Zezé,salario deusa,"1,094.45"
+2023-07,,Saúde,saude,"5,936.95"
+2023-07,,Seguros,seguros,901.11
+2023-07,,Thalita,thalita,"1,600.00"
+2023-09,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-09,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2023-09,1,Bilingue Maju,bilingue maju,430.22
+2023-09,1,Bilingue Malu,bilingue malu,430.22
+2023-09,1,Cartão black,cartao black,172.80
+2023-09,1,Cartão XP,cartao xp,14.90
+2023-09,5,Condominio,condominio,"4,065.39"
+2023-09,5,Conta água,conta agua,860.39
+2023-09,26,Conta luz (ESTIMATIVA),conta luz,"1,400.00"
+2023-09,9,Contas - 2/9 até 9/9,contas - 2/9 ate 9/9,"10,589.32"
+2023-09,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-09,12,Convênio pais,convenio pai e mae,"2,900.00"
+2023-09,1,Convênio sogra,convenio sogra,"5,884.00"
+2023-09,1,Escola Maju,escola maju,"2,801.82"
+2023-09,1,Escola Malu,escola malu,"2,293.20"
+2023-09,5,Escola música,escola musica,"1,350.00"
+2023-09,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-09,1,Estacionamento Batista,estacionamento batista,100.00
+2023-09,1,Estimativa - 01/09,estimativa - 01/09,"24,517.76"
+2023-09,,Estimativa 9 a 18/09,estimativa 9 a 18/09,"5,612.50"
+2023-09,1,Financ imob,financ imob,"24,517.76"
+2023-09,1,GPS Zezé,gps deusa,743.05
+2023-09,1,GPS Jeorge,gps jeorge,261.00
+2023-09,,Granito,granito,"10,000.00"
+2023-09,9,IPTU,iptu,"2,374.62"
+2023-09,4,Juliana,juliana,"5,200.00"
+2023-09,5,Lydia,lydia,"19,202.77"
+2023-09,4,Multas - P1,multas - p1,"1,845.71"
+2023-09,5,Net (automático),net,464.87
+2023-09,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-09,1,Pagto Jeorge,pagto jeorge,200.00
+2023-09,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-09,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-09,1,Pagto Vicente,pagto vicente,250.00
+2023-09,18,Reembolso Fisio,reembolso fisio,"1,000.00"
+2023-09,,Reforma Apto Perdizes,reforma apto perdizes,"15,110.80"
+2023-09,,Reforma Thiago,reforma thiago,"1,366.05"
+2023-09,5,Resgate DEAI34,resgate deai34,"19,950.00"
+2023-09,1,Salário Zezé,salario deusa,"1,094.45"
+2023-09,18,Vencimentos 10 a 18/9,vencimentos 10 a 18/9,"65,070.13"
+2023-10,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-10,1,Bilingue Maju,bilingue maju,430.22
+2023-10,1,Bilingue Malu,bilingue malu,430.22
+2023-10,1,Cartão black,cartao black,100.00
+2023-10,8,Cartão Porto,cartao porto,"1,155.11"
+2023-10,1,Cartão XP,cartao xp,104.89
+2023-10,5,Conta água,conta agua,719.58
+2023-10,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-10,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-10,12,Convênio pais,convenio pai e mae,"2,200.00"
+2023-10,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-10,1,Escola Maju,escola maju,"2,801.82"
+2023-10,1,Escola Malu,escola malu,"2,293.20"
+2023-10,5,Escola música,escola musica,"1,350.00"
+2023-10,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-10,1,GPS Zezé,gps deusa,743.05
+2023-10,1,GPS Jeorge,gps jeorge,261.00
+2023-10,5,Net (automático),net,454.99
+2023-10,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-10,1,Pagto Jeorge,pagto jeorge,50.00
+2023-10,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-10,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-10,1,Pagto Vicente,pagto vicente,250.00
+2023-10,,Reforma Apto Perdizes,reforma apto perdizes,"1,830.00"
+2023-10,,Reforma Thiago,reforma thiago,"2,226.88"
+2023-10,1,Salário Zezé,salario deusa,"1,094.95"
+2023-11,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-11,1,Bilingue Maju,bilingue maju,430.22
+2023-11,1,Bilingue Malu,bilingue malu,430.22
+2023-11,1,Cartão black,cartao black,100.00
+2023-11,8,Cartão Porto,cartao porto,"1,155.11"
+2023-11,1,Cartão XP,cartao xp,104.89
+2023-11,5,Conta água,conta agua,719.58
+2023-11,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-11,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-11,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-11,1,Escola Maju,escola maju,"2,801.82"
+2023-11,1,Escola Malu,escola malu,"2,293.20"
+2023-11,5,Escola música,escola musica,"1,350.00"
+2023-11,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-11,1,GPS Zezé,gps deusa,743.05
+2023-11,1,GPS Jeorge,gps jeorge,261.00
+2023-11,5,Net (automático),net,454.99
+2023-11,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-11,1,Pagto Jeorge,pagto jeorge,50.00
+2023-11,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-11,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-11,1,Pagto Vicente,pagto vicente,250.00
+2023-11,,Reforma Apto Perdizes,reforma apto perdizes,"1,830.00"
+2023-11,,Reforma Thiago,reforma thiago,"2,226.88"
+2023-11,1,Salário Zezé,salario deusa,"1,094.95"
+2023-12,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2023-12,1,Bilingue Maju,bilingue maju,430.22
+2023-12,1,Bilingue Malu,bilingue malu,430.22
+2023-12,1,Cartão black,cartao black,100.00
+2023-12,8,Cartão Porto,cartao porto,"1,155.11"
+2023-12,1,Cartão XP,cartao xp,104.89
+2023-12,5,Conta água,conta agua,719.58
+2023-12,26,Conta luz (ESTIMATIVA),conta luz,"1,101.76"
+2023-12,31,Convênio marco Antônio,convenio marco antonio,794.95
+2023-12,1,Convênio sogra,convenio sogra,"2,205.59"
+2023-12,1,Escola Maju,escola maju,"2,801.82"
+2023-12,1,Escola Malu,escola malu,"2,293.20"
+2023-12,5,Escola música,escola musica,"1,350.00"
+2023-12,,Estacionamento Allianz,estacionamento allianz,190.00
+2023-12,1,GPS Zezé,gps deusa,743.05
+2023-12,1,GPS Jeorge,gps jeorge,261.00
+2023-12,5,Net (automático),net,454.99
+2023-12,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2023-12,1,Pagto Jeorge,pagto jeorge,50.00
+2023-12,1,Pagto Sr Mariano,pagto sr mariano,250.00
+2023-12,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2023-12,1,Pagto Vicente,pagto vicente,250.00
+2023-12,,Reforma Apto Perdizes,reforma apto perdizes,"1,830.00"
+2023-12,,Reforma Thiago,reforma thiago,"2,226.88"
+2023-12,1,Salário Zezé,salario deusa,"1,094.95"
+2024-01,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-01,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-01,1,Bilingue Maju,bilingue maju,430.22
+2024-01,1,Bilingue Malu,bilingue malu,430.22
+2024-01,1,Cartão black,cartao black,384.44
+2024-01,1,Cartão XP,cartao xp,417.05
+2024-01,5,Condominio,condominio,"4,141.86"
+2024-01,5,Conta água CASA,conta agua casa,691.54
+2024-01,26,Conta luz (CASA),conta luz,"1,400.00"
+2024-01,31,Convênio marco Antônio,convenio marco antonio,794.95
+2024-01,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-01,1,Escola Maju,escola maju,"2,801.82"
+2024-01,1,Escola Malu,escola malu,"2,293.20"
+2024-01,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-01,1,Estacionamento Batista,estacionamento batista,100.00
+2024-01,1,Financ imob,financ imob,"24,481.00"
+2024-01,1,GPS Zezé,gps deusa,743.05
+2024-01,9,IPTU,iptu,"2,374.62"
+2024-01,5,Net (automático),net,464.94
+2024-01,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-01,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-01,1,Salário Zezé,salario deusa,"1,094.45"
+2024-02,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-02,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-02,1,Bilingue Maju,bilingue maju,430.22
+2024-02,1,Bilingue Malu,bilingue malu,430.22
+2024-02,1,Cartão black,cartao black,384.44
+2024-02,1,Cartão XP,cartao xp,417.05
+2024-02,,CDB DI,cdb di,"18,965.39"
+2024-02,10,Comgas,comgas,490.00
+2024-02,5,Condominio,condominio,"4,141.86"
+2024-02,26,Conta luz (CASA),conta luz,"1,400.00"
+2024-02,31,Convênio marco Antônio,convenio marco antonio,794.95
+2024-02,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-02,,Delta,delta,"1,389.36"
+2024-02,1,Escola Maju,escola maju,"2,801.82"
+2024-02,1,Escola Malu,escola malu,"2,293.20"
+2024-02,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-02,1,Estacionamento Batista,estacionamento batista,100.00
+2024-02,1,Financ imob,financ imob,"24,481.00"
+2024-02,1,GPS Zezé,gps deusa,743.05
+2024-02,,IPTU,iptu,"24,100.00"
+2024-02,5,Net (automático),net,464.94
+2024-02,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-02,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-02,,Quanto falta,quanto falta,"1,303.64"
+2024-02,1,Salário Zezé,salario deusa,"1,094.45"
+2024-03,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-03,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-03,1,Bilingue Malu,bilingue malu,500.00
+2024-03,,Bonus,bonus,"797,806.00"
+2024-03,1,Cartão black,cartao black,649.00
+2024-03,1,Cartão XP,cartao xp,14.90
+2024-03,,CDB,cdb,"714,676.75"
+2024-03,10,Comgas,comgas,490.00
+2024-03,5,Condominio,condominio,"5,291.75"
+2024-03,26,Conta luz (CASA),conta luz,"1,400.00"
+2024-03,1,Conta Luz apto,conta luz apto,710.89
+2024-03,31,Convênio marco Antônio,convenio marco antonio,"1,589.90"
+2024-03,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-03,,CRA,cra,"100,000.00"
+2024-03,,Disponivel aplicar,disponivel aplicar,"814,676.75"
+2024-03,1,Escola Maju,escola maju,"3,033.10"
+2024-03,1,Escola Malu,escola malu,"2,869.44"
+2024-03,5,Escola música MAJU,escola musica maju,470.00
+2024-03,5,Escola música MALU,escola musica malu,470.00
+2024-03,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-03,1,Estacionamento Batista,estacionamento batista,100.00
+2024-03,1,Financ imob,financ imob,"24,403.48"
+2024-03,1,GPS Zezé,gps deusa,740.07
+2024-03,5,Net (automático),net,189.70
+2024-03,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-03,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-03,1,Salário Zezé,salario deusa,"1,097.04"
+2024-03,1,Vivo,vivo,342.95
+2024-04,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-04,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-04,1,Bilingue Malu,bilingue malu,500.00
+2024-04,1,Cartão black,cartao black,649.00
+2024-04,1,Cartão XP,cartao xp,14.90
+2024-04,10,Comgas,comgas,490.00
+2024-04,5,Condominio,condominio,"5,291.75"
+2024-04,1,Conta Luz apto,conta luz apto,710.89
+2024-04,31,Convênio marco Antônio,convenio marco antonio,"1,589.90"
+2024-04,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-04,1,Escola Maju,escola maju,"3,033.10"
+2024-04,1,Escola Malu,escola malu,"2,869.44"
+2024-04,5,Escola música MAJU,escola musica maju,470.00
+2024-04,5,Escola música MALU,escola musica malu,470.00
+2024-04,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-04,1,Estacionamento Batista,estacionamento batista,100.00
+2024-04,1,Financ imob,financ imob,"24,403.48"
+2024-04,1,GPS Zezé,gps deusa,740.07
+2024-04,5,Net (automático),net,189.70
+2024-04,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-04,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-04,1,Salário Zezé,salario deusa,"1,097.04"
+2024-04,1,Vivo,vivo,342.95
+2024-05,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-05,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-05,1,Bilingue Malu,bilingue malu,476.28
+2024-05,1,Cartão black,cartao black,512.48
+2024-05,1,Cartão XP,cartao xp,14.90
+2024-05,10,Comgas,comgas,554.60
+2024-05,5,Condominio,condominio,"4,543.90"
+2024-05,1,Conta Luz apto,conta luz apto,461.74
+2024-05,31,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-05,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-05,1,Escola Maju,escola maju,"3,082.10"
+2024-05,1,Escola Malu,escola malu,"2,914.52"
+2024-05,5,Escola música MAJU,escola musica maju,470.00
+2024-05,5,Escola música MALU,escola musica malu,470.00
+2024-05,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-05,1,Estacionamento Batista,estacionamento batista,100.00
+2024-05,1,Financ imob,financ imob,"24,323.38"
+2024-05,1,GPS Zezé,gps deusa,"1,012.61"
+2024-05,1,Mesada MAJU,mesada maju,30.00
+2024-05,x,Natação,natacao,500.00
+2024-05,5,Net (automático),net,189.70
+2024-05,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-05,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-05,,Resgate XP,resgate xp,"19,580.44"
+2024-05,1,Salário Zezé,salario deusa,751.66
+2024-05,1,Vivo,vivo,334.99
+2024-05,1,VOLEI MAJU,volei maju,216.58
+2024-06,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-06,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-06,1,Bilingue Malu,bilingue malu,476.28
+2024-06,1,Cartão black,cartao black,100.00
+2024-06,1,Cartão XP,cartao xp,14.90
+2024-06,10,Comgas,comgas,554.60
+2024-06,5,Condominio,condominio,"4,668.19"
+2024-06,1,Conta Luz apto,conta luz apto,703.99
+2024-06,31,Convênio marco Antônio,convenio marco antonio,"1,779.01"
+2024-06,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-06,1,Escola Maju,escola maju,"3,082.10"
+2024-06,1,Escola Malu,escola malu,"2,914.52"
+2024-06,5,Escola música MAJU,escola musica maju,470.00
+2024-06,5,Escola música MALU,escola musica malu,470.00
+2024-06,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-06,1,Estacionamento Batista,estacionamento batista,100.00
+2024-06,1,Financ imob,financ imob,"24,303.12"
+2024-06,1,GPS Zezé,gps deusa,822.81
+2024-06,1,Inglês,ingles,280.00
+2024-06,1,Mesada MAJU,mesada maju,30.00
+2024-06,x,Natação,natacao,500.00
+2024-06,5,Net (automático),net,189.70
+2024-06,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-06,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-06,1,Salário Zezé,salario deusa,358.44
+2024-06,1,Vivo,vivo,334.99
+2024-07,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-07,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-07,1,Bilingue Malu,bilingue malu,476.28
+2024-07,1,Cartão black,cartao black,100.00
+2024-07,1,Cartão XP,cartao xp,14.90
+2024-07,10,Comgas,comgas,554.60
+2024-07,5,Condominio,condominio,"4,668.19"
+2024-07,1,Conta Luz apto,conta luz apto,703.99
+2024-07,31,Convênio marco Antônio,convenio marco antonio,"1,779.01"
+2024-07,1,Convênio sogra,convenio sogra,"5,884.00"
+2024-07,1,Escola Maju,escola maju,"3,082.10"
+2024-07,1,Escola Malu,escola malu,"2,914.52"
+2024-07,5,Escola música MAJU,escola musica maju,470.00
+2024-07,5,Escola música MALU,escola musica malu,470.00
+2024-07,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-07,1,Estacionamento Batista,estacionamento batista,100.00
+2024-07,1,Financ imob,financ imob,"24,303.12"
+2024-07,1,GPS Zezé,gps deusa,822.81
+2024-07,1,Inglês,ingles,280.00
+2024-07,1,Mesada MAJU,mesada maju,30.00
+2024-07,x,Natação,natacao,500.00
+2024-07,5,Net (automático),net,189.70
+2024-07,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-07,1,Pagto Thalita (automático),pagto thalita,"1,600.00"
+2024-07,1,Salário Zezé,salario deusa,358.44
+2024-07,1,Vivo,vivo,334.99
+2024-08,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-08,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-08,1,Bilingue Malu,bilingue malu,476.28
+2024-08,1,Cartão black,cartao black,100.00
+2024-08,8,Cartao Porto,cartao porto,"1,100.00"
+2024-08,1,Cartão XP,cartao xp,19.90
+2024-08,10,Comgas,comgas,"1,000.00"
+2024-08,5,Condominio,condominio,"4,740.18"
+2024-08,1,Conta Luz apto,conta luz apto,447.90
+2024-08,31,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-08,1,Convênio sogra,convenio sogra,"4,100.00"
+2024-08,1,Escola Maju,escola maju,"3,082.10"
+2024-08,1,Escola Malu,escola malu,"2,914.52"
+2024-08,5,Escola música MAJU,escola musica maju,470.00
+2024-08,5,Escola música MALU,escola musica malu,470.00
+2024-08,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-08,1,Estacionamento Batista,estacionamento batista,100.00
+2024-08,1,Financ imob,financ imob,"24,215.51"
+2024-08,1,GPS Zezé,gps deusa,740.07
+2024-08,1,Inglês,ingles,210.00
+2024-08,1,Mesada MAJU,mesada maju,50.00
+2024-08,x,Natação,natacao,500.00
+2024-08,5,Net (automático),net,207.81
+2024-08,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-08,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2024-08,1,Salário Zezé,salario deusa,"1,097.43"
+2024-08,1,Vivo,vivo,334.99
+2024-09,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-09,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-09,1,Bilingue Malu,bilingue malu,476.28
+2024-09,1,Cartão black,cartao black,100.00
+2024-09,8,Cartao Porto,cartao porto,"1,750.00"
+2024-09,1,Cartão XP,cartao xp,19.90
+2024-09,10,Comgas,comgas,"1,000.00"
+2024-09,5,Condominio,condominio,"4,521.34"
+2024-09,1,Conta Luz apto,conta luz apto,343.52
+2024-09,31,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-09,1,Convênio sogra,convenio sogra,"4,100.00"
+2024-09,1,Dona Maria,dona maria,700.00
+2024-09,1,Escola Maju,escola maju,"3,082.10"
+2024-09,1,Escola Malu,escola malu,"2,914.52"
+2024-09,5,Escola música MAJU,escola musica maju,470.00
+2024-09,5,Escola música MALU,escola musica malu,470.00
+2024-09,,Estacionamento Allianz,estacionamento allianz,190.00
+2024-09,1,Estacionamento Batista,estacionamento batista,100.00
+2024-09,1,Financ imob,financ imob,"24,272.14"
+2024-09,1,GPS Zezé,gps deusa,740.07
+2024-09,1,Inglês,ingles,210.00
+2024-09,1,IPTU casa,iptu casa,"4,000.00"
+2024-09,1,Mesada MAJU,mesada maju,50.00
+2024-09,x,Natação,natacao,500.00
+2024-09,5,Net (automático),net,207.81
+2024-09,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-09,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2024-09,1,Salário Zezé,salario deusa,"1,097.43"
+2024-09,1,Vivo,vivo,334.99
+2024-10,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-10,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-10,1,Bilingue Malu,bilingue malu,476.28
+2024-10,8,Cartao Porto,cartao porto,"1,100.00"
+2024-10,1,Cartão XP,cartao xp,19.90
+2024-10,10,Comgas,comgas,"1,000.00"
+2024-10,5,Condominio,condominio,"4,784.19"
+2024-10,1,Conta Luz apto,conta luz apto,398.37
+2024-10,31,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-10,1,Convênio sogra,convenio sogra,"4,096.52"
+2024-10,1,Escola Maju,escola maju,"3,082.10"
+2024-10,1,Escola Malu,escola malu,"2,914.52"
+2024-10,5,Escola música MAJU,escola musica maju,470.00
+2024-10,5,Escola música MALU,escola musica malu,470.00
+2024-10,,Estacionamento Allianz,estacionamento allianz,220.00
+2024-10,1,Estacionamento Batista,estacionamento batista,100.00
+2024-10,1,Financ imob,financ imob,"24,243.03"
+2024-10,1,GPS Zezé,gps deusa,740.07
+2024-10,1,Inglês,ingles,210.00
+2024-10,1,Mesada MAJU,mesada maju,50.00
+2024-10,x,Natação,natacao,500.00
+2024-10,5,Net (automático),net,207.81
+2024-10,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-10,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2024-10,1,Salário Zezé,salario deusa,"1,097.43"
+2024-10,1,Vivo,vivo,334.99
+2024-11,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-11,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-11,1,Bilingue Malu,bilingue malu,476.28
+2024-11,1,Cartão black,cartao black,264.82
+2024-11,8,Cartao Porto,cartao porto,"1,713.58"
+2024-11,1,Cartão XP,cartao xp,19.90
+2024-11,10,Comgas,comgas,"1,000.00"
+2024-11,5,Condominio,condominio,"4,747.14"
+2024-11,1,Conta Luz apto,conta luz apto,420.58
+2024-11,31,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-11,8,Convênio sogra,convenio sogra,"4,096.52"
+2024-11,1,Escola Maju,escola maju,"3,082.10"
+2024-11,1,Escola Malu,escola malu,"2,627.00"
+2024-11,5,Escola música MAJU,escola musica maju,470.00
+2024-11,5,Escola música MALU,escola musica malu,470.00
+2024-11,,Estacionamento Allianz,estacionamento allianz,220.00
+2024-11,1,Financ imob,financ imob,"24,221.15"
+2024-11,7,GPS Zezé,gps deusa,997.67
+2024-11,1,Inglês,ingles,315.00
+2024-11,1,IPTU casa,iptu casa,"3,944.16"
+2024-11,1,Mesada MAJU,mesada maju,50.00
+2024-11,1,Natação,natacao,480.00
+2024-11,5,Net (automático),net,207.81
+2024-11,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-11,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2024-11,1,Salário Zezé,salario deusa,"1,097.43"
+2024-11,1,Vivo,vivo,334.99
+2024-12,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2024-12,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2024-12,1,Bilingue Malu,bilingue malu,476.28
+2024-12,1,Cartão black,cartao black,200.00
+2024-12,8,Cartao Porto,cartao porto,"1,713.58"
+2024-12,1,Cartão XP,cartao xp,19.90
+2024-12,10,Comgas,comgas,800.00
+2024-12,5,Condominio,condominio,"4,785.38"
+2024-12,1,Conta Luz apto,conta luz apto,420.58
+2024-12,1,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2024-12,9,Convênio sogra,convenio sogra,"4,096.52"
+2024-12,1,Escola Maju,escola maju,"3,082.10"
+2024-12,1,Escola Malu,escola malu,"2,627.00"
+2024-12,5,Escola música MAJU,escola musica maju,470.00
+2024-12,5,Escola música MALU,escola musica malu,470.00
+2024-12,1,Estacionamento Allianz,estacionamento allianz,220.00
+2024-12,1,Financ imob,financ imob,"24,191.32"
+2024-12,7,GPS Zezé,gps deusa,689.32
+2024-12,1,Inglês,ingles,315.00
+2024-12,1,IPTU casa,iptu casa,"3,944.16"
+2024-12,1,Mesada MAJU,mesada maju,50.00
+2024-12,1,Natação,natacao,480.00
+2024-12,5,Net (automático),net,207.81
+2024-12,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2024-12,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2024-12,1,Salário Zezé,salario deusa,"1,113.18"
+2024-12,1,Vivo,vivo,334.99
+2025-01,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2025-01,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2025-01,1,Cartão black,cartao black,549.00
+2025-01,8,Cartao Porto,cartao porto,"1,713.58"
+2025-01,1,Cartão XP,cartao xp,198.90
+2025-01,10,Comgas,comgas,800.00
+2025-01,5,Condominio,condominio,"4,673.02"
+2025-01,1,Conta Luz apto,conta luz apto,420.58
+2025-01,1,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2025-01,9,Convênio sogra,convenio sogra,"4,096.52"
+2025-01,1,Escola Maju,escola maju,"3,082.10"
+2025-01,1,Escola Malu,escola malu,"2,627.00"
+2025-01,5,Escola música MAJU,escola musica maju,490.00
+2025-01,5,Escola música MALU,escola musica malu,490.00
+2025-01,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-01,1,Financ imob,financ imob,"24,168.05"
+2025-01,7,GPS Zezé,gps deusa,689.32
+2025-01,1,IPTU casa,iptu casa,"3,944.16"
+2025-01,24,IPVA,ipva,"8,861.75"
+2025-01,1,Mesada MAJU,mesada maju,50.00
+2025-01,1,Natação,natacao,480.00
+2025-01,5,Net (automático),net,207.81
+2025-01,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-01,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-01,1,Salário Zezé,salario deusa,"1,113.18"
+2025-01,1,Vivo,vivo,334.99
+2025-02,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2025-02,1,Aluguel vaga garagem,aluguel vaga garagem,230.00
+2025-02,8,Cartao Porto,cartao porto,"4,637.12"
+2025-02,1,Cartão XP,cartao xp,19.90
+2025-02,10,Comgas,comgas,800.00
+2025-02,5,Condominio,condominio,"4,700.00"
+2025-02,1,Conta Luz apto,conta luz apto,420.58
+2025-02,1,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2025-02,9,Convênio sogra,convenio sogra,"4,096.52"
+2025-02,1,Escola Maju,escola maju,"3,082.10"
+2025-02,1,Escola Malu,escola malu,"2,627.00"
+2025-02,5,Escola música MAJU,escola musica maju,490.00
+2025-02,5,Escola música MALU,escola musica malu,490.00
+2025-02,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-02,1,Financ imob,financ imob,"24,163.17"
+2025-02,7,GPS Zezé,gps deusa,835.76
+2025-02,1,IPTU casa,iptu casa,"3,944.16"
+2025-02,1,Mesada MAJU,mesada maju,50.00
+2025-02,1,Natação,natacao,480.00
+2025-02,5,Net (automático),net,223.38
+2025-02,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-02,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-02,,Resgate CDB,resgate cdb,"27,000.00"
+2025-02,1,Salário Zezé,salario deusa,306.43
+2025-02,,Venc. CDB 3s,venc. cdb 3s,"15,182.62"
+2025-02,1,Vivo,vivo,334.99
+2025-03,12,Adiantamento Zezé,adiantamento deusa,"1,312.50"
+2025-03,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-03,8,Cartao Porto,cartao porto,"1,767.58"
+2025-03,1,Cartão XP,cartao xp,19.90
+2025-03,10,Comgas,comgas,800.00
+2025-03,5,Condominio,condominio,"3,994.98"
+2025-03,1,Conta Luz apto,conta luz apto,420.58
+2025-03,1,Convênio marco Antônio,convenio marco antonio,"1,743.01"
+2025-03,9,Convênio sogra,convenio sogra,"4,096.52"
+2025-03,1,Escola Maju,escola maju,"3,082.10"
+2025-03,1,Escola Malu,escola malu,"2,627.00"
+2025-03,5,Escola música MAJU,escola musica maju,490.00
+2025-03,5,Escola música MALU,escola musica malu,490.00
+2025-03,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-03,1,Financ imob,financ imob,"24,149.48"
+2025-03,7,GPS Zezé,gps deusa,738.48
+2025-03,9,iptu apto,iptu apto,"2,659.02"
+2025-03,1,IPTU casa,iptu casa,"3,944.16"
+2025-03,1,Mesada MAJU,mesada maju,50.00
+2025-03,1,Natação,natacao,480.00
+2025-03,5,Net (automático),net,223.38
+2025-03,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-03,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-03,,Resgate CDB,resgate cdb,"27,000.00"
+2025-03,1,Salário Zezé,salario deusa,"1,099.22"
+2025-03,,Venc. CDB 3s,venc. cdb 3s,"19,495.38"
+2025-03,1,Vivo,vivo,334.99
+2025-04,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-04,1,Cartão black,cartao black,100.00
+2025-04,8,Cartao Porto,cartao porto,"3,911.79"
+2025-04,1,Cartão XP,cartao xp,19.90
+2025-04,10,Comgas,comgas,559.33
+2025-04,5,Condominio,condominio,"5,768.65"
+2025-04,1,Conta Luz apto,conta luz apto,614.77
+2025-04,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-04,9,Convênio sogra,convenio sogra,"4,096.52"
+2025-04,1,Escola Maju,escola maju,"3,131.10"
+2025-04,1,Escola Malu,escola malu,"2,680.50"
+2025-04,5,Escola música MAJU,escola musica maju,490.00
+2025-04,5,Escola música MALU,escola musica malu,490.00
+2025-04,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-04,1,Financ imob,financ imob,"24,129.94"
+2025-04,7,GPS Zezé,gps deusa,395.85
+2025-04,9,iptu apto,iptu apto,"2,659.02"
+2025-04,1,IPTU casa,iptu casa,"3,944.16"
+2025-04,1,Mesada MAJU,mesada maju,50.00
+2025-04,1,Natação,natacao,480.00
+2025-04,5,Net (automático),net,223.38
+2025-04,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-04,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-04,,Resgate CDB semana 1,resgate cdb semana 1,"13,404.39"
+2025-04,,Resgate CDB Semana 2,resgate cdb semana 2,"18,404.39"
+2025-04,1,Salário Zezé,salario deusa,"1,204.54"
+2025-04,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-04,26,Vivo,vivo,334.99
+2025-05,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-05,1,Bilingue Malu,bilingue malu,304.19
+2025-05,1,Cartão black,cartao black,"1,426.08"
+2025-05,8,Cartao Porto,cartao porto,"2,960.72"
+2025-05,1,Cartão XP,cartao xp,19.90
+2025-05,10,Comgas,comgas,750.00
+2025-05,5,Condominio,condominio,"4,355.25"
+2025-05,1,Conta Luz apto,conta luz apto,462.04
+2025-05,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-05,8,Convênio sogra,convenio sogra,"4,096.52"
+2025-05,1,Escola Maju,escola maju,"3,131.10"
+2025-05,1,Escola Malu,escola malu,"2,680.50"
+2025-05,5,Escola música MAJU,escola musica maju,490.00
+2025-05,5,Escola música MALU,escola musica malu,490.00
+2025-05,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-05,1,Financ imob,financ imob,"24,124.78"
+2025-05,7,GPS Zezé,gps deusa,156.88
+2025-05,9,iptu apto,iptu apto,"2,659.02"
+2025-05,1,IPTU casa,iptu casa,"3,944.16"
+2025-05,1,Mesada MAJU,mesada maju,50.00
+2025-05,1,Natação,natacao,480.00
+2025-05,5,Net (automático),net,223.38
+2025-05,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-05,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-05,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-05,26,Vivo,vivo,334.99
+2025-06,12,Adiantamento Deusa,adiantamento deusa,"1,312.50"
+2025-06,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-06,,Bilingue Maju,bilingue maju,310.40
+2025-06,1,Bilingue Malu,bilingue malu,310.40
+2025-06,1,Cartão black,cartao black,"6,171.79"
+2025-06,8,Cartao Porto,cartao porto,618.18
+2025-06,1,Cartão XP,cartao xp,19.90
+2025-06,10,Comgas,comgas,834.79
+2025-06,5,Condominio,condominio,"4,349.79"
+2025-06,1,Conta Luz apto,conta luz apto,401.23
+2025-06,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-06,8,Convênio sogra,convenio sogra,"4,096.52"
+2025-06,1,Escola Maju,escola maju,"3,195.00"
+2025-06,1,Escola Malu,escola malu,"2,735.00"
+2025-06,5,Escola música MAJU,escola musica maju,490.00
+2025-06,5,Escola música MALU,escola musica malu,490.00
+2025-06,7,Esocial Deusa,esocial deusa,615.67
+2025-06,1,Estacionamento Allianz,estacionamento allianz,220.00
+2025-06,1,Financ imob,financ imob,"24,120.00"
+2025-06,9,iptu apto,iptu apto,"2,659.02"
+2025-06,1,IPTU casa,iptu casa,"3,944.16"
+2025-06,1,Mesada MAJU,mesada maju,50.00
+2025-06,1,Natação,natacao,480.00
+2025-06,5,Net (automático),net,223.38
+2025-06,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-06,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-06,1,Salário Deusa,salario deusa,"1,103.74"
+2025-06,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-06,26,Vivo,vivo,334.99
+2025-07,12,Adiantamento Deusa,adiantamento deusa,"1,312.50"
+2025-07,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-07,,Bilingue Maju,bilingue maju,304.19
+2025-07,1,Bilingue Malu,bilingue malu,304.19
+2025-07,1,Cartão black,cartao black,"5,991.29"
+2025-07,8,Cartao Porto,cartao porto,60.89
+2025-07,1,Cartão XP,cartao xp,19.90
+2025-07,10,Comgas,comgas,945.62
+2025-07,5,Condominio,condominio,"4,413.46"
+2025-07,1,Conta Luz apto,conta luz apto,386.47
+2025-07,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-07,8,Convênio sogra,convenio sogra,"4,096.52"
+2025-07,1,Escola Maju,escola maju,"3,131.10"
+2025-07,1,Escola Malu,escola malu,"2,680.50"
+2025-07,5,Escola música MAJU,escola musica maju,490.00
+2025-07,5,Escola música MALU,escola musica malu,490.00
+2025-07,7,Esocial Deusa,esocial deusa,738.48
+2025-07,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-07,1,Financ imob,financ imob,"24,114.99"
+2025-07,9,iptu apto,iptu apto,"2,659.02"
+2025-07,1,Mesada MAJU,mesada maju,50.00
+2025-07,1,Natação,natacao,480.00
+2025-07,,Necessidade dia 4,necessidade dia 4,"47,704.20"
+2025-07,5,Net (automático),net,359.99
+2025-07,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-07,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-07,1,Salário Deusa + Vale transporte,salario deusa + vale transporte,"1,319.02"
+2025-07,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-07,26,Vivo,vivo,334.99
+2025-08,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2025-08,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-08,,Bilingue Maju,bilingue maju,304.19
+2025-08,1,Bilingue Malu,bilingue malu,304.19
+2025-08,1,Cartão black,cartao black,"3,073.18"
+2025-08,8,Cartao Porto,cartao porto,"4,590.76"
+2025-08,1,Cartão XP,cartao xp,19.90
+2025-08,10,Comgas,comgas,700.00
+2025-08,5,Condominio,condominio,"4,413.46"
+2025-08,1,Conta Luz apto,conta luz apto,418.37
+2025-08,1,Contador MCVSW,contador mcvsw,200.00
+2025-08,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-08,8,Convênio sogra,convenio sogra,"4,720.40"
+2025-08,1,Escola Maju,escola maju,"3,131.10"
+2025-08,1,Escola Malu,escola malu,"2,680.50"
+2025-08,5,Escola música MAJU,escola musica maju,490.00
+2025-08,5,Escola música MALU,escola musica malu,490.00
+2025-08,7,Esocial Deusa,esocial deusa,848.79
+2025-08,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-08,1,Financ imob,financ imob,"24,114.99"
+2025-08,9,iptu apto,iptu apto,"2,659.02"
+2025-08,1,Mesada MAJU,mesada maju,50.00
+2025-08,,Necessidade dia 1,necessidade dia 1,"58,357.86"
+2025-08,5,Net (automático),net,359.99
+2025-08,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-08,1,Pagto Thalita (automático),pagto thalita,"2,000.00"
+2025-08,1,Salário Deusa + Vale transporte,salario deusa + vale transporte,"1,341.72"
+2025-08,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-08,26,Vivo,vivo,334.99
+2025-09,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2025-09,1,Aluguel vaga garagem,aluguel vaga garagem,250.00
+2025-09,,Bilingue Maju,bilingue maju,304.19
+2025-09,1,Bilingue Malu,bilingue malu,304.19
+2025-09,1,Cartão black,cartao black,"12,095.42"
+2025-09,8,Cartao Porto,cartao porto,340.00
+2025-09,1,Cartão XP,cartao xp,19.90
+2025-09,10,Comgas,comgas,700.00
+2025-09,5,Condominio,condominio,"4,629.83"
+2025-09,1,Conta Luz apto,conta luz apto,433.41
+2025-09,1,Contador MCVSW,contador mcvsw,200.00
+2025-09,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-09,8,Convênio sogra,convenio sogra,"4,720.40"
+2025-09,1,Escola Maju,escola maju,"3,131.10"
+2025-09,1,Escola Malu,escola malu,"2,680.50"
+2025-09,5,Escola música MAJU,escola musica maju,490.00
+2025-09,5,Escola música MALU,escola musica malu,490.00
+2025-09,7,Esocial Deusa,esocial deusa,738.48
+2025-09,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-09,1,Financ imob,financ imob,"24,199.90"
+2025-09,9,iptu apto,iptu apto,"2,659.02"
+2025-09,1,Mesada MAJU,mesada maju,60.00
+2025-09,5,Net (automático),net,494.95
+2025-09,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-09,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2025-09,1,Salário Deusa + Vale transporte,salario deusa + vale transporte,"1,319.20"
+2025-09,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-09,1,Vaga garagem -3,vaga garagem -3,250.00
+2025-09,26,Vivo,vivo,187.00
+2025-10,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2025-10,,Bilingue Maju,bilingue maju,304.19
+2025-10,1,Bilingue Malu,bilingue malu,304.19
+2025-10,1,Cartão black,cartao black,"16,662.50"
+2025-10,8,Cartao Porto,cartao porto,322.68
+2025-10,1,Cartão XP,cartao xp,19.90
+2025-10,10,Comgas,comgas,"1,000.00"
+2025-10,5,Condominio,condominio,"5,200.72"
+2025-10,1,Conta Luz apto,conta luz apto,433.41
+2025-10,1,Contador MCVSW,contador mcvsw,200.00
+2025-10,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-10,8,Convênio sogra,convenio sogra,"4,720.00"
+2025-10,1,Escola Maju,escola maju,"3,131.10"
+2025-10,1,Escola Malu,escola malu,"2,680.50"
+2025-10,5,Escola música MAJU,escola musica maju,490.00
+2025-10,5,Escola música MALU,escola musica malu,490.00
+2025-10,7,Esocial Deusa,esocial deusa,738.48
+2025-10,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-10,1,Financ imob,financ imob,"24,195.48"
+2025-10,9,iptu apto,iptu apto,"2,659.02"
+2025-10,1,Mesada MAJU,mesada maju,60.00
+2025-10,5,Net (automático),net,494.95
+2025-10,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-10,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2025-10,1,Salário Deusa + Vale transporte,salario deusa + vale transporte,"1,099.02"
+2025-10,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-10,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2025-10,1,Vale Transporte Deusa,vale transporte deusa,242.95
+2025-10,26,Vivo,vivo,187.00
+2025-11,,A Aplicar,a aplicar,"43,252.79"
+2025-11,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2025-11,,Bilingue Maju,bilingue maju,304.19
+2025-11,1,Bilingue Malu,bilingue malu,304.19
+2025-11,1,Cartão black,cartao black,"24,526.41"
+2025-11,8,Cartao Porto,cartao porto,322.68
+2025-11,1,Cartão XP,cartao xp,19.90
+2025-11,10,Comgas,comgas,"1,000.00"
+2025-11,5,Condominio,condominio,"5,116.05"
+2025-11,1,Conta Luz apto,conta luz apto,433.41
+2025-11,1,Contador MCVSW,contador mcvsw,200.00
+2025-11,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-11,8,Convênio sogra,convenio sogra,"4,720.00"
+2025-11,1,Escola Maju,escola maju,"3,131.10"
+2025-11,1,Escola Malu,escola malu,"2,680.50"
+2025-11,5,Escola música MAJU,escola musica maju,490.00
+2025-11,5,Escola música MALU,escola musica malu,490.00
+2025-11,7,Esocial Deusa,esocial deusa,738.48
+2025-11,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-11,1,Financ imob,financ imob,"24,191.37"
+2025-11,9,iptu apto,iptu apto,"2,659.02"
+2025-11,1,Mesada MAJU,mesada maju,60.00
+2025-11,5,Net (automático),net,494.95
+2025-11,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-11,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2025-11,,Resgate mês (para comparação),resgate mes,"43,629.84"
+2025-11,1,Salário Deusa + Vale transporte,salario deusa + vale transporte,"1,099.02"
+2025-11,1,SEGURO CARTOES,seguro cartoes,50.00
+2025-11,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2025-11,1,Vale Transporte Deusa,vale transporte deusa,242.95
+2025-11,,Vencimentos aplicações,vencimentos aplicacoes,"86,882.63"
+2025-11,26,Vivo,vivo,99.99
+2025-12,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2025-12,,Bilingue Maju,bilingue maju,304.19
+2025-12,1,Bilingue Malu,bilingue malu,304.19
+2025-12,1,Cartão black,cartao black,"21,180.97"
+2025-12,8,Cartao Porto,cartao porto,322.68
+2025-12,1,Cartão XP,cartao xp,19.90
+2025-12,10,Comgas,comgas,850.00
+2025-12,5,Condominio,condominio,"5,158.25"
+2025-12,1,Conta Luz apto,conta luz apto,433.41
+2025-12,1,Contador MCVSW,contador mcvsw,200.00
+2025-12,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2025-12,8,Convênio sogra,convenio sogra,"4,720.00"
+2025-12,1,Escola Maju,escola maju,"3,131.10"
+2025-12,1,Escola Malu,escola malu,"2,680.50"
+2025-12,5,Escola música MAJU,escola musica maju,510.00
+2025-12,5,Escola música MALU,escola musica malu,510.00
+2025-12,7,Esocial Deusa,esocial deusa,836.48
+2025-12,1,Estacionamento Allianz,estacionamento allianz,250.00
+2025-12,1,Financ imob,financ imob,"24,184.17"
+2025-12,1,Mesada MAJU,mesada maju,100.00
+2025-12,5,Net (automático),net,494.95
+2025-12,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2025-12,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2025-12,,Resgate mês (para comparação),resgate mes,"38,043.54"
+2025-12,1,Salário Deusa + 13 salario,salario deusa + 13 salario,"1,974.02"
+2025-12,1,SEGURO CARTOES,seguro cartoes,52.28
+2025-12,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2025-12,1,Vale Transporte Deusa,vale transporte deusa,242.95
+2025-12,26,Vivo,vivo,99.99
+2026-01,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2026-01,1,Cartão black,cartao black,"22,661.46"
+2026-01,8,Cartao Porto,cartao porto,322.68
+2026-01,1,Cartão XP,cartao xp,198.90
+2026-01,10,Comgas,comgas,850.00
+2026-01,5,Condominio,condominio,"4,927.11"
+2026-01,1,Conta Luz apto,conta luz apto,549.12
+2026-01,1,Contador MCVSW,contador mcvsw,200.00
+2026-01,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2026-01,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-01,1,Escola Maju,escola maju,"3,466.54"
+2026-01,1,Escola Malu,escola malu,"2,951.55"
+2026-01,5,Escola música MAJU,escola musica maju,510.00
+2026-01,5,Escola música MALU,escola musica malu,510.00
+2026-01,7,Esocial Deusa,esocial deusa,"1,214.12"
+2026-01,1,Estacionamento Allianz,estacionamento allianz,250.00
+2026-01,1,Financ imob,financ imob,"24,182.27"
+2026-01,1,Mesada MAJU,mesada maju,60.00
+2026-01,5,Net (automático),net,494.95
+2026-01,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-01,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-01,1,Salário Deusa + 13 salario,salario deusa + 13 salario,"2,104.23"
+2026-01,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-01,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-01,1,Vale Transporte Deusa,vale transporte deusa,242.95
+2026-01,26,Vivo,vivo,99.99
+2026-02,,A aplicar CDB,a aplicar cdb,"29,427.85"
+2026-02,,A aplicar cofrinhos,a aplicar cofrinhos,"25,534.72"
+2026-02,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2026-02,1,Cartão black,cartao black,"14,257.38"
+2026-02,8,Cartao Porto,cartao porto,322.68
+2026-02,1,Cartão XP,cartao xp,19.99
+2026-02,10,Comgas,comgas,566.69
+2026-02,5,Condominio,condominio,"5,038.47"
+2026-02,1,Conta Luz apto,conta luz apto,784.16
+2026-02,1,Contador MCVSW,contador mcvsw,162.50
+2026-02,1,Convênio marco Antônio,convenio marco antonio,"1,863.45"
+2026-02,,Convênio pai e mãe,convenio pai e mae,"11,325.56"
+2026-02,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-02,,Devolução sogra,devolucao sogra,"1,000.00"
+2026-02,1,Escola Maju,escola maju,"3,466.54"
+2026-02,1,Escola Malu,escola malu,"2,951.55"
+2026-02,5,Escola música MAJU,escola musica maju,510.00
+2026-02,5,Escola música MALU,escola musica malu,510.00
+2026-02,7,Esocial Deusa,esocial deusa,736.93
+2026-02,1,Estacionamento Allianz,estacionamento allianz,250.00
+2026-02,1,Financ imob,financ imob,"24,176.92"
+2026-02,1,Fisio Thalita,fisio thalita,600.00
+2026-02,9,iptu apto,iptu apto,"2,924.94"
+2026-02,1,Mesada MAJU,mesada maju,60.00
+2026-02,5,Net (automático),net,494.95
+2026-02,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-02,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-02,1,Personal Thalita,personal thalita,720.00
+2026-02,1,Salário Deusa,salario deusa,950.57
+2026-02,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-02,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-02,1,Vale Transporte Deusa,vale transporte deusa,262.43
+2026-02,26,Vivo,vivo,99.99
+2026-03,1,14 salário Deusa,14 salario deusa,"2,625.00"
+2026-03,,A aplicar CDB,a aplicar cdb,"25,648.52"
+2026-03,,A aplicar cofrinhos,a aplicar cofrinhos,"25,534.72"
+2026-03,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2026-03,1,Blilingue Malu,blilingue malu,320.92
+2026-03,1,Cartão Amazon,cartao amazon,"2,138.88"
+2026-03,1,Cartão black,cartao black,"17,292.77"
+2026-03,8,Cartao Porto,cartao porto,376.68
+2026-03,10,Comgas,comgas,785.15
+2026-03,5,Condominio,condominio,"4,705.59"
+2026-03,1,Conta Luz apto,conta luz apto,643.07
+2026-03,1,Contador MCVSW,contador mcvsw,162.50
+2026-03,1,Convênio marco Antônio,convenio marco antonio,"2,017.45"
+2026-03,,Convênio pai e mãe,convenio pai e mae,"11,325.56"
+2026-03,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-03,1,Escola Maju,escola maju,"3,466.54"
+2026-03,1,Escola Malu,escola malu,"2,951.55"
+2026-03,5,Escola música MAJU,escola musica maju,510.00
+2026-03,5,Escola música MALU,escola musica malu,510.00
+2026-03,7,Esocial Deusa,esocial deusa,736.93
+2026-03,1,Estacionamento Allianz,estacionamento allianz,250.00
+2026-03,1,Financ imob,financ imob,"24,159.16"
+2026-03,1,Fisio Thalita,fisio thalita,600.00
+2026-03,9,iptu apto,iptu apto,"2,924.94"
+2026-03,1,Material Maju,material maju,53.36
+2026-03,1,Material Malu,material malu,53.36
+2026-03,1,Mesada MAJU,mesada maju,60.00
+2026-03,1,Mesada MALU,mesada malu,60.00
+2026-03,5,Net (automático),net,494.95
+2026-03,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-03,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-03,1,Personal Thalita,personal thalita,"1,215.00"
+2026-03,,Red Baloom Maju,red baloom maju,"1,350.00"
+2026-03,1,Red Baloom Malu,red baloom malu,"1,350.00"
+2026-03,1,Salário Deusa,salario deusa,"1,050.57"
+2026-03,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-03,1,Teatro Maju,teatro maju,155.08
+2026-03,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-03,1,Vale Transporte Deusa,vale transporte deusa,262.43
+2026-03,26,Vivo,vivo,99.99
+2026-04,,A aplicar CDB,a aplicar cdb,"77,334.04"
+2026-04,,A aplicar cofrinhos,a aplicar cofrinhos,"25,534.72"
+2026-04,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2026-04,1,Cartão Amazon,cartao amazon,"3,819.12"
+2026-04,1,Cartão black,cartao black,"7,942.55"
+2026-04,1,Cartão One,cartao one,"16,654.00"
+2026-04,10,Comgas,comgas,986.72
+2026-04,5,Condominio,condominio,"4,705.59"
+2026-04,1,Conta Luz apto,conta luz apto,616.39
+2026-04,1,Contador MCVSW,contador mcvsw,162.50
+2026-04,1,Convênio marco Antônio,convenio marco antonio,"1,976.38"
+2026-04,,Convênio pai e mãe,convenio pai e mae,"11,325.56"
+2026-04,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-04,1,Escola Maju,escola maju,"3,466.54"
+2026-04,1,Escola Malu,escola malu,"2,951.55"
+2026-04,5,Escola música MAJU,escola musica maju,510.00
+2026-04,5,Escola música MALU,escola musica malu,510.00
+2026-04,7,Esocial Deusa,esocial deusa,736.93
+2026-04,1,Estacionamento Allianz,estacionamento allianz,260.00
+2026-04,1,Financ imob,financ imob,"24,154.04"
+2026-04,1,Fisio Thalita,fisio thalita,"1,000.00"
+2026-04,9,iptu apto,iptu apto,"2,924.94"
+2026-04,1,Material Maju,material maju,53.36
+2026-04,1,Material Malu,material malu,53.36
+2026-04,1,Mesada MAJU,mesada maju,60.00
+2026-04,1,Mesada MALU,mesada malu,60.00
+2026-04,5,Net (automático),net,494.95
+2026-04,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-04,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-04,1,Personal Thalita,personal thalita,"1,080.00"
+2026-04,1,Red Baloom Malu,red baloom malu,"1,319.77"
+2026-04,1,Salário Deusa,salario deusa,"1,100.57"
+2026-04,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-04,1,Teatro Maju,teatro maju,155.08
+2026-04,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-04,1,Vale Transporte Deusa,vale transporte deusa,262.43
+2026-04,26,Vivo,vivo,99.99
+2026-05,,A aplicar CDB,a aplicar cdb,"77,334.04"
+2026-05,,A aplicar cofrinhos,a aplicar cofrinhos,"25,534.72"
+2026-05,12,Adiantamento Deusa,adiantamento deusa,"1,012.50"
+2026-05,1,Cartão Amazon,cartao amazon,"3,819.12"
+2026-05,1,Cartão black,cartao black,"7,942.55"
+2026-05,1,Cartão One,cartao one,"16,654.00"
+2026-05,10,Comgas,comgas,986.72
+2026-05,5,Condominio,condominio,"4,705.59"
+2026-05,1,Conta Luz apto,conta luz apto,616.39
+2026-05,1,Contador MCVSW,contador mcvsw,162.50
+2026-05,1,Convênio marco Antônio,convenio marco antonio,"1,976.38"
+2026-05,,Convênio pai e mãe,convenio pai e mae,"11,325.56"
+2026-05,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-05,1,Escola Maju,escola maju,"3,466.54"
+2026-05,1,Escola Malu,escola malu,"2,951.55"
+2026-05,5,Escola música MAJU,escola musica maju,510.00
+2026-05,5,Escola música MALU,escola musica malu,510.00
+2026-05,7,Esocial Deusa,esocial deusa,736.93
+2026-05,1,Estacionamento Allianz,estacionamento allianz,260.00
+2026-05,1,Financ imob,financ imob,"24,154.04"
+2026-05,1,Fisio Thalita,fisio thalita,"1,000.00"
+2026-05,9,iptu apto,iptu apto,"2,924.94"
+2026-05,1,Material Maju,material maju,53.36
+2026-05,1,Material Malu,material malu,53.36
+2026-05,1,Mesada MAJU,mesada maju,60.00
+2026-05,1,Mesada MALU,mesada malu,60.00
+2026-05,5,Net (automático),net,494.95
+2026-05,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-05,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-05,1,Personal Thalita,personal thalita,"1,080.00"
+2026-05,1,Red Baloom Malu,red baloom malu,"1,319.77"
+2026-05,1,Salário Deusa,salario deusa,"1,100.57"
+2026-05,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-05,1,Teatro Maju,teatro maju,155.08
+2026-05,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-05,1,Vale Transporte Deusa,vale transporte deusa,262.43
+2026-05,26,Vivo,vivo,99.99
+2026-06,12,Adiantamento Deusa,adiantamento deusa,"1,312.50"
+2026-06,1,Cartão Amazon,cartao amazon,"2,766.86"
+2026-06,1,Cartão black,cartao black,"5,315.94"
+2026-06,1,Cartão mercado livre,cartao mercado livre,821.93
+2026-06,1,Cartão One,cartao one,"12,083.26"
+2026-06,10,Comgas,comgas,986.72
+2026-06,5,Condominio,condominio,"5,957.59"
+2026-06,1,Conta Luz apto,conta luz apto,604.90
+2026-06,1,Contador MCVSW,contador mcvsw,162.50
+2026-06,1,Convênio marco Antônio,convenio marco antonio,"1,976.38"
+2026-06,,Convênio pai e mãe,convenio pai e mae,"11,325.56"
+2026-06,8,Convênio sogra,convenio sogra,"4,720.00"
+2026-06,1,Escola Maju,escola maju,"3,466.54"
+2026-06,1,Escola Malu,escola malu,"2,951.55"
+2026-06,5,Escola música MAJU,escola musica maju,510.00
+2026-06,5,Escola música MALU,escola musica malu,510.00
+2026-06,7,Esocial Deusa,esocial deusa,871.89
+2026-06,1,Estacionamento Allianz,estacionamento allianz,260.00
+2026-06,1,Financ imob,financ imob,"24,141.05"
+2026-06,1,Fisio Thalita,fisio thalita,"1,000.00"
+2026-06,9,iptu apto,iptu apto,"2,924.94"
+2026-06,1,Material Maju,material maju,53.36
+2026-06,1,Material Malu,material malu,53.36
+2026-06,1,Mesada MAJU,mesada maju,60.00
+2026-06,1,Mesada MALU,mesada malu,60.00
+2026-06,5,Net (automático),net,515.24
+2026-06,1,Pagto IPEN Beto (automático),pagto ipen beto,30.00
+2026-06,1,Pagto Thalita (automático),pagto thalita,"2,200.00"
+2026-06,1,Personal Thalita,personal thalita,"1,080.00"
+2026-06,,Red Baloom Maju,red baloom maju,"1,319.77"
+2026-06,1,Red Baloom Malu,red baloom malu,"1,319.77"
+2026-06,1,SEGURO CARTOES,seguro cartoes,52.28
+2026-06,1,Teatro Maju,teatro maju,155.08
+2026-06,1,Vaga garagem Chacara Monteverde,vaga garagem chacara monteverde,250.00
+2026-06,1,Vale Transporte Deusa,vale transporte deusa,262.43
+2026-06,26,Vivo,vivo,99.99
