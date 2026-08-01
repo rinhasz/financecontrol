@@ -54,7 +54,8 @@ export function Importacao() {
   const [selecionada, setSelecionada] = useState('')
   const [novaDespesaNome, setNovaDespesaNome] = useState('')
   const [associando, setAssociando] = useState<number | null>(null)
-  const [transacaoSelecionada, setTransacaoSelecionada] = useState('')
+  const [selecionadaAssoc, setSelecionadaAssoc] = useState('')
+  const [novaDespesaNomeAssoc, setNovaDespesaNomeAssoc] = useState('')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -128,34 +129,51 @@ export function Importacao() {
     setCorrigindo(null)
   }
 
-  function abrirAssociacao(lancamentoId: number) {
-    setAssociando(associando === lancamentoId ? null : lancamentoId)
-    setTransacaoSelecionada('')
+  function abrirAssociacao(transacaoId: number) {
+    setAssociando(associando === transacaoId ? null : transacaoId)
+    setSelecionadaAssoc('')
+    setNovaDespesaNomeAssoc('')
   }
 
-  async function aplicarAssociacao(ne: NaoEncontrado) {
-    if (!transacaoSelecionada) return
-    const transacaoId = Number(transacaoSelecionada)
-    const t = resultado?.transacoes_sobrando.find(x => x.id === transacaoId)
-    if (!t) return
+  async function aplicarAssociacao(t: TransacaoSobrando) {
+    let despesaId: number
+    let despesaNome: string
+    if (selecionadaAssoc === 'nova') {
+      const nome = novaDespesaNomeAssoc.trim()
+      if (!nome) return
+      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+      const res = await api.catalogo.upsert({
+        nome,
+        tipo_valor: 'variavel',
+        padrao_variabilidade: 'variavel_nao_sazonal',
+        valor_padrao: Math.abs(t.valor),
+        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
+      })
+      despesaId = res.id
+      despesaNome = nome
+      setDespesas(ds => [...ds, { id: despesaId, nome: despesaNome }])
+    } else {
+      if (!selecionadaAssoc) return
+      despesaId = Number(selecionadaAssoc)
+      despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
+    }
 
-    await api.batimento.corrigir(mesRef, transacaoId, ne.despesa_id)
+    await api.batimento.corrigir(mesRef, t.id, despesaId)
 
     setResultado(r => {
       if (!r) return r
       const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
       return {
         ...r,
-        nao_encontrados: r.nao_encontrados.filter(x => x.lancamento_id !== ne.lancamento_id),
-        transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== transacaoId),
+        nao_encontrados: r.nao_encontrados.filter(x => x.despesa_id !== despesaId),
+        transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== t.id),
         detalhes: [...r.detalhes, {
-          lancamento_id: ne.lancamento_id, despesa_id: ne.despesa_id, despesa_nome: ne.despesa_nome,
+          lancamento_id: 0, despesa_id: despesaId, despesa_nome: despesaNome,
           transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
         }]
       }
     })
     setAssociando(null)
-    setTransacaoSelecionada('')
   }
 
   const STEPS: [Step, string][] = [['selecionar', '1. Selecionar'], ['revisar', '2. Revisar'], ['concluido', '3. Concluído']]
@@ -342,51 +360,54 @@ export function Importacao() {
               </div>
             )}
 
-            {resultado.nao_encontrados.length > 0 && (
+            {resultado.transacoes_sobrando.length > 0 && (
               <div>
                 <p className="text-sm text-zinc-400 mb-2">
-                  Despesas que não bateram com nada no extrato — se alguma das transações que sobraram for ela, associe:
+                  Transações do extrato sem despesa correspondente — associe a uma despesa existente ou crie uma nova:
                 </p>
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-zinc-800 bg-zinc-900/40">
-                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
-                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Valor esperado</th>
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Data</th>
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Descrição no extrato</th>
+                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Valor</th>
                         <th className="px-4 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {resultado.nao_encontrados.map((ne, i) => (
-                        <Fragment key={ne.lancamento_id}>
+                      {resultado.transacoes_sobrando.map((t, i) => (
+                        <Fragment key={t.id}>
                           <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
-                            <td className="px-4 py-2 text-zinc-200 font-medium">{ne.despesa_nome}</td>
-                            <td className="px-4 py-2 text-right tabular-nums text-zinc-400">{formatBRL(ne.valor_esperado)}</td>
+                            <td className="px-4 py-2 text-zinc-500 text-xs tabular-nums">
+                              {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className="px-4 py-2 text-zinc-300">{t.descricao}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(t.valor))}</td>
                             <td className="px-4 py-2 text-right">
-                              {resultado.transacoes_sobrando.length > 0 ? (
-                                <button onClick={() => abrirAssociacao(ne.lancamento_id)}
-                                  className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                                  Associar transação
-                                </button>
-                              ) : (
-                                <span className="text-xs text-zinc-700">sem transações disponíveis</span>
-                              )}
+                              <button onClick={() => abrirAssociacao(t.id)}
+                                className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
+                                Associar despesa
+                              </button>
                             </td>
                           </tr>
-                          {associando === ne.lancamento_id && (
+                          {associando === t.id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
-                              <td colSpan={3} className="px-4 py-3">
+                              <td colSpan={4} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <select value={transacaoSelecionada} onChange={e => setTransacaoSelecionada(e.target.value)}
-                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 max-w-md">
-                                    <option value="">Selecionar transação do extrato...</option>
-                                    {resultado.transacoes_sobrando.map(t => (
-                                      <option key={t.id} value={t.id}>
-                                        {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')} — {t.descricao} — {formatBRL(Math.abs(t.valor))}
-                                      </option>
-                                    ))}
+                                  <select value={selecionadaAssoc} onChange={e => setSelecionadaAssoc(e.target.value)}
+                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+                                    <option value="">Selecionar despesa...</option>
+                                    {despesas.map(ds => <option key={ds.id} value={ds.id}>{ds.nome}</option>)}
+                                    <option value="nova">+ Nova despesa</option>
                                   </select>
-                                  <button onClick={() => aplicarAssociacao(ne)} disabled={!transacaoSelecionada}
+                                  {selecionadaAssoc === 'nova' && (
+                                    <input value={novaDespesaNomeAssoc} onChange={e => setNovaDespesaNomeAssoc(e.target.value)}
+                                      placeholder="Nome da nova despesa" autoFocus
+                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+                                  )}
+                                  <button onClick={() => aplicarAssociacao(t)}
+                                    disabled={!selecionadaAssoc || (selecionadaAssoc === 'nova' && !novaDespesaNomeAssoc.trim())}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
                                   </button>
