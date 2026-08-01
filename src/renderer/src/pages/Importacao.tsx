@@ -9,6 +9,7 @@ interface ParsedTx { data: string; descricao: string; valor: number }
 interface DetalheMatch {
   lancamento_id: number
   despesa_id: number
+  despesa_id_sugerido: number | null
   despesa_nome: string
   transacao_id: number
   descricao_transacao: string
@@ -56,6 +57,8 @@ export function Importacao() {
   const [associando, setAssociando] = useState<number | null>(null)
   const [selecionadaAssoc, setSelecionadaAssoc] = useState('')
   const [novaDespesaNomeAssoc, setNovaDespesaNomeAssoc] = useState('')
+  const [confirmando, setConfirmando] = useState(false)
+  const [confirmado, setConfirmado] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -86,6 +89,7 @@ export function Importacao() {
       const [res, cat] = await Promise.all([api.batimento.rodar(mesRef), api.catalogo.list()])
       setResultado(res)
       setDespesas(cat)
+      setConfirmado(null)
       setStep('concluido')
     } finally {
       setLoading(false)
@@ -114,14 +118,14 @@ export function Importacao() {
       })
       despesaId = res.id
       despesaNome = nome
+      setDespesas(ds => [...ds, { id: despesaId, nome: despesaNome }])
     } else {
       if (!selecionada) return
       despesaId = Number(selecionada)
       despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
 
-    await api.batimento.corrigir(mesRef, d.transacao_id, despesaId)
-
+    // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
     setResultado(r => r ? {
       ...r,
       detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
@@ -158,8 +162,7 @@ export function Importacao() {
       despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
 
-    await api.batimento.corrigir(mesRef, t.id, despesaId)
-
+    // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
     setResultado(r => {
       if (!r) return r
       const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
@@ -168,12 +171,25 @@ export function Importacao() {
         nao_encontrados: r.nao_encontrados.filter(x => x.despesa_id !== despesaId),
         transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== t.id),
         detalhes: [...r.detalhes, {
-          lancamento_id: 0, despesa_id: despesaId, despesa_nome: despesaNome,
+          lancamento_id: 0, despesa_id: despesaId, despesa_id_sugerido: null, despesa_nome: despesaNome,
           transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
         }]
       }
     })
     setAssociando(null)
+  }
+
+  async function confirmarTudo() {
+    if (!resultado || resultado.detalhes.length === 0) return
+    setConfirmando(true)
+    try {
+      const res = await api.batimento.confirmar(mesRef, resultado.detalhes.map(d => ({
+        transacao_id: d.transacao_id, despesa_id: d.despesa_id, despesa_id_sugerido: d.despesa_id_sugerido
+      })))
+      setConfirmado(res.confirmados ?? resultado.detalhes.length)
+    } finally {
+      setConfirmando(false)
+    }
   }
 
   const STEPS: [Step, string][] = [['selecionar', '1. Selecionar'], ['revisar', '2. Revisar'], ['concluido', '3. Concluído']]
@@ -289,10 +305,17 @@ export function Importacao() {
         {/* Step 3 — concluído */}
         {step === 'concluido' && resultado && (
           <div className="space-y-4 max-w-3xl">
-            <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-8 text-center">
-              <div className="text-5xl font-bold text-emerald-400 mb-2">{resultado.matched}/{resultado.total}</div>
-              <p className="text-zinc-400 text-sm">lançamentos casados automaticamente</p>
-            </div>
+            {confirmado !== null ? (
+              <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-8 text-center">
+                <div className="text-5xl font-bold text-emerald-400 mb-2">{confirmado}</div>
+                <p className="text-zinc-400 text-sm">lançamentos confirmados e gravados</p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-8 text-center">
+                <div className="text-5xl font-bold text-zinc-200 mb-2">{resultado.matched}/{resultado.total}</div>
+                <p className="text-zinc-500 text-sm">sugestões automáticas — revise abaixo e clique em "Confirmar tudo" para gravar. Nada é salvo antes disso.</p>
+              </div>
+            )}
 
             {resultado.detalhes.length > 0 && (
               <div>
@@ -322,10 +345,12 @@ export function Importacao() {
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">
-                              <button onClick={() => abrirCorrecao(d.transacao_id)}
-                                className="text-xs text-zinc-500 hover:text-amber-400 transition-colors whitespace-nowrap">
-                                Não é essa despesa
-                              </button>
+                              {confirmado === null && (
+                                <button onClick={() => abrirCorrecao(d.transacao_id)}
+                                  className="text-xs text-zinc-500 hover:text-amber-400 transition-colors whitespace-nowrap">
+                                  Não é essa despesa
+                                </button>
+                              )}
                             </td>
                           </tr>
                           {corrigindo === d.transacao_id && (
@@ -385,10 +410,12 @@ export function Importacao() {
                             <td className="px-4 py-2 text-zinc-300">{t.descricao}</td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(t.valor))}</td>
                             <td className="px-4 py-2 text-right">
-                              <button onClick={() => abrirAssociacao(t.id)}
-                                className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                                Associar despesa
-                              </button>
+                              {confirmado === null && (
+                                <button onClick={() => abrirAssociacao(t.id)}
+                                  className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
+                                  Associar despesa
+                                </button>
+                              )}
                             </td>
                           </tr>
                           {associando === t.id && (
@@ -423,13 +450,25 @@ export function Importacao() {
               </div>
             )}
 
-            <p className="text-sm text-zinc-500">
-              Vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar os lançamentos em aberto.
-            </p>
-            <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null) }}
-              className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
-              Nova importação
-            </button>
+            {confirmado === null ? (
+              <div className="flex items-center gap-3 pt-2">
+                <button onClick={confirmarTudo} disabled={confirmando || resultado.detalhes.length === 0}
+                  className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                  {confirmando ? 'Gravando...' : `Confirmar tudo (${resultado.detalhes.length})`}
+                </button>
+                <p className="text-sm text-zinc-500">Nada é gravado até você clicar aqui — pode sair e voltar sem perder o que já revisou.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-zinc-500">
+                  Vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar os lançamentos em aberto.
+                </p>
+                <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null); setConfirmado(null) }}
+                  className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
+                  Nova importação
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

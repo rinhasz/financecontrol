@@ -283,6 +283,10 @@ def importar():
 
 @bp.route('/batimento', methods=['POST'])
 def rodar_batimento():
+    """Calcula as sugestões de casamento (preview) — não grava nada no banco.
+    Só é persistido quando o usuário confirma via /api/batimento/confirmar,
+    para não perder o trabalho de quem ainda não terminou de revisar (rodar
+    duas vezes sem confirmar não deve fazer nada desaparecer)."""
     mes_ref = request.json.get('mes_ref', '')
 
     conn = get_db()
@@ -347,29 +351,20 @@ def rodar_batimento():
     # Casamentos com maior confiança (score) são resolvidos primeiro
     candidatos.sort(key=lambda c: c[0], reverse=True)
 
-    lanc_matched = set()
-    tx_used = set()
-    matched = 0
+    lanc_sugerido = set()
+    tx_sugerida = set()
     detalhes = []
 
     for score, l, t in candidatos:
-        if l['id'] in lanc_matched or t['id'] in tx_used:
+        if l['id'] in lanc_sugerido or t['id'] in tx_sugerida:
             continue
         status = 'pago' if t['situacao'] == 'efetivada' else 'agendado'
-        conn.execute(
-            'UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=? WHERE id=?',
-            (status, t['id'], abs(t['valor']), t['data'], l['id'])
-        )
-        conn.execute(
-            "UPDATE transacao SET despesa_id=?, classificacao='recorrente' WHERE id=?",
-            (l['despesa_id'], t['id'])
-        )
-        lanc_matched.add(l['id'])
-        tx_used.add(t['id'])
-        matched += 1
+        lanc_sugerido.add(l['id'])
+        tx_sugerida.add(t['id'])
         detalhes.append({
             'lancamento_id': l['id'],
             'despesa_id': l['despesa_id'],
+            'despesa_id_sugerido': l['despesa_id'],
             'despesa_nome': l['despesa_nome'],
             'transacao_id': t['id'],
             'descricao_transacao': t['descricao'],
@@ -378,50 +373,68 @@ def rodar_batimento():
             'status': status,
         })
 
-    nao_encontrados = conn.execute("""
-        SELECT l.id as lancamento_id, l.despesa_id, d.nome as despesa_nome, l.valor_esperado
-        FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
-        WHERE l.mes_ref=? AND l.status='nao_encontrado'
-        ORDER BY d.nome
-    """, (mes_ref,)).fetchall()
+    nao_encontrados = [
+        {'lancamento_id': l['id'], 'despesa_id': l['despesa_id'], 'despesa_nome': l['despesa_nome'], 'valor_esperado': l['valor_esperado']}
+        for l in lancamentos if l['id'] not in lanc_sugerido
+    ]
+    transacoes_sobrando = [dict(t) for t in transacoes if t['id'] not in tx_sugerida]
 
-    sobrando = conn.execute("""
-        SELECT id, data, descricao, valor, situacao FROM transacao
-        WHERE data BETWEEN ? AND ? AND tipo='debito' AND despesa_id IS NULL
-        ORDER BY data
-    """, (ini, fim)).fetchall()
-
-    conn.commit()
     conn.close()
     return jsonify({
-        'ok': True, 'matched': matched, 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim},
+        'ok': True, 'matched': len(detalhes), 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim},
         'detalhes': detalhes,
-        'nao_encontrados': [dict(r) for r in nao_encontrados],
-        'transacoes_sobrando': [dict(r) for r in sobrando],
+        'nao_encontrados': nao_encontrados,
+        'transacoes_sobrando': transacoes_sobrando,
     })
 
 
-@bp.route('/batimento/corrigir', methods=['POST'])
-def corrigir_batimento():
-    """Move uma transação já casada para a despesa correta (o usuário
-    identificou que o casamento automático errou o alvo)."""
+@bp.route('/batimento/confirmar', methods=['POST'])
+def confirmar_batimento():
+    """Grava de uma vez só os pares (transação, despesa) que o usuário
+    revisou na tela — sugestões automáticas aceitas + correções + associações
+    manuais. Nada do preview em /api/batimento é persistido antes disso."""
     data = request.json or {}
     mes_ref = data.get('mes_ref', '')
-    transacao_id = data.get('transacao_id')
-    despesa_id = data.get('despesa_id')
-    if not (mes_ref and transacao_id and despesa_id):
-        return jsonify({'ok': False, 'msg': 'mes_ref, transacao_id e despesa_id são obrigatórios'}), 400
+    pares = data.get('pares', [])
+    if not mes_ref or not pares:
+        return jsonify({'ok': False, 'msg': 'mes_ref e pares são obrigatórios'}), 400
 
     conn = get_db()
-    transacao = conn.execute('SELECT * FROM transacao WHERE id=?', (transacao_id,)).fetchone()
-    despesa = conn.execute('SELECT * FROM despesa WHERE id=?', (despesa_id,)).fetchone()
-    if not transacao or not despesa:
-        conn.close()
-        return jsonify({'ok': False, 'msg': 'Transação ou despesa não encontrada'}), 404
+    confirmados = 0
+    for par in pares:
+        transacao_id = par.get('transacao_id')
+        despesa_id = par.get('despesa_id')
+        despesa_id_sugerido = par.get('despesa_id_sugerido')
+        if not transacao_id or not despesa_id:
+            continue
 
+        transacao = conn.execute('SELECT * FROM transacao WHERE id=?', (transacao_id,)).fetchone()
+        despesa = conn.execute('SELECT * FROM despesa WHERE id=?', (despesa_id,)).fetchone()
+        if not transacao or not despesa:
+            continue
+
+        _persistir_par(conn, mes_ref, despesa_id, transacao_id, transacao)
+        confirmados += 1
+
+        if despesa_id_sugerido != despesa_id:
+            nome_sugerido = None
+            if despesa_id_sugerido:
+                row = conn.execute('SELECT nome FROM despesa WHERE id=?', (despesa_id_sugerido,)).fetchone()
+                nome_sugerido = row['nome'] if row else None
+            _registrar_dicionario(transacao['descricao'], despesa['nome'], nome_sugerido)
+
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'confirmados': confirmados})
+
+
+def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, transacao):
+    """Vincula uma transação a uma despesa: garante que o lançamento do mês
+    existe, marca como pago/agendado conforme a situação da transação, e
+    reverte qualquer vínculo anterior errado que a transação já tivesse."""
     despesa_errada = conn.execute(
-        'SELECT l.*, d.nome as despesa_nome FROM lancamento l JOIN despesa d ON d.id=l.despesa_id WHERE l.transacao_id=?',
-        (transacao_id,)
+        'SELECT id FROM lancamento WHERE transacao_id=? AND despesa_id != ?',
+        (transacao_id, despesa_id)
     ).fetchone()
     if despesa_errada:
         conn.execute(
@@ -443,6 +456,32 @@ def corrigir_batimento():
         "UPDATE transacao SET despesa_id=?, classificacao='recorrente' WHERE id=?",
         (despesa_id, transacao_id)
     )
+
+
+@bp.route('/batimento/corrigir', methods=['POST'])
+def corrigir_batimento():
+    """Corrige um vínculo já confirmado/persistido (ex: revisando um mês
+    fechado). O fluxo normal de importação usa /api/batimento/confirmar."""
+    data = request.json or {}
+    mes_ref = data.get('mes_ref', '')
+    transacao_id = data.get('transacao_id')
+    despesa_id = data.get('despesa_id')
+    if not (mes_ref and transacao_id and despesa_id):
+        return jsonify({'ok': False, 'msg': 'mes_ref, transacao_id e despesa_id são obrigatórios'}), 400
+
+    conn = get_db()
+    transacao = conn.execute('SELECT * FROM transacao WHERE id=?', (transacao_id,)).fetchone()
+    despesa = conn.execute('SELECT * FROM despesa WHERE id=?', (despesa_id,)).fetchone()
+    if not transacao or not despesa:
+        conn.close()
+        return jsonify({'ok': False, 'msg': 'Transação ou despesa não encontrada'}), 404
+
+    despesa_errada = conn.execute(
+        'SELECT l.*, d.nome as despesa_nome FROM lancamento l JOIN despesa d ON d.id=l.despesa_id WHERE l.transacao_id=?',
+        (transacao_id,)
+    ).fetchone()
+
+    _persistir_par(conn, mes_ref, despesa_id, transacao_id, transacao)
     conn.commit()
     conn.close()
 

@@ -1,34 +1,100 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment, type ReactNode } from 'react'
 import { api } from '../lib/api'
-import { cn } from '../lib/utils'
+import { cn, formatBRL } from '../lib/utils'
 
 interface Despesa {
-  id: number; nome: string; categoria_nome: string
+  id: number; nome: string; categoria_id: number | null; categoria_nome: string
   dia_vencimento: number | null; tipo_valor: string
-  padrao_variabilidade: string; valor_padrao: number; ativo: number
+  padrao_variabilidade: string; valor_padrao: number; regras_match: string; ativo: number
 }
+
+interface Categoria { id: number; nome: string }
 
 const PADRAO_LABEL: Record<string, string> = {
   fixa: 'Fixa', variavel_sazonal: 'Sazonal', variavel_nao_sazonal: 'Variável',
   reajuste_anual: 'Reajuste anual', anual: 'Anual', sem_dados: 'Sem dados'
 }
 
+interface FormState {
+  nome: string
+  categoria_id: string
+  tipo_valor: string
+  padrao_variabilidade: string
+  valor_padrao: string
+  dia_vencimento: string
+  palavras_chave: string
+}
+
+function despesaParaForm(d: Despesa): FormState {
+  let palavras_chave = ''
+  try { palavras_chave = (JSON.parse(d.regras_match).palavras_chave ?? []).join(', ') } catch { /* regras_match inválido, deixa vazio */ }
+  return {
+    nome: d.nome,
+    categoria_id: d.categoria_id != null ? String(d.categoria_id) : '',
+    tipo_valor: d.tipo_valor,
+    padrao_variabilidade: d.padrao_variabilidade,
+    valor_padrao: String(d.valor_padrao ?? ''),
+    dia_vencimento: d.dia_vencimento != null ? String(d.dia_vencimento) : '',
+    palavras_chave
+  }
+}
+
 export function Catalogo() {
   const [despesas, setDespesas] = useState<Despesa[]>([])
+  const [categorias, setCategorias] = useState<Categoria[]>([])
   const [busca, setBusca] = useState('')
   const [apenasAtivas, setApenasAtivas] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [editando, setEditando] = useState<number | null>(null)
+  const [form, setForm] = useState<FormState | null>(null)
+  const [criando, setCriando] = useState(false)
 
   async function load() {
     setLoading(true)
-    try { setDespesas(await api.catalogo.list()) }
-    finally { setLoading(false) }
+    try {
+      const [desp, cats] = await Promise.all([api.catalogo.list(), api.categorias.list()])
+      setDespesas(desp)
+      setCategorias(cats)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
 
   async function toggle(id: number) {
     await api.catalogo.toggleAtivo(id)
+    load()
+  }
+
+  function abrirEdicao(d: Despesa) {
+    setCriando(false)
+    setEditando(editando === d.id ? null : d.id)
+    setForm(despesaParaForm(d))
+  }
+
+  function abrirCriacao() {
+    setEditando(null)
+    setCriando(c => !c)
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', valor_padrao: '', dia_vencimento: '', palavras_chave: '' })
+  }
+
+  async function salvar(id: number | null) {
+    if (!form || !form.nome.trim()) return
+    const keywords = form.palavras_chave.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
+    await api.catalogo.upsert({
+      id: id ?? undefined,
+      nome: form.nome.trim(),
+      categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
+      tipo_valor: form.tipo_valor,
+      padrao_variabilidade: form.padrao_variabilidade,
+      valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
+      dia_vencimento: form.dia_vencimento ? Number(form.dia_vencimento) : null,
+      regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
+    })
+    setEditando(null)
+    setCriando(false)
+    setForm(null)
     load()
   }
 
@@ -45,6 +111,52 @@ export function Catalogo() {
     return acc
   }, {})
 
+  const formFields = form && (
+    <div className="flex items-end gap-2 flex-wrap">
+      <Field label="Nome">
+        <input value={form.nome} onChange={e => setForm(f => f && { ...f, nome: e.target.value })} autoFocus
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-48" />
+      </Field>
+      <Field label="Categoria">
+        <select value={form.categoria_id} onChange={e => setForm(f => f && { ...f, categoria_id: e.target.value })}
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+          <option value="">—</option>
+          {categorias.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+      </Field>
+      <Field label="Padrão">
+        <select value={form.padrao_variabilidade} onChange={e => setForm(f => f && { ...f, padrao_variabilidade: e.target.value })}
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+          {Object.entries(PADRAO_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+      </Field>
+      <Field label="Tipo valor">
+        <select value={form.tipo_valor} onChange={e => setForm(f => f && { ...f, tipo_valor: e.target.value })}
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+          <option value="variavel">Variável</option>
+          <option value="fixo">Fixo</option>
+        </select>
+      </Field>
+      <Field label="Valor previsto">
+        <input value={form.valor_padrao} onChange={e => setForm(f => f && { ...f, valor_padrao: e.target.value })}
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-24 text-right" />
+      </Field>
+      <Field label="Dia venc.">
+        <input value={form.dia_vencimento} onChange={e => setForm(f => f && { ...f, dia_vencimento: e.target.value })}
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-14 text-center" />
+      </Field>
+      <Field label="Palavras-chave (separadas por vírgula)">
+        <input value={form.palavras_chave} onChange={e => setForm(f => f && { ...f, palavras_chave: e.target.value })}
+          placeholder="ex: cartao, black"
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-56" />
+      </Field>
+      <button onClick={() => salvar(editando)}
+        className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 transition-colors">
+        Salvar
+      </button>
+    </div>
+  )
+
   return (
     <div className="flex flex-col h-full pt-3">
       <div className="px-6 pb-4 flex items-center justify-between flex-none">
@@ -59,10 +171,20 @@ export function Catalogo() {
           </label>
           <input type="text" placeholder="Buscar..." value={busca} onChange={e => setBusca(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-48 placeholder:text-zinc-600" />
+          <button onClick={abrirCriacao}
+            className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
+            + Nova despesa
+          </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto px-6 pb-6">
+        {criando && (
+          <div className="mb-4 rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-4">
+            {formFields}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500">Carregando...</div>
         ) : (
@@ -83,31 +205,47 @@ export function Catalogo() {
                         <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsão</th>
                         <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Dia Venc.</th>
                         <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
+                        <th className="px-4 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((d, i) => (
-                        <tr key={d.id} className={cn('transition-colors hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40', !d.ativo && 'opacity-40')}>
-                          <td className="px-4 py-2.5 text-zinc-300">{d.nome}</td>
-                          <td className="px-4 py-2.5">
-                            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
-                              {PADRAO_LABEL[d.padrao_variabilidade] ?? d.padrao_variabilidade}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">
-                            {d.valor_padrao > 0 ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(d.valor_padrao) : '—'}
-                          </td>
-                          <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia_vencimento ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-center">
-                            <button onClick={() => toggle(d.id)}
-                              className={cn('text-xs px-2 py-0.5 rounded border transition-colors',
-                                d.ativo
-                                  ? 'border-emerald-800/50 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-950/60'
-                                  : 'border-zinc-700 text-zinc-500 hover:bg-zinc-800')}>
-                              {d.ativo ? 'Ativa' : 'Inativa'}
-                            </button>
-                          </td>
-                        </tr>
+                        <Fragment key={d.id}>
+                          <tr className={cn('transition-colors hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40', !d.ativo && 'opacity-40')}>
+                            <td className="px-4 py-2.5 text-zinc-300">{d.nome}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
+                                {PADRAO_LABEL[d.padrao_variabilidade] ?? d.padrao_variabilidade}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">
+                              {d.valor_padrao > 0 ? formatBRL(d.valor_padrao) : '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia_vencimento ?? '—'}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button onClick={() => toggle(d.id)}
+                                className={cn('text-xs px-2 py-0.5 rounded border transition-colors',
+                                  d.ativo
+                                    ? 'border-emerald-800/50 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-950/60'
+                                    : 'border-zinc-700 text-zinc-500 hover:bg-zinc-800')}>
+                                {d.ativo ? 'Ativa' : 'Inativa'}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              <button onClick={() => abrirEdicao(d)}
+                                className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors">
+                                Editar
+                              </button>
+                            </td>
+                          </tr>
+                          {editando === d.id && (
+                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                              <td colSpan={6} className="px-4 py-3">
+                                {formFields}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -117,6 +255,15 @@ export function Catalogo() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div>
+      <label className="text-xs text-zinc-500 block mb-1">{label}</label>
+      {children}
     </div>
   )
 }

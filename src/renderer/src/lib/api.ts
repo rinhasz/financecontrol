@@ -66,10 +66,16 @@ export const api = {
   },
   batimento: {
     rodar: (mesRef: string) => post('/api/batimento', { mes_ref: mesRef }),
+    confirmar: (mesRef: string, pares: { transacao_id: number; despesa_id: number; despesa_id_sugerido: number | null }[]) =>
+      post('/api/batimento/confirmar', { mes_ref: mesRef, pares }),
     corrigir: (mesRef: string, transacaoId: number, despesaId: number) =>
       post('/api/batimento/corrigir', { mes_ref: mesRef, transacao_id: transacaoId, despesa_id: despesaId })
   },
   transacoes: {
     list: (mes: string) => get(`/api/transacoes?mes=${mes}`)
+  },
+  email: {
+    status: () => get('/api/email/status'),
+    buscar: (mesRef: string) => post('/api/email/buscar', { mes_ref: mesRef })
   }
 }
