@@ -43,7 +43,10 @@ app.register_blueprint(bp_email_busca, url_prefix='/api')
 
 
 def run_flask():
-    app.run(host='127.0.0.1', port=5173, debug=False, use_reloader=False)
+    # threaded=True: o login de email (device code flow) fica bloqueado
+    # esperando o usuário confirmar no navegador — sem isso, essa espera
+    # travaria toda a UI do app enquanto durasse.
+    app.run(host='127.0.0.1', port=5173, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == '__main__':

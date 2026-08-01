@@ -76,6 +76,8 @@ export const api = {
   },
   email: {
     status: () => get('/api/email/status'),
+    conectarIniciar: () => post('/api/email/conectar/iniciar'),
+    conectarFinalizar: () => post('/api/email/conectar/finalizar'),
     buscar: (mesRef: string) => post('/api/email/buscar', { mes_ref: mesRef })
   }
 }

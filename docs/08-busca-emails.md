@@ -1,74 +1,86 @@
 # Função: Procurar em Emails
 
-**Status:** planejamento — aguardando decisões do usuário antes de implementar.
+**Status:** implementado (`api/email_busca.py`, aba "Procurar em Emails").
 
 ## Objetivo
 
-Não é para criar despesas novas nem para automatizar o batimento. É uma
-ferramenta de apoio ao pagamento manual: buscar, entre os emails do
-usuário, faturas/boletos referentes a **despesas já cadastradas no
-catálogo**, e extrair:
+Não cria despesas novas nem automatiza o batimento. É uma ferramenta de
+apoio ao pagamento manual: busca, entre os emails do usuário, faturas/
+boletos referentes a **despesas variáveis já cadastradas no catálogo**, e
+extrai:
 
 - o **valor** da fatura do mês
 - o **código de boleto** (linha digitável) para copiar e colar no pagamento
 
-O usuário confere na tela e paga manualmente fora do app — o app só
-poupa o trabalho de vasculhar a caixa de entrada.
+O usuário confere na tela e paga manualmente fora do app — o app só poupa
+o trabalho de vasculhar a caixa de entrada. Nada é gravado no banco por
+essa tela.
 
-## Fluxo proposto
+## Decisões tomadas com o usuário
 
-1. Usuário abre a aba "Procurar em Emails".
-2. Escolhe o mês de referência (mesma lógica de competência já usada no
-   resto do app — ver [07-dicionario-despesas.md](07-dicionario-despesas.md)).
-3. O app busca, para cada despesa ativa do catálogo que tenha
-   `regras_match.palavras_chave`, emails recentes cujo assunto/remetente
-   bata com essas palavras (reaproveita a mesma lógica de palavras-chave
-   do catálogo, então melhorar o catálogo para o batimento bancário
-   também melhora a busca de email, e vice-versa).
-4. Para cada email encontrado, tenta extrair valor e linha digitável do
-   corpo (HTML/texto) ou de um PDF anexado.
-5. Mostra por despesa: valor extraído, linha digitável (com botão
-   "copiar"), data de vencimento se identificável, e um link para abrir
-   o email original no cliente de email do usuário.
-6. Não grava nada no banco automaticamente — é só um painel de consulta.
+- **Provedor**: Outlook/Hotmail.
+- **Escopo de busca**: só despesas com `tipo_valor='variavel'` (cartões,
+  contas de consumo) — despesas fixas com débito automático não têm
+  boleto. Busca dentro da janela de competência do mês (mesma lógica do
+  batimento bancário, `periodo_competencia()` em `api/db.py`).
 
-## Decisões em aberto (bloqueiam a implementação)
+## Autenticação — por que OAuth2 e não usuário/senha
 
-### 1. Provedor de email e autenticação
-Preciso saber qual provedor o usuário usa (Gmail, Outlook/Hotmail, iCloud,
-outro via IMAP genérico) porque isso muda a estratégia de autenticação:
+A implementação original usava IMAP com "senha de aplicativo" (usuário +
+senha). Ao testar, a autenticação falhava mesmo com credenciais corretas.
+Motivo: a Microsoft desativou completamente a autenticação por senha
+(Basic Authentication, incluindo senhas de aplicativo) para IMAP em
+contas Outlook/Hotmail pessoais — desligamento começou em 1º de março de
+2026, aplicação total em 30 de abril de 2026. Não tem senha que funcione
+mais por esse caminho.
 
-- **Gmail** → API do Gmail com OAuth2 (mais robusto, requer criar um
-  projeto no Google Cloud Console e fazer o usuário autorizar uma vez;
-  token fica salvo localmente).
-- **IMAP genérico** (Outlook, iCloud, etc.) → mais simples de implementar,
-  mas exige uma "senha de app" gerada no provedor (a senha normal da
-  conta não funciona com a maioria dos provedores por segurança).
+A solução foi reescrever para **OAuth2 + Microsoft Graph API**:
 
-Isso é uma decisão que não dá para assumir — foi perguntado ao usuário
-via pergunta interativa antes de começar a implementação.
+- Biblioteca `msal` (Microsoft Authentication Library), fluxo *device
+  code*: o usuário clica "Conectar com Microsoft", recebe um código de 8
+  caracteres, abre uma página da Microsoft no navegador, cola o código e
+  loga — sem digitar senha nenhuma dentro do app.
+- Requer um **app registrado no Azure** (gratuito, ~5 min, passo a passo
+  em `.env.example`) — gera um `EMAIL_CLIENT_ID` público (não é segredo,
+  mas fica em `.env` mesmo assim, fora do controle de versão).
+- O token (access + refresh) fica em cache local (`.msal_token_cache.json`,
+  gitignored) e renova sozinho — login manual só é necessário quando o
+  refresh token expira (tipicamente meses) ou é revogado.
+- Busca de mensagens via Microsoft Graph (`GET /me/mailFolders/inbox/messages`)
+  em vez de IMAP puro — mais robusto e é o caminho que a própria
+  Microsoft recomenda daqui pra frente.
+- Escopo de permissão pedido: só `Mail.Read` (leitura) — o app nunca
+  envia nem apaga email.
 
-### 2. Escopo de busca (quais despesas / quanto tempo)
-Provável default: só despesas com `tipo_valor='variavel'` que normalmente
-chegam por boleto/fatura (cartões, contas de consumo) — despesas fixas
-com débito automático não precisam de boleto. Buscar dentro da janela do
-mês de competência atual (mesma janela do batimento bancário). A
-confirmar com o usuário quando a implementação começar.
+## Fluxo implementado
 
-### 3. Extração de valor e linha digitável
-- Linha digitável de boleto tem formato bem definido (5 blocos de
-  dígitos) — dá para usar regex com boa confiabilidade no texto puro do
-  email.
-- Quando a fatura vem em PDF anexado (comum em fatura de cartão), precisa
-  abrir o PDF e extrair texto (`pdfplumber` ou similar) antes de aplicar
-  o mesmo regex. PDFs escaneados como imagem exigiriam OCR — fora de
-  escopo inicial; se acontecer, mostrar "não consegui extrair, abra o
-  email manualmente" em vez de falhar silenciosamente.
+1. Usuário abre "Procurar em Emails".
+2. Se `EMAIL_CLIENT_ID` não está no `.env` → mostra instruções para
+   registrar o app no Azure.
+3. Se configurado mas ainda não conectado → botão "Conectar com
+   Microsoft" → `POST /api/email/conectar/iniciar` retorna o código de
+   dispositivo e o link → usuário confirma no navegador →
+   `POST /api/email/conectar/finalizar` (fica bloqueado aguardando; por
+   isso o Flask roda com `threaded=True`) confirma e salva o token.
+4. Escolhe o mês de referência → `POST /api/email/buscar` busca todas as
+   mensagens do INBOX no período uma única vez (evita repetir a mesma
+   consulta por despesa), filtra por despesa comparando palavras-chave de
+   `regras_match` contra assunto/remetente (mesma função `normalize_text`
+   usada no batimento bancário — melhorar o catálogo melhora as duas
+   buscas), e tenta extrair valor (regex `R\$ ...`) e linha digitável
+   (regex de 5 blocos de dígitos) do corpo HTML e de anexos PDF
+   (`pdfplumber`).
+5. Mostra por despesa: assunto, remetente, data, valor encontrado e linha
+   digitável com botão de copiar. PDFs escaneados como imagem (sem texto
+   extraível) não são suportados — aparece "linha digitável não
+   encontrada, abra o email manualmente" em vez de falhar.
 
-## Riscos / cuidados
+## Notas para manutenção futura
 
-- Credenciais de email (senha de app ou token OAuth) devem ir para
-  `.env.local`, nunca commitadas.
-- Acesso de leitura de email é sensível — o app deve pedir só escopo de
-  **leitura** (nunca enviar/apagar), e deixar claro na UI que credenciais
-  ficam armazenadas localmente.
+- Se um dia o usuário trocar de provedor de email, só `api/email_busca.py`
+  muda — o resto do app (catálogo, competência, regex de extração) é
+  reaproveitável.
+- Se a busca por `$filter` de data no Graph API começar a retornar volume
+  grande (muitos emails no período), falta paginação mais agressiva — hoje
+  já pagina via `@odata.nextLink`, mas não há limite superior nem
+  amostragem; para uma caixa de entrada muito cheia isso pode ficar lento.

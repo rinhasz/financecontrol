@@ -15,6 +15,15 @@ conversa com o usuário.
 |---|---|---|
 | `CARTAO ITAU THE ONE` | cartao one itau | cartao xp |
 | `SEGURO CARTAO` | seguro cartoes | cartao xp |
+| `TBI 4949.02160-63789.072` | pagto thalita | — |
+| `PIX TRANSF MARIA L28/07` | mesada malu | — |
+| `PIX TRANSF MARIA J28/07` | mesada maju | — |
+| `PAG BOLETO PREVENT S P OP SAUDE LTDA` | convenio marco antonio | — |
+| `PIX TRANSF ALBERTO31/07` | pagto ipen beto | — |
+| `PIX TRANSF MARCELO01/08` | aluguel vaga garagem | — |
+| `ITAU VISA     0703-7489` | cartao azul | — |
+| `Agendado` | financ imob | — |
+| `DA  CLARO BL/IT 77712744` | net | — |
 
 ## Notas
 

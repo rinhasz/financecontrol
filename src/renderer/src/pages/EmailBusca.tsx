@@ -17,7 +17,7 @@ interface ResultadoDespesa {
 }
 
 export function EmailBusca() {
-  const [status, setStatus] = useState<{ configurado: boolean; endereco: string | null } | null>(null)
+  const [status, setStatus] = useState<{ configurado: boolean; conectado: string | null } | null>(null)
   const [mesRef, setMesRef] = useState(() => {
     const n = new Date()
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
@@ -28,7 +28,40 @@ export function EmailBusca() {
   const [erro, setErro] = useState('')
   const [copiado, setCopiado] = useState<string | null>(null)
 
-  useEffect(() => { api.email.status().then(setStatus) }, [])
+  const [codigoDispositivo, setCodigoDispositivo] = useState<{ verification_uri: string; user_code: string } | null>(null)
+  const [aguardandoLogin, setAguardandoLogin] = useState(false)
+  const [erroConexao, setErroConexao] = useState('')
+
+  function carregarStatus() {
+    api.email.status().then(setStatus)
+  }
+
+  useEffect(() => { carregarStatus() }, [])
+
+  async function conectar() {
+    setErroConexao('')
+    setCodigoDispositivo(null)
+    try {
+      const res = await api.email.conectarIniciar()
+      if (!res.ok) {
+        setErroConexao(res.msg || 'Falha ao iniciar conexão')
+        return
+      }
+      setCodigoDispositivo({ verification_uri: res.verification_uri, user_code: res.user_code })
+      setAguardandoLogin(true)
+      const fin = await api.email.conectarFinalizar()
+      setAguardandoLogin(false)
+      if (fin.ok) {
+        setCodigoDispositivo(null)
+        carregarStatus()
+      } else {
+        setErroConexao(fin.msg || 'Login não concluído')
+      }
+    } catch (e) {
+      setAguardandoLogin(false)
+      setErroConexao(String(e))
+    }
+  }
 
   async function buscar() {
     setBuscando(true)
@@ -68,24 +101,57 @@ export function EmailBusca() {
       <div className="px-6 pb-6 flex-1 overflow-auto space-y-4">
         {status && !status.configurado && (
           <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4 text-sm text-amber-300 max-w-xl">
-            Credenciais de email não configuradas. Copie <code className="text-amber-200">.env.example</code> para{' '}
-            <code className="text-amber-200">.env</code> e preencha <code className="text-amber-200">EMAIL_ADDRESS</code> e{' '}
-            <code className="text-amber-200">EMAIL_APP_PASSWORD</code> (senha de aplicativo, não a senha normal da conta),
-            depois reinicie o app.
+            App do Azure ainda não configurado. Veja o passo a passo em{' '}
+            <code className="text-amber-200">.env.example</code> — registre um app gratuito no Azure e cole o
+            "ID do aplicativo (cliente)" em <code className="text-amber-200">EMAIL_CLIENT_ID</code> no{' '}
+            <code className="text-amber-200">.env</code>, depois reinicie o app.
           </div>
         )}
 
-        <div className="flex items-end gap-3">
-          <div>
-            <label className="text-sm text-zinc-400 block mb-2">Mês de referência</label>
-            <input type="month" value={mesRef} onChange={e => setMesRef(e.target.value)}
-              className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+        {status?.configurado && !status.conectado && !codigoDispositivo && (
+          <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-4 max-w-xl">
+            <p className="text-sm text-zinc-400 mb-3">Email ainda não conectado.</p>
+            <button onClick={conectar}
+              className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 transition-colors">
+              Conectar com Microsoft
+            </button>
+            {erroConexao && <p className="text-sm text-red-400 mt-2">{erroConexao}</p>}
           </div>
-          <button onClick={buscar} disabled={buscando || !status?.configurado}
-            className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-            {buscando ? 'Buscando...' : 'Buscar'}
-          </button>
-        </div>
+        )}
+
+        {codigoDispositivo && (
+          <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-5 max-w-xl">
+            <p className="text-sm text-zinc-300 mb-3">
+              Abra <a href={codigoDispositivo.verification_uri} target="_blank" rel="noreferrer"
+                className="text-emerald-400 underline">{codigoDispositivo.verification_uri}</a> e cole o código abaixo:
+            </p>
+            <div className="flex items-center gap-3">
+              <code className="text-2xl font-bold text-emerald-400 tracking-widest bg-zinc-900/60 px-4 py-2 rounded">
+                {codigoDispositivo.user_code}
+              </code>
+              <button onClick={() => navigator.clipboard.writeText(codigoDispositivo.user_code)}
+                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-zinc-500 transition-colors">
+                Copiar
+              </button>
+            </div>
+            {aguardandoLogin && <p className="text-xs text-zinc-500 mt-3">Aguardando você confirmar no navegador...</p>}
+          </div>
+        )}
+
+        {status?.conectado && (
+          <div className="flex items-end gap-3">
+            <div>
+              <label className="text-sm text-zinc-400 block mb-2">Mês de referência</label>
+              <input type="month" value={mesRef} onChange={e => setMesRef(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+            </div>
+            <button onClick={buscar} disabled={buscando}
+              className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+              {buscando ? 'Buscando...' : 'Buscar'}
+            </button>
+            <p className="text-xs text-zinc-600 pb-2">conectado como {status.conectado}</p>
+          </div>
+        )}
 
         {erro && <p className="text-sm text-red-400">{erro}</p>}
 

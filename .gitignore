@@ -4,6 +4,7 @@ out/
 __pycache__/
 *.pyc
 .env
+.msal_token_cache.json
 debug-main.js
 test-main.js
 src/main/
