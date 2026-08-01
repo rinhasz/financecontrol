@@ -17,6 +17,21 @@ interface DetalheMatch {
   status: 'pago' | 'agendado'
 }
 
+interface NaoEncontrado {
+  lancamento_id: number
+  despesa_id: number
+  despesa_nome: string
+  valor_esperado: number
+}
+
+interface TransacaoSobrando {
+  id: number
+  data: string
+  descricao: string
+  valor: number
+  situacao: 'efetivada' | 'agendada'
+}
+
 interface Despesa { id: number; nome: string }
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
@@ -30,11 +45,16 @@ export function Importacao() {
     const n = new Date()
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
   })
-  const [resultado, setResultado] = useState<{ matched: number; total: number; detalhes: DetalheMatch[] } | null>(null)
+  const [resultado, setResultado] = useState<{
+    matched: number; total: number; detalhes: DetalheMatch[]
+    nao_encontrados: NaoEncontrado[]; transacoes_sobrando: TransacaoSobrando[]
+  } | null>(null)
   const [despesas, setDespesas] = useState<Despesa[]>([])
   const [corrigindo, setCorrigindo] = useState<number | null>(null)
   const [selecionada, setSelecionada] = useState('')
   const [novaDespesaNome, setNovaDespesaNome] = useState('')
+  const [associando, setAssociando] = useState<number | null>(null)
+  const [transacaoSelecionada, setTransacaoSelecionada] = useState('')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -106,6 +126,36 @@ export function Importacao() {
       detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
     } : r)
     setCorrigindo(null)
+  }
+
+  function abrirAssociacao(lancamentoId: number) {
+    setAssociando(associando === lancamentoId ? null : lancamentoId)
+    setTransacaoSelecionada('')
+  }
+
+  async function aplicarAssociacao(ne: NaoEncontrado) {
+    if (!transacaoSelecionada) return
+    const transacaoId = Number(transacaoSelecionada)
+    const t = resultado?.transacoes_sobrando.find(x => x.id === transacaoId)
+    if (!t) return
+
+    await api.batimento.corrigir(mesRef, transacaoId, ne.despesa_id)
+
+    setResultado(r => {
+      if (!r) return r
+      const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
+      return {
+        ...r,
+        nao_encontrados: r.nao_encontrados.filter(x => x.lancamento_id !== ne.lancamento_id),
+        transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== transacaoId),
+        detalhes: [...r.detalhes, {
+          lancamento_id: ne.lancamento_id, despesa_id: ne.despesa_id, despesa_nome: ne.despesa_nome,
+          transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
+        }]
+      }
+    })
+    setAssociando(null)
+    setTransacaoSelecionada('')
   }
 
   const STEPS: [Step, string][] = [['selecionar', '1. Selecionar'], ['revisar', '2. Revisar'], ['concluido', '3. Concluído']]
@@ -277,6 +327,66 @@ export function Importacao() {
                                   )}
                                   <button onClick={() => aplicarCorrecao(d)}
                                     disabled={!selecionada || (selecionada === 'nova' && !novaDespesaNome.trim())}
+                                    className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                                    Confirmar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {resultado.nao_encontrados.length > 0 && (
+              <div>
+                <p className="text-sm text-zinc-400 mb-2">
+                  Despesas que não bateram com nada no extrato — se alguma das transações que sobraram for ela, associe:
+                </p>
+                <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-900/40">
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Valor esperado</th>
+                        <th className="px-4 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultado.nao_encontrados.map((ne, i) => (
+                        <Fragment key={ne.lancamento_id}>
+                          <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                            <td className="px-4 py-2 text-zinc-200 font-medium">{ne.despesa_nome}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-zinc-400">{formatBRL(ne.valor_esperado)}</td>
+                            <td className="px-4 py-2 text-right">
+                              {resultado.transacoes_sobrando.length > 0 ? (
+                                <button onClick={() => abrirAssociacao(ne.lancamento_id)}
+                                  className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
+                                  Associar transação
+                                </button>
+                              ) : (
+                                <span className="text-xs text-zinc-700">sem transações disponíveis</span>
+                              )}
+                            </td>
+                          </tr>
+                          {associando === ne.lancamento_id && (
+                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                              <td colSpan={3} className="px-4 py-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <select value={transacaoSelecionada} onChange={e => setTransacaoSelecionada(e.target.value)}
+                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 max-w-md">
+                                    <option value="">Selecionar transação do extrato...</option>
+                                    {resultado.transacoes_sobrando.map(t => (
+                                      <option key={t.id} value={t.id}>
+                                        {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')} — {t.descricao} — {formatBRL(Math.abs(t.valor))}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button onClick={() => aplicarAssociacao(ne)} disabled={!transacaoSelecionada}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
                                   </button>

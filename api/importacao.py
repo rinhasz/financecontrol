@@ -378,9 +378,27 @@ def rodar_batimento():
             'status': status,
         })
 
+    nao_encontrados = conn.execute("""
+        SELECT l.id as lancamento_id, l.despesa_id, d.nome as despesa_nome, l.valor_esperado
+        FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
+        WHERE l.mes_ref=? AND l.status='nao_encontrado'
+        ORDER BY d.nome
+    """, (mes_ref,)).fetchall()
+
+    sobrando = conn.execute("""
+        SELECT id, data, descricao, valor, situacao FROM transacao
+        WHERE data BETWEEN ? AND ? AND tipo='debito' AND despesa_id IS NULL
+        ORDER BY data
+    """, (ini, fim)).fetchall()
+
     conn.commit()
     conn.close()
-    return jsonify({'ok': True, 'matched': matched, 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim}, 'detalhes': detalhes})
+    return jsonify({
+        'ok': True, 'matched': matched, 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim},
+        'detalhes': detalhes,
+        'nao_encontrados': [dict(r) for r in nao_encontrados],
+        'transacoes_sobrando': [dict(r) for r in sobrando],
+    })
 
 
 @bp.route('/batimento/corrigir', methods=['POST'])
