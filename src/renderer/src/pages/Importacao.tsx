@@ -105,8 +105,8 @@ export function Importacao() {
             </div>
 
             <div>
-              <label className="text-sm text-zinc-400 block mb-2">Arquivo (.ofx, .csv ou .xlsx)</label>
-              <input ref={fileRef} type="file" accept=".ofx,.csv,.txt,.xlsx,.xlsm" className="hidden"
+              <label className="text-sm text-zinc-400 block mb-2">Arquivo (.ofx, .csv, .xls ou .xlsx)</label>
+              <input ref={fileRef} type="file" accept=".ofx,.csv,.txt,.xls,.xlsx,.xlsm" className="hidden"
                 onChange={e => setFile(e.target.files?.[0] ?? null)} />
               <div className="flex items-center gap-3">
                 <button onClick={() => fileRef.current?.click()}

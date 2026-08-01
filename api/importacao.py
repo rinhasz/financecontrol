@@ -83,40 +83,75 @@ def parse_ofx(content: str):
     return txs
 
 
-def parse_xlsx_content(content: bytes):
+def _sheet_rows_xlsx(content: bytes):
+    """Retorna uma lista de planilhas (cada uma uma lista de linhas) de um .xlsx/.xlsm."""
     import openpyxl
-    from datetime import datetime as _dt, date as _date
-
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
+    return [list(ws.iter_rows(values_only=True)) for ws in wb.worksheets]
 
-    header_idx = None
-    col = {}
-    for i, row in enumerate(rows[:30]):
-        headers = [normalize_text(str(c)) if c is not None else '' for c in row]
-        date_idx = next((j for j, h in enumerate(headers) if re.search(r'data|lancamento|dt lanc', h)), None)
-        desc_idx = next((j for j, h in enumerate(headers) if re.search(r'desc|hist|memo|lancamento', h)), None)
-        val_idx = next((j for j, h in enumerate(headers) if re.search(r'valor|amount', h)), None)
+
+def _sheet_rows_xls(content: bytes):
+    """Retorna uma lista de planilhas (cada uma uma lista de linhas) de um .xls legado (BIFF/OLE2)."""
+    import xlrd
+    wb = xlrd.open_workbook(file_contents=content)
+    sheets = []
+    for ws in wb.sheets():
+        sheets.append([
+            [ws.cell_value(r, c) for c in range(ws.ncols)]
+            for r in range(ws.nrows)
+        ])
+    return sheets
+
+
+def _find_header(rows):
+    """Acha a linha de cabeçalho (data/lançamento/valor) e o índice de cada coluna.
+
+    Extratos de banco costumam ter várias linhas de metadados (logo, nome,
+    agência...) antes da tabela real — por isso varremos as primeiras linhas
+    procurando o cabeçalho, em vez de assumir que é a linha 0.
+    """
+    for i, row in enumerate(rows[:40]):
+        headers = [normalize_text(str(c)) if c not in (None, '') else '' for c in row]
+        # 'data' isolado identifica a coluna de data; não pode casar com a
+        # coluna "lançamento" (descrição), que também contém a palavra.
+        date_idx = next((j for j, h in enumerate(headers) if h.startswith('data') or 'dt lanc' in h or 'data mov' in h), None)
+        desc_idx = next((j for j, h in enumerate(headers) if re.search(r'\bdesc|\bhist|\bmemo|\blancamento\b', h)), None)
+        val_idx = next((j for j, h in enumerate(headers) if re.search(r'\bvalor\b|\bamount\b', h)), None)
         if date_idx is not None and desc_idx is not None and val_idx is not None and date_idx != desc_idx:
-            header_idx = i
             col = {'data': date_idx, 'descricao': desc_idx, 'valor': val_idx}
             sit_idx = next((j for j, h in enumerate(headers) if re.search(r'situa|status', h)), None)
             if sit_idx is not None:
                 col['situacao'] = sit_idx
-            break
+            return i, col
+    return None, {}
 
+
+def _parse_excel_sheet(rows):
+    from datetime import datetime as _dt, date as _date
+
+    header_idx, col = _find_header(rows)
     if header_idx is None:
         return []
 
     txs = []
+    # Extratos do Itaú marcam o início dos lançamentos agendados com uma
+    # linha tipo "lançamentos futuros" / "saídas futuras" em vez de uma
+    # coluna de status — tudo que vier depois dessa marca é 'agendada'.
+    future = False
     for row in rows[header_idx + 1:]:
-        if row is None or all(c is None for c in row):
+        if row is None or all(c is None or c == '' for c in row):
             continue
+
         raw_data = row[col['data']] if col['data'] < len(row) else None
         raw_desc = row[col['descricao']] if col['descricao'] < len(row) else None
         raw_valor = row[col['valor']] if col['valor'] < len(row) else None
-        if raw_data is None or raw_valor is None:
+
+        label = normalize_text(f"{raw_data or ''} {raw_desc or ''}")
+        if 'futur' in label:
+            future = True
+            continue
+
+        if raw_data in (None, '') or raw_valor in (None, ''):
             continue
 
         if isinstance(raw_data, (_dt, _date)):
@@ -142,10 +177,21 @@ def parse_xlsx_content(content: bytes):
                 tx['situacao'] = 'agendada'
             elif sit_norm:
                 tx['situacao'] = 'efetivada'
+        if future:
+            tx['situacao'] = 'agendada'
 
         txs.append(tx)
 
     return txs
+
+
+def parse_excel_content(content: bytes, ext: str):
+    sheets = _sheet_rows_xls(content) if ext == 'xls' else _sheet_rows_xlsx(content)
+    for rows in sheets:
+        txs = _parse_excel_sheet(rows)
+        if txs:
+            return txs
+    return []
 
 
 def parse_csv_content(content: str):
@@ -188,9 +234,9 @@ def importar():
     ext = filename.rsplit('.', 1)[-1].lower()
     content = file.read()
 
-    if ext in ('xlsx', 'xlsm'):
-        txs = parse_xlsx_content(content)
-        formato = 'xlsx'
+    if ext in ('xls', 'xlsx', 'xlsm'):
+        txs = parse_excel_content(content, ext)
+        formato = ext
     else:
         try:
             text = content.decode('latin-1')
