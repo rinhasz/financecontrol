@@ -7,12 +7,16 @@ import threading
 import os
 import sys
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, send_from_directory
 
 from api.db import init_db, seed_db
 from api.lancamentos import bp as bp_lancamentos
 from api.catalogo import bp as bp_catalogo
 from api.importacao import bp as bp_importacao
+from api.email_busca import bp as bp_email_busca
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend', 'dist')
@@ -35,6 +39,7 @@ def serve_frontend(path):
 app.register_blueprint(bp_lancamentos, url_prefix='/api')
 app.register_blueprint(bp_catalogo,    url_prefix='/api')
 app.register_blueprint(bp_importacao,  url_prefix='/api')
+app.register_blueprint(bp_email_busca, url_prefix='/api')
 
 
 def run_flask():

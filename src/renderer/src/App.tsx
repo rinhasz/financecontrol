@@ -2,14 +2,16 @@ import { useState } from 'react'
 import { MesAtual } from './pages/MesAtual'
 import { Catalogo } from './pages/Catalogo'
 import { Importacao } from './pages/Importacao'
+import { EmailBusca } from './pages/EmailBusca'
 import { cn } from './lib/utils'
 
-type Page = 'mes' | 'catalogo' | 'importacao'
+type Page = 'mes' | 'catalogo' | 'importacao' | 'email'
 
 const NAV = [
   { id: 'mes' as Page, label: 'Mês Atual', icon: CalendarIcon },
   { id: 'catalogo' as Page, label: 'Catálogo', icon: ListIcon },
-  { id: 'importacao' as Page, label: 'Importar Extrato', icon: UploadIcon }
+  { id: 'importacao' as Page, label: 'Importar Extrato', icon: UploadIcon },
+  { id: 'email' as Page, label: 'Procurar em Emails', icon: MailIcon }
 ]
 
 export default function App(): JSX.Element {
@@ -58,9 +60,12 @@ export default function App(): JSX.Element {
         <div className="h-8 titlebar-drag flex-none" />
 
         <div className="flex-1 overflow-auto -mt-8">
-          {page === 'mes' && <MesAtual />}
-          {page === 'catalogo' && <Catalogo />}
-          {page === 'importacao' && <Importacao />}
+          {/* As três telas ficam sempre montadas — só a visibilidade muda — para
+              não perder o estado (ex: importação em andamento) ao trocar de aba */}
+          <div className={cn('h-full', page !== 'mes' && 'hidden')}><MesAtual /></div>
+          <div className={cn('h-full', page !== 'catalogo' && 'hidden')}><Catalogo /></div>
+          <div className={cn('h-full', page !== 'importacao' && 'hidden')}><Importacao /></div>
+          <div className={cn('h-full', page !== 'email' && 'hidden')}><EmailBusca /></div>
         </div>
       </main>
     </div>
@@ -97,6 +102,15 @@ function UploadIcon({ size = 16 }: { size?: number }): JSX.Element {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="17 8 12 3 7 8" />
       <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  )
+}
+
+function MailIcon({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m22 7-10 5L2 7" />
     </svg>
   )
 }
