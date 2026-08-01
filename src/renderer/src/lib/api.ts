@@ -65,7 +65,9 @@ export const api = {
     }
   },
   batimento: {
-    rodar: (mesRef: string) => post('/api/batimento', { mes_ref: mesRef })
+    rodar: (mesRef: string) => post('/api/batimento', { mes_ref: mesRef }),
+    corrigir: (mesRef: string, transacaoId: number, despesaId: number) =>
+      post('/api/batimento/corrigir', { mes_ref: mesRef, transacao_id: transacaoId, despesa_id: despesaId })
   },
   transacoes: {
     list: (mes: string) => get(`/api/transacoes?mes=${mes}`)

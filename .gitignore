@@ -11,3 +11,4 @@ src/preload/
 electron.vite.config.ts
 tsconfig.node.json
 tsconfig.web.json
+*.tsbuildinfo

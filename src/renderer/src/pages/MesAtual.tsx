@@ -40,17 +40,21 @@ export function MesAtual() {
   const [editVal, setEditVal] = useState('')
   const [saldoEdit, setSaldoEdit] = useState(false)
   const [saldoVal, setSaldoVal] = useState('')
+  const [diaSalarioEdit, setDiaSalarioEdit] = useState(false)
+  const [diaSalarioVal, setDiaSalarioVal] = useState('27')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [data, res] = await Promise.all([
+      const [data, res, cfg] = await Promise.all([
         api.lancamentos.list(mesRef),
-        api.lancamentos.resumo(mesRef)
+        api.lancamentos.resumo(mesRef),
+        api.config.get()
       ])
       setLancamentos(data)
       setResumo(res)
       setSaldoVal(String(res.saldo))
+      setDiaSalarioVal(String(cfg.dia_recebimento_salario ?? '27'))
     } finally {
       setLoading(false)
     }
@@ -69,6 +73,13 @@ export function MesAtual() {
     const val = parseFloat(saldoVal.replace(',', '.'))
     if (!isNaN(val)) await api.config.set({ saldo_conta: val })
     setSaldoEdit(false)
+    load()
+  }
+
+  async function saveDiaSalario() {
+    const val = parseInt(diaSalarioVal, 10)
+    if (!isNaN(val) && val >= 1 && val <= 31) await api.config.set({ dia_recebimento_salario: val })
+    setDiaSalarioEdit(false)
     load()
   }
 
@@ -94,10 +105,27 @@ export function MesAtual() {
             <ChevronRight />
           </button>
         </div>
-        <button onClick={load}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
-          <RefreshIcon /> Atualizar
-        </button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5 text-sm text-zinc-500">
+            <span>Recebo o salário no dia</span>
+            {diaSalarioEdit ? (
+              <input autoFocus type="number" min={1} max={31}
+                className="bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-sm text-zinc-200 w-14 outline-none focus:border-emerald-500"
+                value={diaSalarioVal} onChange={e => setDiaSalarioVal(e.target.value)}
+                onBlur={saveDiaSalario}
+                onKeyDown={e => { if (e.key === 'Enter') saveDiaSalario() }}
+              />
+            ) : (
+              <button onClick={() => setDiaSalarioEdit(true)} className="text-zinc-300 font-medium hover:text-emerald-400 transition-colors">
+                {diaSalarioVal}
+              </button>
+            )}
+          </div>
+          <button onClick={load}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
+            <RefreshIcon /> Atualizar
+          </button>
+        </div>
       </div>
 
       {/* Resumo cards */}

@@ -27,17 +27,19 @@ def upsert_catalogo():
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'), data.get('regras_match'), data.get('ativo', 1), data['id']))
+        despesa_id = data['id']
     else:
-        conn.execute("""
+        cur = conn.execute("""
             INSERT INTO despesa (nome, categoria_id, dia_vencimento, tipo_valor, padrao_variabilidade, valor_padrao, regras_match)
             VALUES (?,?,?,?,?,?,?)
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'),
               data.get('regras_match', '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}')))
+        despesa_id = cur.lastrowid
     conn.commit()
     conn.close()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'id': despesa_id})
 
 
 @bp.route('/catalogo/<int:did>/toggle', methods=['POST'])

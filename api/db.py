@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS config (
 
 INSERT OR IGNORE INTO config VALUES ('reserva_desejada', '5000');
 INSERT OR IGNORE INTO config VALUES ('saldo_conta', '0');
+INSERT OR IGNORE INTO config VALUES ('dia_recebimento_salario', '27');
 """
 
 PADRAO_MAP = {
@@ -121,6 +122,38 @@ def init_db():
     conn.commit()
     conn.close()
     print(f'[db] initialized at {DB_PATH}')
+
+
+def get_config_value(conn, chave: str, default: str) -> str:
+    row = conn.execute('SELECT valor FROM config WHERE chave=?', (chave,)).fetchone()
+    return row['valor'] if row else default
+
+
+def periodo_competencia(mes_ref: str, dia_corte: int):
+    """Converte um mes_ref (competência) no intervalo real de datas do extrato.
+
+    As despesas de um mês começam a ser pagas a partir do dia em que o
+    salário cai (ex: dia 27 do mês anterior), não no dia 1 do próprio mês.
+    Então mes_ref='2026-08' com dia_corte=27 cobre 2026-07-27 a 2026-08-26.
+    """
+    import calendar
+    from datetime import date, timedelta
+
+    ano, mes = (int(x) for x in mes_ref.split('-'))
+    if mes == 1:
+        ano_ant, mes_ant = ano - 1, 12
+    else:
+        ano_ant, mes_ant = ano, mes - 1
+
+    dia_ini = min(dia_corte, calendar.monthrange(ano_ant, mes_ant)[1])
+    ini = date(ano_ant, mes_ant, dia_ini)
+
+    # fim = véspera do próximo corte (o corte de dia_corte dentro do próprio
+    # mes_ref) — evita construir uma data com dia 0 quando dia_corte=1
+    dia_corte_no_mes = min(dia_corte, calendar.monthrange(ano, mes)[1])
+    fim = date(ano, mes, dia_corte_no_mes) - timedelta(days=1)
+
+    return ini.isoformat(), fim.isoformat()
 
 
 def parse_number(s: str) -> float:

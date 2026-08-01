@@ -1,9 +1,12 @@
 import re
 import csv as csvlib
 import io
+import os
 from datetime import date
 from flask import Blueprint, jsonify, request
-from .db import get_db
+from .db import get_db, get_config_value, periodo_competencia
+
+DICIONARIO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', '07-dicionario-despesas.md')
 
 bp = Blueprint('importacao', __name__)
 
@@ -281,13 +284,13 @@ def importar():
 @bp.route('/batimento', methods=['POST'])
 def rodar_batimento():
     mes_ref = request.json.get('mes_ref', '')
-    ano, mes = mes_ref.split('-')
-    ini = f'{ano}-{mes}-01'
-    fim = f'{ano}-{mes}-31'
 
     conn = get_db()
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
+    ini, fim = periodo_competencia(mes_ref, dia_corte)
+
     lancamentos = conn.execute("""
-        SELECT l.*, d.tipo_valor, d.regras_match, d.dia_vencimento
+        SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.regras_match, d.dia_vencimento
         FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
         WHERE l.mes_ref=? AND l.status='nao_encontrado'
     """, (mes_ref,)).fetchall()
@@ -330,7 +333,11 @@ def rodar_batimento():
             if keywords:
                 matched_kw = sum(1 for kw in keywords if normalize_text(kw) in desc_norm)
                 if matched_kw == len(keywords):
-                    score += 3
+                    # Quanto mais palavras-chave a despesa exige (mais específica),
+                    # mais peso o casamento completo ganha — uma despesa com uma
+                    # única palavra genérica (ex: só "cartao") não pode mais vencer
+                    # sozinha, sem nenhuma corroboração de valor ou data.
+                    score += 2 * len(keywords)
                 elif matched_kw > 0:
                     score += 1
 
@@ -343,6 +350,7 @@ def rodar_batimento():
     lanc_matched = set()
     tx_used = set()
     matched = 0
+    detalhes = []
 
     for score, l, t in candidatos:
         if l['id'] in lanc_matched or t['id'] in tx_used:
@@ -359,19 +367,116 @@ def rodar_batimento():
         lanc_matched.add(l['id'])
         tx_used.add(t['id'])
         matched += 1
+        detalhes.append({
+            'lancamento_id': l['id'],
+            'despesa_id': l['despesa_id'],
+            'despesa_nome': l['despesa_nome'],
+            'transacao_id': t['id'],
+            'descricao_transacao': t['descricao'],
+            'valor': abs(t['valor']),
+            'data': t['data'],
+            'status': status,
+        })
 
     conn.commit()
     conn.close()
-    return jsonify({'ok': True, 'matched': matched, 'total': len(lancamentos)})
+    return jsonify({'ok': True, 'matched': matched, 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim}, 'detalhes': detalhes})
+
+
+@bp.route('/batimento/corrigir', methods=['POST'])
+def corrigir_batimento():
+    """Move uma transação já casada para a despesa correta (o usuário
+    identificou que o casamento automático errou o alvo)."""
+    data = request.json or {}
+    mes_ref = data.get('mes_ref', '')
+    transacao_id = data.get('transacao_id')
+    despesa_id = data.get('despesa_id')
+    if not (mes_ref and transacao_id and despesa_id):
+        return jsonify({'ok': False, 'msg': 'mes_ref, transacao_id e despesa_id são obrigatórios'}), 400
+
+    conn = get_db()
+    transacao = conn.execute('SELECT * FROM transacao WHERE id=?', (transacao_id,)).fetchone()
+    despesa = conn.execute('SELECT * FROM despesa WHERE id=?', (despesa_id,)).fetchone()
+    if not transacao or not despesa:
+        conn.close()
+        return jsonify({'ok': False, 'msg': 'Transação ou despesa não encontrada'}), 404
+
+    despesa_errada = conn.execute(
+        'SELECT l.*, d.nome as despesa_nome FROM lancamento l JOIN despesa d ON d.id=l.despesa_id WHERE l.transacao_id=?',
+        (transacao_id,)
+    ).fetchone()
+    if despesa_errada:
+        conn.execute(
+            "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, data_pagamento=NULL WHERE id=?",
+            (despesa_errada['id'],)
+        )
+
+    conn.execute(
+        'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
+        (mes_ref, despesa_id, abs(transacao['valor']))
+    )
+    status = 'pago' if transacao['situacao'] == 'efetivada' else 'agendado'
+    conn.execute(
+        """UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=?
+           WHERE despesa_id=? AND mes_ref=?""",
+        (status, transacao_id, abs(transacao['valor']), transacao['data'], despesa_id, mes_ref)
+    )
+    conn.execute(
+        "UPDATE transacao SET despesa_id=?, classificacao='recorrente' WHERE id=?",
+        (despesa_id, transacao_id)
+    )
+    conn.commit()
+    conn.close()
+
+    _registrar_dicionario(transacao['descricao'], despesa['nome'], despesa_errada['despesa_nome'] if despesa_errada else None)
+
+    return jsonify({'ok': True})
+
+
+def _registrar_dicionario(descricao_transacao: str, despesa_correta: str, despesa_errada: str | None):
+    """Acrescenta a correção ao dicionário de despesas em docs/, para que
+    futuras sessões (e futuras revisões de regras_match) aproveitem o que
+    já foi aprendido sobre como identificar cada despesa no extrato."""
+    if not os.path.exists(DICIONARIO_PATH):
+        os.makedirs(os.path.dirname(DICIONARIO_PATH), exist_ok=True)
+        with open(DICIONARIO_PATH, 'w', encoding='utf-8') as f:
+            f.write(
+                '# Dicionário de Despesas\n\n'
+                'Registro de correções feitas pelo usuário quando o batimento automático\n'
+                'associa uma transação do extrato à despesa errada. Serve como referência\n'
+                'para revisar `regras_match` (palavras-chave) do catálogo e evitar repetir\n'
+                'o mesmo erro.\n\n'
+                '| Descrição no extrato | Despesa correta | Erro anterior |\n'
+                '|---|---|---|\n'
+            )
+
+    with open(DICIONARIO_PATH, encoding='utf-8') as f:
+        linhas = f.readlines()
+
+    if f'`{descricao_transacao}`' in ''.join(linhas):
+        return
+
+    obs = despesa_errada or '—'
+    nova_linha = f'| `{descricao_transacao}` | {despesa_correta} | {obs} |\n'
+
+    # insere logo após a última linha da tabela (bloco contíguo iniciado em '|'),
+    # não no fim do arquivo — assim não fica depois de seções como "## Notas"
+    idx_insercao = len(linhas)
+    for i, linha in enumerate(linhas):
+        if linha.startswith('|'):
+            idx_insercao = i + 1
+
+    linhas.insert(idx_insercao, nova_linha)
+    with open(DICIONARIO_PATH, 'w', encoding='utf-8') as f:
+        f.writelines(linhas)
 
 
 @bp.route('/transacoes')
 def list_transacoes():
     mes_ref = request.args.get('mes', '')
-    ano, mes = mes_ref.split('-')
-    ini = f'{ano}-{mes}-01'
-    fim = f'{ano}-{mes}-31'
     conn = get_db()
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
+    ini, fim = periodo_competencia(mes_ref, dia_corte)
     rows = conn.execute("""
         SELECT t.*, d.nome as despesa_nome
         FROM transacao t LEFT JOIN despesa d ON d.id = t.despesa_id

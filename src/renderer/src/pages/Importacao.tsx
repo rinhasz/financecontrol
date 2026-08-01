@@ -1,10 +1,23 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, Fragment } from 'react'
 import { api } from '../lib/api'
-import { cn } from '../lib/utils'
+import { cn, formatBRL } from '../lib/utils'
 
 type Step = 'selecionar' | 'revisar' | 'concluido'
 
 interface ParsedTx { data: string; descricao: string; valor: number }
+
+interface DetalheMatch {
+  lancamento_id: number
+  despesa_id: number
+  despesa_nome: string
+  transacao_id: number
+  descricao_transacao: string
+  valor: number
+  data: string
+  status: 'pago' | 'agendado'
+}
+
+interface Despesa { id: number; nome: string }
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
@@ -17,7 +30,11 @@ export function Importacao() {
     const n = new Date()
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
   })
-  const [resultado, setResultado] = useState<{ matched: number; total: number } | null>(null)
+  const [resultado, setResultado] = useState<{ matched: number; total: number; detalhes: DetalheMatch[] } | null>(null)
+  const [despesas, setDespesas] = useState<Despesa[]>([])
+  const [corrigindo, setCorrigindo] = useState<number | null>(null)
+  const [selecionada, setSelecionada] = useState('')
+  const [novaDespesaNome, setNovaDespesaNome] = useState('')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -45,12 +62,50 @@ export function Importacao() {
   async function rodarBatimento() {
     setLoading(true)
     try {
-      const res = await api.batimento.rodar(mesRef)
+      const [res, cat] = await Promise.all([api.batimento.rodar(mesRef), api.catalogo.list()])
       setResultado(res)
+      setDespesas(cat)
       setStep('concluido')
     } finally {
       setLoading(false)
     }
+  }
+
+  function abrirCorrecao(transacaoId: number) {
+    setCorrigindo(corrigindo === transacaoId ? null : transacaoId)
+    setSelecionada('')
+    setNovaDespesaNome('')
+  }
+
+  async function aplicarCorrecao(d: DetalheMatch) {
+    let despesaId: number
+    let despesaNome: string
+    if (selecionada === 'nova') {
+      const nome = novaDespesaNome.trim()
+      if (!nome) return
+      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+      const res = await api.catalogo.upsert({
+        nome,
+        tipo_valor: 'variavel',
+        padrao_variabilidade: 'variavel_nao_sazonal',
+        valor_padrao: d.valor,
+        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
+      })
+      despesaId = res.id
+      despesaNome = nome
+    } else {
+      if (!selecionada) return
+      despesaId = Number(selecionada)
+      despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
+    }
+
+    await api.batimento.corrigir(mesRef, d.transacao_id, despesaId)
+
+    setResultado(r => r ? {
+      ...r,
+      detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
+    } : r)
+    setCorrigindo(null)
   }
 
   const STEPS: [Step, string][] = [['selecionar', '1. Selecionar'], ['revisar', '2. Revisar'], ['concluido', '3. Concluído']]
@@ -165,15 +220,82 @@ export function Importacao() {
 
         {/* Step 3 — concluído */}
         {step === 'concluido' && resultado && (
-          <div className="space-y-4 max-w-md">
+          <div className="space-y-4 max-w-3xl">
             <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-8 text-center">
               <div className="text-5xl font-bold text-emerald-400 mb-2">{resultado.matched}/{resultado.total}</div>
               <p className="text-zinc-400 text-sm">lançamentos casados automaticamente</p>
             </div>
+
+            {resultado.detalhes.length > 0 && (
+              <div>
+                <p className="text-sm text-zinc-400 mb-2">Confira os casamentos — se alguma despesa estiver errada, corrija abaixo:</p>
+                <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-900/40">
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Transação no extrato</th>
+                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Valor</th>
+                        <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
+                        <th className="px-4 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultado.detalhes.map((d, i) => (
+                        <Fragment key={d.transacao_id}>
+                          <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                            <td className="px-4 py-2 text-zinc-200 font-medium">{d.despesa_nome}</td>
+                            <td className="px-4 py-2 text-zinc-400">{d.descricao_transacao}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(d.valor)}</td>
+                            <td className="px-4 py-2 text-center">
+                              <span className={cn('text-xs px-2 py-0.5 rounded',
+                                d.status === 'pago' ? 'text-emerald-400 bg-emerald-950/40' : 'text-blue-400 bg-blue-950/40')}>
+                                {d.status === 'pago' ? 'Pago' : 'Agendado'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <button onClick={() => abrirCorrecao(d.transacao_id)}
+                                className="text-xs text-zinc-500 hover:text-amber-400 transition-colors whitespace-nowrap">
+                                Não é essa despesa
+                              </button>
+                            </td>
+                          </tr>
+                          {corrigindo === d.transacao_id && (
+                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                              <td colSpan={5} className="px-4 py-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <select value={selecionada} onChange={e => setSelecionada(e.target.value)}
+                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+                                    <option value="">Selecionar despesa correta...</option>
+                                    {despesas.map(ds => <option key={ds.id} value={ds.id}>{ds.nome}</option>)}
+                                    <option value="nova">+ Nova despesa</option>
+                                  </select>
+                                  {selecionada === 'nova' && (
+                                    <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
+                                      placeholder="Nome da nova despesa" autoFocus
+                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+                                  )}
+                                  <button onClick={() => aplicarCorrecao(d)}
+                                    disabled={!selecionada || (selecionada === 'nova' && !novaDespesaNome.trim())}
+                                    className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                                    Confirmar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <p className="text-sm text-zinc-500">
               Vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar os lançamentos em aberto.
             </p>
-            <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]) }}
+            <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null) }}
               className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
               Nova importação
             </button>
