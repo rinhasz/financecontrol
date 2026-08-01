@@ -60,7 +60,7 @@ export function Importacao() {
     <div className="flex flex-col h-full pt-3">
       <div className="px-6 pb-4 flex-none">
         <h1 className="text-xl font-semibold text-zinc-100">Importar Extrato</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">OFX ou CSV — importa e bate automaticamente com os lançamentos do mês</p>
+        <p className="text-sm text-zinc-500 mt-0.5">OFX, CSV ou Excel — importa e bate automaticamente com os lançamentos do mês. Use Excel para capturar lançamentos futuros/agendados.</p>
       </div>
 
       {/* Steps indicator */}
@@ -105,8 +105,8 @@ export function Importacao() {
             </div>
 
             <div>
-              <label className="text-sm text-zinc-400 block mb-2">Arquivo (.ofx ou .csv)</label>
-              <input ref={fileRef} type="file" accept=".ofx,.csv,.txt" className="hidden"
+              <label className="text-sm text-zinc-400 block mb-2">Arquivo (.ofx, .csv ou .xlsx)</label>
+              <input ref={fileRef} type="file" accept=".ofx,.csv,.txt,.xlsx,.xlsm" className="hidden"
                 onChange={e => setFile(e.target.files?.[0] ?? null)} />
               <div className="flex items-center gap-3">
                 <button onClick={() => fileRef.current?.click()}
