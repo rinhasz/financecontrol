@@ -1,6 +1,7 @@
 import { useEffect, useState, Fragment, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { cn, formatBRL } from '../lib/utils'
+import { ImportarCatalogoModal } from '../components/ImportarCatalogoModal'
 
 interface Despesa {
   id: number; nome: string; categoria_id: number | null; categoria_nome: string
@@ -48,6 +49,7 @@ export function Catalogo() {
   const [editando, setEditando] = useState<number | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
   const [criando, setCriando] = useState(false)
+  const [importando, setImportando] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -175,8 +177,16 @@ export function Catalogo() {
             className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
             + Nova despesa
           </button>
+          <button onClick={() => setImportando(true)}
+            className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors whitespace-nowrap">
+            Importar catálogo
+          </button>
         </div>
       </div>
+
+      {importando && (
+        <ImportarCatalogoModal onClose={() => setImportando(false)} onConcluido={load} />
+      )}
 
       <div className="flex-1 overflow-auto px-6 pb-6">
         {criando && (

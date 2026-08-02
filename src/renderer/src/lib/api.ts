@@ -50,7 +50,22 @@ export const api = {
   catalogo: {
     list: () => get('/api/catalogo'),
     upsert: (data: Record<string, unknown>) => post('/api/catalogo', data),
-    toggleAtivo: (id: number) => post(`/api/catalogo/${id}/toggle`)
+    toggleAtivo: (id: number) => post(`/api/catalogo/${id}/toggle`),
+    importarAmostra: (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return fetch('/api/catalogo/importar/amostra', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    importarAnalisar: (file: File, colNome: number, colCategoria: number | null, colValor: number | null, temCabecalho: boolean) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('col_nome', String(colNome))
+      if (colCategoria !== null) fd.append('col_categoria', String(colCategoria))
+      if (colValor !== null) fd.append('col_valor', String(colValor))
+      fd.append('tem_cabecalho', String(temCabecalho))
+      return fetch('/api/catalogo/importar/analisar', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    importarConfirmar: (plano: unknown) => post('/api/catalogo/importar/confirmar', plano)
   },
   categorias: {
     list: () => get('/api/categorias')
