@@ -51,14 +51,16 @@ export const api = {
     list: () => get('/api/catalogo'),
     upsert: (data: Record<string, unknown>) => post('/api/catalogo', data),
     toggleAtivo: (id: number) => post(`/api/catalogo/${id}/toggle`),
-    importarAmostra: (file: File) => {
+    importarAmostra: (fonte: { file: File } | { texto: string }) => {
       const fd = new FormData()
-      fd.append('file', file)
+      if ('file' in fonte) fd.append('file', fonte.file)
+      else fd.append('texto', fonte.texto)
       return fetch('/api/catalogo/importar/amostra', { method: 'POST', body: fd }).then(r => r.json())
     },
-    importarAnalisar: (file: File, colNome: number, colCategoria: number | null, colValor: number | null, temCabecalho: boolean) => {
+    importarAnalisar: (fonte: { file: File } | { texto: string }, colNome: number, colCategoria: number | null, colValor: number | null, temCabecalho: boolean) => {
       const fd = new FormData()
-      fd.append('file', file)
+      if ('file' in fonte) fd.append('file', fonte.file)
+      else fd.append('texto', fonte.texto)
       fd.append('col_nome', String(colNome))
       if (colCategoria !== null) fd.append('col_categoria', String(colCategoria))
       if (colValor !== null) fd.append('col_valor', String(colValor))

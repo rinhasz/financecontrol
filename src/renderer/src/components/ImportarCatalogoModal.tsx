@@ -28,9 +28,17 @@ interface Props {
 
 export function ImportarCatalogoModal({ onClose, onConcluido }: Props) {
   const [passo, setPasso] = useState<Passo>('selecionar')
+  const [aba, setAba] = useState<'arquivo' | 'colar'>('arquivo')
   const [arquivo, setArquivo] = useState<File | null>(null)
+  const [textoColado, setTextoColado] = useState('')
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
+
+  function fonteAtual(): { file: File } | { texto: string } | null {
+    if (arquivo) return { file: arquivo }
+    if (textoColado.trim()) return { texto: textoColado }
+    return null
+  }
 
   const [amostra, setAmostra] = useState<{ colunas: number; linhas: (string | number)[][]; total_linhas: number } | null>(null)
   const [colNome, setColNome] = useState('')
@@ -43,11 +51,22 @@ export function ImportarCatalogoModal({ onClose, onConcluido }: Props) {
 
   async function selecionarArquivo(f: File) {
     setArquivo(f)
+    setTextoColado('')
+    await carregarAmostra({ file: f })
+  }
+
+  async function usarTextoColado() {
+    if (!textoColado.trim()) return
+    setArquivo(null)
+    await carregarAmostra({ texto: textoColado })
+  }
+
+  async function carregarAmostra(fonte: { file: File } | { texto: string }) {
     setErro('')
     setCarregando(true)
     try {
-      const res = await api.catalogo.importarAmostra(f)
-      if (!res.ok) { setErro(res.msg || 'Erro ao ler arquivo'); return }
+      const res = await api.catalogo.importarAmostra(fonte)
+      if (!res.ok) { setErro(res.msg || 'Erro ao ler dados'); return }
       setAmostra(res)
       setPasso('mapear')
     } catch (e) {
@@ -57,13 +76,23 @@ export function ImportarCatalogoModal({ onClose, onConcluido }: Props) {
     }
   }
 
+  async function colarDaAreaDeTransferencia() {
+    try {
+      const texto = await navigator.clipboard.readText()
+      if (texto) setTextoColado(texto)
+    } catch {
+      setErro('Não consegui ler a área de transferência automaticamente — cole manualmente (Ctrl+V) no campo abaixo.')
+    }
+  }
+
   async function analisar() {
-    if (!arquivo || colNome === '') return
+    const fonte = fonteAtual()
+    if (!fonte || colNome === '') return
     setErro('')
     setCarregando(true)
     try {
       const res = await api.catalogo.importarAnalisar(
-        arquivo, Number(colNome),
+        fonte, Number(colNome),
         colCategoria !== '' ? Number(colCategoria) : null,
         colValor !== '' ? Number(colValor) : null,
         temCabecalho
@@ -108,13 +137,49 @@ export function ImportarCatalogoModal({ onClose, onConcluido }: Props) {
           {passo === 'selecionar' && (
             <div className="space-y-3">
               <p className="text-sm text-zinc-400">
-                Envie uma planilha Excel com o nome das despesas — e, se quiser, categoria e último valor pago.
-                Só o que estiver na planilha fica ativo no catálogo depois (o resto é desativado, não apagado).
+                Envie uma planilha Excel (ou cole células copiadas do Excel) com o nome das despesas — e, se
+                quiser, categoria e último valor pago. Só o que estiver aqui fica ativo no catálogo depois
+                (o resto é desativado, não apagado).
               </p>
-              <input type="file" accept=".xls,.xlsx,.xlsm"
-                onChange={e => { const f = e.target.files?.[0]; if (f) selecionarArquivo(f) }}
-                className="text-sm text-zinc-300" />
-              {carregando && <p className="text-sm text-zinc-500">Lendo arquivo...</p>}
+
+              <div className="flex items-center gap-2 text-sm">
+                <button onClick={() => setAba('arquivo')}
+                  className={cn('px-3 py-1.5 rounded-md border transition-colors',
+                    aba === 'arquivo' ? 'border-emerald-600 text-emerald-400 bg-emerald-600/10' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+                  Enviar arquivo
+                </button>
+                <button onClick={() => setAba('colar')}
+                  className={cn('px-3 py-1.5 rounded-md border transition-colors',
+                    aba === 'colar' ? 'border-emerald-600 text-emerald-400 bg-emerald-600/10' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+                  Colar da área de transferência
+                </button>
+              </div>
+
+              {aba === 'arquivo' ? (
+                <input type="file" accept=".xls,.xlsx,.xlsm"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) selecionarArquivo(f) }}
+                  className="text-sm text-zinc-300" />
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <button onClick={colarDaAreaDeTransferencia}
+                      className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
+                      Colar da área de transferência
+                    </button>
+                    <span className="text-xs text-zinc-600">ou cole manualmente (Ctrl+V) no campo abaixo</span>
+                  </div>
+                  <textarea value={textoColado} onChange={e => setTextoColado(e.target.value)}
+                    placeholder="Cole aqui (Ctrl+V) as células copiadas do Excel"
+                    rows={6}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500 font-mono" />
+                  <button onClick={usarTextoColado} disabled={!textoColado.trim() || carregando}
+                    className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                    {carregando ? 'Lendo...' : 'Usar estes dados'}
+                  </button>
+                </div>
+              )}
+
+              {carregando && aba === 'arquivo' && <p className="text-sm text-zinc-500">Lendo arquivo...</p>}
             </div>
           )}
 

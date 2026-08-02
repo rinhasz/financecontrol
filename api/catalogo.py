@@ -68,16 +68,22 @@ def list_categorias():
     return jsonify([dict(r) for r in rows])
 
 
-def _ler_planilha(file):
-    """Lê a primeira planilha de um .xls/.xlsx enviado, como lista de linhas
-    brutas (sem assumir cabeçalho nem nomes de coluna — formato varia)."""
-    filename = file.filename or 'planilha'
-    ext = filename.rsplit('.', 1)[-1].lower()
-    if ext not in ('xls', 'xlsx', 'xlsm'):
-        return None
-    content = file.read()
-    sheets = _sheet_rows_xls(content) if ext == 'xls' else _sheet_rows_xlsx(content)
-    return sheets[0] if sheets else []
+def _ler_linhas(file, texto):
+    """Lê linhas cruas de um .xls/.xlsx enviado OU de texto colado da área
+    de transferência (TSV — é o formato que o Excel gera ao copiar células),
+    como lista de linhas (sem assumir cabeçalho nem nomes de coluna)."""
+    if file:
+        filename = file.filename or 'planilha'
+        ext = filename.rsplit('.', 1)[-1].lower()
+        if ext not in ('xls', 'xlsx', 'xlsm'):
+            return None
+        content = file.read()
+        sheets = _sheet_rows_xls(content) if ext == 'xls' else _sheet_rows_xlsx(content)
+        return sheets[0] if sheets else []
+    if texto and texto.strip():
+        linhas = texto.replace('\r\n', '\n').replace('\r', '\n').strip('\n').split('\n')
+        return [linha.split('\t') for linha in linhas]
+    return None
 
 
 @bp.route('/catalogo/importar/amostra', methods=['POST'])
@@ -85,12 +91,13 @@ def importar_catalogo_amostra():
     """Primeiro passo: mostra uma amostra crua da planilha (sem interpretar
     nada) pra o usuário indicar qual coluna é qual."""
     file = request.files.get('file')
-    if not file:
-        return jsonify({'ok': False, 'msg': 'Nenhum arquivo enviado'}), 400
+    texto = request.form.get('texto')
+    if not file and not texto:
+        return jsonify({'ok': False, 'msg': 'Envie um arquivo ou cole os dados'}), 400
 
-    rows = _ler_planilha(file)
+    rows = _ler_linhas(file, texto)
     if rows is None:
-        return jsonify({'ok': False, 'msg': 'Envie um arquivo Excel (.xls ou .xlsx)'}), 400
+        return jsonify({'ok': False, 'msg': 'Envie um arquivo Excel (.xls ou .xlsx) ou cole os dados'}), 400
     if not rows:
         return jsonify({'ok': False, 'msg': 'Planilha vazia'}), 400
 
@@ -108,8 +115,9 @@ def importar_catalogo_analisar():
     """Segundo passo: com o mapeamento de colunas escolhido, monta o plano
     de mudanças (não grava nada ainda) pro usuário revisar."""
     file = request.files.get('file')
-    if not file:
-        return jsonify({'ok': False, 'msg': 'Nenhum arquivo enviado'}), 400
+    texto = request.form.get('texto')
+    if not file and not texto:
+        return jsonify({'ok': False, 'msg': 'Envie um arquivo ou cole os dados'}), 400
 
     try:
         col_nome = int(request.form.get('col_nome'))
@@ -121,9 +129,9 @@ def importar_catalogo_analisar():
     col_valor = int(col_valor_raw) if col_valor_raw != '' else None
     tem_cabecalho = request.form.get('tem_cabecalho') == 'true'
 
-    rows = _ler_planilha(file)
+    rows = _ler_linhas(file, texto)
     if rows is None:
-        return jsonify({'ok': False, 'msg': 'Envie um arquivo Excel (.xls ou .xlsx)'}), 400
+        return jsonify({'ok': False, 'msg': 'Envie um arquivo Excel (.xls ou .xlsx) ou cole os dados'}), 400
     if tem_cabecalho:
         rows = rows[1:]
 
