@@ -1,6 +1,7 @@
 import { useState, useRef, Fragment } from 'react'
 import { api } from '../lib/api'
 import { cn, formatBRL } from '../lib/utils'
+import { DespesaPicker } from '../components/DespesaPicker'
 
 type Step = 'selecionar' | 'revisar' | 'concluido'
 
@@ -357,12 +358,10 @@ export function Importacao() {
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={5} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <select value={selecionada} onChange={e => setSelecionada(e.target.value)}
-                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
-                                    <option value="">Selecionar despesa correta...</option>
-                                    {despesas.map(ds => <option key={ds.id} value={ds.id}>{ds.nome}</option>)}
-                                    <option value="nova">+ Nova despesa</option>
-                                  </select>
+                                  <DespesaPicker despesas={despesas} value={selecionada} onChange={setSelecionada}
+                                    placeholder="Digite pra buscar a despesa certa..." allowNova
+                                    onSelectNova={q => { setSelecionada('nova'); setNovaDespesaNome(q) }}
+                                    className="w-56" />
                                   {selecionada === 'nova' && (
                                     <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
                                       placeholder="Nome da nova despesa" autoFocus
@@ -422,12 +421,10 @@ export function Importacao() {
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={4} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <select value={selecionadaAssoc} onChange={e => setSelecionadaAssoc(e.target.value)}
-                                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
-                                    <option value="">Selecionar despesa...</option>
-                                    {despesas.map(ds => <option key={ds.id} value={ds.id}>{ds.nome}</option>)}
-                                    <option value="nova">+ Nova despesa</option>
-                                  </select>
+                                  <DespesaPicker despesas={despesas} value={selecionadaAssoc} onChange={setSelecionadaAssoc}
+                                    placeholder="Digite pra buscar a despesa..." allowNova
+                                    onSelectNova={q => { setSelecionadaAssoc('nova'); setNovaDespesaNomeAssoc(q) }}
+                                    className="w-56" />
                                   {selecionadaAssoc === 'nova' && (
                                     <input value={novaDespesaNomeAssoc} onChange={e => setNovaDespesaNomeAssoc(e.target.value)}
                                       placeholder="Nome da nova despesa" autoFocus

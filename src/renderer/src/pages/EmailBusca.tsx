@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { cn, currentMesRef } from '../lib/utils'
+import { DespesaPicker } from '../components/DespesaPicker'
 
 interface Boleto {
   id: string
@@ -252,11 +253,8 @@ export function EmailBusca() {
 
                   {associando === b.id && (
                     <div className="mt-3 flex items-center gap-2 flex-wrap bg-zinc-900/60 rounded p-3">
-                      <select value={despesaEscolhida} onChange={e => setDespesaEscolhida(e.target.value)}
-                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
-                        <option value="">Selecionar despesa...</option>
-                        {despesas.map(ds => <option key={ds.id} value={ds.id}>{ds.nome}</option>)}
-                      </select>
+                      <DespesaPicker despesas={despesas} value={despesaEscolhida} onChange={setDespesaEscolhida}
+                        placeholder="Digite pra buscar a despesa..." className="w-56" />
                       <input type="month" value={mesEscolhido} onChange={e => setMesEscolhido(e.target.value)}
                         className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
                       <button onClick={() => aplicarAssociacao(b)} disabled={!despesaEscolhida}
