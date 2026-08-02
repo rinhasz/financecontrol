@@ -12,6 +12,7 @@ interface Lancamento {
   valor_real: number | null
   status: 'pago' | 'agendado' | 'nao_encontrado'
   data_pagamento: string | null
+  linha_digitavel: string | null
 }
 
 interface Resumo {
@@ -42,6 +43,7 @@ export function MesAtual() {
   const [saldoVal, setSaldoVal] = useState('')
   const [diaSalarioEdit, setDiaSalarioEdit] = useState(false)
   const [diaSalarioVal, setDiaSalarioVal] = useState('27')
+  const [boletoCopiado, setBoletoCopiado] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,6 +83,13 @@ export function MesAtual() {
     if (!isNaN(val) && val >= 1 && val <= 31) await api.config.set({ dia_recebimento_salario: val })
     setDiaSalarioEdit(false)
     load()
+  }
+
+  async function copiarBoleto(l: Lancamento) {
+    if (!l.linha_digitavel) return
+    await navigator.clipboard.writeText(l.linha_digitavel.replace(/\s+/g, ''))
+    setBoletoCopiado(l.id)
+    setTimeout(() => setBoletoCopiado(null), 1500)
   }
 
   const byCategory = lancamentos.reduce<Record<string, Lancamento[]>>((acc, l) => {
@@ -224,6 +233,17 @@ export function MesAtual() {
                             <span className={cn('inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border', STATUS_STYLE[l.status])}>
                               {STATUS_LABEL[l.status]}
                             </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {l.linha_digitavel && (
+                              <button onClick={() => copiarBoleto(l)}
+                                className={cn('text-xs px-2 py-0.5 rounded border transition-colors whitespace-nowrap',
+                                  boletoCopiado === l.id
+                                    ? 'border-emerald-700 text-emerald-400'
+                                    : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+                                {boletoCopiado === l.id ? 'Copiado!' : 'Copiar boleto'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

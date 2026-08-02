@@ -78,6 +78,8 @@ export const api = {
     status: () => get('/api/email/status'),
     conectarIniciar: () => post('/api/email/conectar/iniciar'),
     conectarFinalizar: () => post('/api/email/conectar/finalizar'),
-    buscar: (mesRef: string) => post('/api/email/buscar', { mes_ref: mesRef })
+    buscar: (dataIni: string, dataFim: string) => post('/api/email/buscar', { data_ini: dataIni, data_fim: dataFim }),
+    associar: (despesaId: number, mesRef: string, linhaDigitavel: string | null, valor: string | null, remetente: string) =>
+      post('/api/email/associar', { despesa_id: despesaId, mes_ref: mesRef, linha_digitavel: linhaDigitavel, valor, remetente })
   }
 }

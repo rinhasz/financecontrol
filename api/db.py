@@ -53,14 +53,15 @@ CREATE TABLE IF NOT EXISTS transacao (
 );
 
 CREATE TABLE IF NOT EXISTS lancamento (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  mes_ref        TEXT NOT NULL,
-  despesa_id     INTEGER NOT NULL REFERENCES despesa(id),
-  valor_esperado REAL NOT NULL DEFAULT 0,
-  status         TEXT NOT NULL DEFAULT 'nao_encontrado',
-  transacao_id   INTEGER REFERENCES transacao(id),
-  valor_real     REAL,
-  data_pagamento TEXT,
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  mes_ref         TEXT NOT NULL,
+  despesa_id      INTEGER NOT NULL REFERENCES despesa(id),
+  valor_esperado  REAL NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'nao_encontrado',
+  transacao_id    INTEGER REFERENCES transacao(id),
+  valor_real      REAL,
+  data_pagamento  TEXT,
+  linha_digitavel TEXT,
   UNIQUE(mes_ref, despesa_id)
 );
 
@@ -81,6 +82,13 @@ CREATE TABLE IF NOT EXISTS posicao_investimento (
   valor              REAL NOT NULL,
   valor_mes_anterior REAL,
   rentabilidade      REAL
+);
+
+CREATE TABLE IF NOT EXISTS email_despesa_regra (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  remetente  TEXT NOT NULL UNIQUE,
+  despesa_id INTEGER NOT NULL REFERENCES despesa(id),
+  criado_em  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -119,6 +127,12 @@ def get_db():
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+
+    # migração: bancos criados antes de linha_digitavel existir
+    colunas = [r[1] for r in conn.execute('PRAGMA table_info(lancamento)').fetchall()]
+    if 'linha_digitavel' not in colunas:
+        conn.execute('ALTER TABLE lancamento ADD COLUMN linha_digitavel TEXT')
+
     conn.commit()
     conn.close()
     print(f'[db] initialized at {DB_PATH}')

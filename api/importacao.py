@@ -18,6 +18,14 @@ def normalize_text(s: str) -> str:
     return re.sub(r'[^a-z0-9 ]', ' ', s)
 
 
+def tem_palavra(alvo: str, kw: str) -> bool:
+    """Casamento de palavra inteira, não substring — 'conta' não pode bater
+    com 'contato', nem 'net' com 'netflix', nem 'casa' com 'casas'.
+    `alvo` já deve estar normalizado; `kw` é normalizado aqui."""
+    kw_norm = normalize_text(kw)
+    return bool(kw_norm) and re.search(r'\b' + re.escape(kw_norm) + r'\b', alvo) is not None
+
+
 def parse_br_date(s: str):
     s = s.strip()
     m = re.match(r'^(\d{2})/(\d{2})/(\d{4})', s)
@@ -335,7 +343,7 @@ def rodar_batimento():
 
             desc_norm = normalize_text(t['descricao'])
             if keywords:
-                matched_kw = sum(1 for kw in keywords if normalize_text(kw) in desc_norm)
+                matched_kw = sum(1 for kw in keywords if tem_palavra(desc_norm, kw))
                 if matched_kw == len(keywords):
                     # Quanto mais palavras-chave a despesa exige (mais específica),
                     # mais peso o casamento completo ganha — uma despesa com uma

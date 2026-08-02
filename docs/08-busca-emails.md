@@ -4,25 +4,74 @@
 
 ## Objetivo
 
-Não cria despesas novas nem automatiza o batimento. É uma ferramenta de
-apoio ao pagamento manual: busca, entre os emails do usuário, faturas/
-boletos referentes a **despesas variáveis já cadastradas no catálogo**, e
-extrai:
-
-- o **valor** da fatura do mês
-- o **código de boleto** (linha digitável) para copiar e colar no pagamento
-
-O usuário confere na tela e paga manualmente fora do app — o app só poupa
-o trabalho de vasculhar a caixa de entrada. Nada é gravado no banco por
-essa tela.
+Não cria despesas novas nem automatiza o batimento sozinho. É uma
+ferramenta de apoio ao pagamento manual: busca, entre os emails do
+usuário, faturas/boletos de qualquer despesa ativa do catálogo (cartão de
+crédito, seguro saúde, convênio, contas de consumo etc.), extrai valor e
+linha digitável, e deixa o usuário **associar** o achado a uma despesa e
+mês específicos — só então isso aparece disponível para copiar na tela
+Mês Atual.
 
 ## Decisões tomadas com o usuário
 
 - **Provedor**: Outlook/Hotmail.
-- **Escopo de busca**: só despesas com `tipo_valor='variavel'` (cartões,
-  contas de consumo) — despesas fixas com débito automático não têm
-  boleto. Busca dentro da janela de competência do mês (mesma lógica do
-  batimento bancário, `periodo_competencia()` em `api/db.py`).
+- **Escopo de busca**: qualquer despesa ativa do catálogo (não só
+  variável — seguro saúde por boleto, por exemplo, pode ter valor fixo).
+- **Período**: filtro de data início/fim livre na tela, não mais atrelado
+  a um único mês de competência — faturas de coisas como seguro anual
+  podem chegar meses antes do vencimento.
+
+## Classificação e extração — por que Gemini
+
+A primeira versão usava só palavra-chave do catálogo (`regras_match`) pra
+sugerir despesa, e regex pra achar valor/linha digitável no texto. Isso
+tem um limite estrutural: a operadora raramente aparece no *nome* da
+despesa. Ex: a despesa é `convenio marco antonio`, mas o email da
+seguradora diz "SulAmérica" — nenhuma palavra-chave bate, e por regex
+puro o email nunca aparecia na busca.
+
+Com `GEMINI_API_KEY` configurada (opcional, ver `.env.example`), a busca
+passa a usar o Gemini em duas etapas:
+
+1. **Classificação em lote** (barata: só assunto+remetente de todos os
+   emails do período numa chamada só) — pergunta quais parecem fatura/
+   boleto/cobrança, capturando semanticamente o que a lista de
+   palavras-chave não cobre.
+2. **Extração por email candidato** (corpo + texto de PDFs anexados via
+   `pdfplumber`) — pede valor, linha digitável e a despesa mais provável
+   entre os nomes exatos do catálogo.
+
+Sem a chave, cai para a lógica antiga (palavra-chave + regex) — sem custo
+de API, mas mais limitada.
+
+### Validação obrigatória da linha digitável
+
+Um LLM pode "alucinar" uma linha digitável plausível em vez de admitir que
+não achou nenhuma — isso é inaceitável para um dado usado em pagamento.
+Toda linha digitável que o Gemini retorna passa por `_linha_digitavel_valida()`
+antes de ir pra tela:
+- precisa ter exatamente 47 ou 48 dígitos;
+- não pode ser degenerada (todos os dígitos iguais, sequência óbvia tipo
+  `12345...`);
+- os dígitos precisam aparecer **literalmente** no texto extraído do
+  email/PDF (comparação por substring) — não passa se o modelo inventou.
+
+Mesmo assim, a tela mostra um aviso pra sempre conferir contra o email
+original antes de pagar. Isso não é uma garantia absoluta, só reduz bastante
+o risco de um número inventado passar despercebido.
+
+## Regras aprendidas (remetente → despesa)
+
+Toda vez que o usuário associa um boleto a uma despesa, o remetente do
+email é gravado em `email_despesa_regra` (tabela). Na próxima busca, esse
+remetente já entra automaticamente como candidato com a despesa
+pré-preenchida — sem depender de bater de novo por classificação/IA. Isso
+é a resposta direta ao pedido do usuário: "no próximo mês trazer tudo
+pré-preenchido só pra eu conferir".
+
+A tabela é a fonte de verdade (é o que o app consulta); um espelho legível
+fica em [09-dicionario-emails.md](09-dicionario-emails.md), atualizado
+automaticamente por `_registrar_regra_email()` a cada associação nova.
 
 ## Autenticação — por que OAuth2 e não usuário/senha
 
@@ -62,18 +111,24 @@ A solução foi reescrever para **OAuth2 + Microsoft Graph API**:
    dispositivo e o link → usuário confirma no navegador →
    `POST /api/email/conectar/finalizar` (fica bloqueado aguardando; por
    isso o Flask roda com `threaded=True`) confirma e salva o token.
-4. Escolhe o mês de referência → `POST /api/email/buscar` busca todas as
-   mensagens do INBOX no período uma única vez (evita repetir a mesma
-   consulta por despesa), filtra por despesa comparando palavras-chave de
-   `regras_match` contra assunto/remetente (mesma função `normalize_text`
-   usada no batimento bancário — melhorar o catálogo melhora as duas
-   buscas), e tenta extrair valor (regex `R\$ ...`) e linha digitável
-   (regex de 5 blocos de dígitos) do corpo HTML e de anexos PDF
-   (`pdfplumber`).
-5. Mostra por despesa: assunto, remetente, data, valor encontrado e linha
-   digitável com botão de copiar. PDFs escaneados como imagem (sem texto
-   extraível) não são suportados — aparece "linha digitável não
-   encontrada, abra o email manualmente" em vez de falhar.
+4. Escolhe um período (data início/fim) → `POST /api/email/buscar` busca
+   todas as mensagens do INBOX nesse período uma única vez, classifica
+   (Gemini, ou palavra-chave se a chave não estiver configurada) e
+   extrai valor/linha digitável dos candidatos (corpo HTML + anexos PDF
+   via `pdfplumber`). Remetentes já associados antes (`email_despesa_regra`)
+   entram automaticamente com a despesa pré-preenchida.
+5. Mostra uma lista plana de boletos (não mais agrupada por despesa, já
+   que agora cobre despesas sem correspondência óbvia por palavra-chave):
+   assunto, remetente, data, valor, linha digitável com botão de copiar,
+   e um seletor de despesa + mês pra associar. PDFs escaneados como
+   imagem (sem texto extraível) não são suportados — aparece "linha
+   digitável não encontrada, abra o email manualmente" em vez de falhar.
+6. Ao confirmar a associação (`POST /api/email/associar`): grava
+   `linha_digitavel` no `lancamento` da despesa/mês (sem mexer em status
+   de pagamento) e grava/atualiza a regra remetente→despesa para a
+   próxima busca.
+7. Em Mês Atual, qualquer lançamento com `linha_digitavel` preenchida
+   ganha um botão "Copiar boleto".
 
 ## Notas para manutenção futura
 

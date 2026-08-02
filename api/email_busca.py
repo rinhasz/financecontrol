@@ -9,13 +9,14 @@ import msal
 import requests
 from flask import Blueprint, jsonify, request
 
-from .db import get_db, get_config_value, periodo_competencia
-from .importacao import normalize_text
+from .db import get_db, parse_number
+from .importacao import normalize_text, tem_palavra
 
 bp = Blueprint('email_busca', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOKEN_CACHE_PATH = os.path.join(BASE_DIR, '.msal_token_cache.json')
+DICIONARIO_EMAILS_PATH = os.path.join(BASE_DIR, 'docs', '09-dicionario-emails.md')
 
 # A Microsoft desativou autenticação por senha (inclusive senha de app) para
 # IMAP em contas Outlook/Hotmail pessoais em abril/2026 — o caminho que
@@ -26,11 +27,42 @@ AUTHORITY = 'https://login.microsoftonline.com/common'
 SCOPES = ['Mail.Read']
 GRAPH = 'https://graph.microsoft.com/v1.0'
 
+# Se configurada, o Gemini faz a classificação (é fatura?) e extração
+# (despesa provável, valor, linha digitável) — mais robusto que palavra-chave
+# porque entende semanticamente ("SulAmérica" -> despesa "convenio ...") sem
+# precisar que o catálogo liste o nome da operadora. Sem a chave, cai para a
+# lógica por palavra-chave/regex abaixo.
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_MODEL = 'gemini-flash-latest'
+
 # Linha digitável de boleto: 5 blocos de dígitos (com ou sem pontuação)
 RE_LINHA_DIGITAVEL = re.compile(
     r'\d{5}[.\s]?\d{5}\s+\d{5}[.\s]?\d{6}\s+\d{5}[.\s]?\d{6}\s+\d\s+\d{14,17}'
 )
 RE_VALOR = re.compile(r'R\$\s*([\d.]{1,12},\d{2})')
+
+
+def _linha_digitavel_valida(s) -> bool:
+    """Sanity check obrigatório pro que o Gemini extrai — um LLM pode
+    'alucinar' uma linha digitável plausível (ou devolver texto de
+    placeholder/nome de campo) em vez de dizer que não achou nada. Nunca
+    confiar cegamente num código usado pra pagamento."""
+    if not isinstance(s, str):
+        return False
+    digitos = re.sub(r'\D', '', s)
+    if len(digitos) not in (47, 48):
+        return False
+    if len(set(digitos)) <= 2:  # tudo zero, tudo um dígito repetido etc.
+        return False
+    if digitos in ('12345678901234567890123456789012345678901234567', '123456789012345678901234567890123456789012345678'):
+        return False
+    return True
+
+# Fallback quando nenhuma despesa do catálogo bate por palavra-chave — muitas
+# operadoras (ex: SulAmérica) não aparecem no nome da despesa (ex: "convenio
+# marco antonio"), só no assunto do email. Um assunto com essas palavras já
+# entra na lista de candidatos, mesmo sem despesa sugerida.
+ASSUNTO_FATURA_KEYWORDS = ['fatura', 'boleto', 'conta', 'cobranca', 'cobrança', 'vencimento', 'mensalidade', 'invoice']
 
 _lock = threading.Lock()
 _pending = {}  # device flow em andamento — app desktop de 1 usuário, sem sessão
@@ -174,46 +206,133 @@ def _mensagens_no_periodo(token: str, ini: str, fim: str):
     return mensagens
 
 
-def _buscar_despesa(token: str, despesa, mensagens: list):
-    regras = json.loads(despesa['regras_match'])
-    keywords = [kw for kw in regras.get('palavras_chave', []) if kw]
-    if not keywords:
-        return []
+def _despesa_sugerida(assunto: str, remetente: str, despesas: list):
+    """Acha a primeira despesa do catálogo cujas palavras-chave batem com o
+    assunto/remetente do email — só uma sugestão, o usuário confirma ou troca."""
+    alvo = normalize_text(f'{assunto} {remetente}')
+    for d in despesas:
+        regras = json.loads(d['regras_match'])
+        keywords = [kw for kw in regras.get('palavras_chave', []) if kw]
+        if keywords and all(tem_palavra(alvo, kw) for kw in keywords):
+            return d
+    for d in despesas:
+        regras = json.loads(d['regras_match'])
+        keywords = [kw for kw in regras.get('palavras_chave', []) if kw]
+        if keywords and any(tem_palavra(alvo, kw) for kw in keywords):
+            return d
+    return None
 
+
+def _parece_fatura(assunto: str) -> bool:
+    alvo = normalize_text(assunto)
+    return any(tem_palavra(alvo, kw) for kw in ASSUNTO_FATURA_KEYWORDS)
+
+
+def _texto_completo(token: str, m: dict) -> str:
+    """Texto do corpo + PDFs anexados de uma mensagem."""
     headers = {'Authorization': f'Bearer {token}'}
-    resultados = []
+    texto = _extrair_texto_html((m.get('body') or {}).get('content', ''))
 
-    for m in mensagens:
-        assunto = m.get('subject') or ''
-        remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
-        alvo = normalize_text(f'{assunto} {remetente}')
-        if not any(normalize_text(kw) in alvo for kw in keywords):
-            continue
+    if m.get('hasAttachments'):
+        try:
+            att_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}/attachments', headers=headers, timeout=30)
+            att_resp.raise_for_status()
+            for att in att_resp.json().get('value', []):
+                if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
+                    texto += '\n' + _extrair_pdf(att['contentBytes'])
+        except Exception:
+            pass
 
-        texto = _extrair_texto_html((m.get('body') or {}).get('content', ''))
+    return texto
 
-        if m.get('hasAttachments'):
-            try:
-                att_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}/attachments', headers=headers, timeout=30)
-                att_resp.raise_for_status()
-                for att in att_resp.json().get('value', []):
-                    if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
-                        texto += '\n' + _extrair_pdf(att['contentBytes'])
-            except Exception:
-                pass
 
-        linha = RE_LINHA_DIGITAVEL.search(texto)
-        valores = RE_VALOR.findall(texto)
+def _extrair_boleto_regex(texto: str):
+    linha = RE_LINHA_DIGITAVEL.search(texto)
+    valores = RE_VALOR.findall(texto)
+    return (
+        re.sub(r'\s+', ' ', linha.group()).strip() if linha else None,
+        valores[0] if valores else None,
+    )
 
-        resultados.append({
-            'assunto': assunto,
-            'remetente': remetente,
-            'data': m.get('receivedDateTime'),
-            'linha_digitavel': re.sub(r'\s+', ' ', linha.group()).strip() if linha else None,
-            'valor_encontrado': valores[0] if valores else None,
-        })
 
-    return resultados
+def _gemini_client():
+    if not GEMINI_API_KEY:
+        return None
+    from google import genai
+    return genai.Client(api_key=GEMINI_API_KEY)
+
+
+def _gemini_classificar(client, mensagens: list) -> set:
+    """Uma chamada só (barata: só assunto+remetente) pra descobrir quais
+    mensagens parecem fatura/boleto/conta a pagar."""
+    from google.genai import types
+
+    itens = [
+        {'id': m['id'], 'assunto': m.get('subject') or '',
+         'remetente': (m.get('from') or {}).get('emailAddress', {}).get('address') or ''}
+        for m in mensagens
+    ]
+    prompt = (
+        'Você recebe uma lista de emails (id, assunto, remetente) de uma caixa de entrada pessoal '
+        'no Brasil. Identifique quais parecem ser fatura, boleto, conta a pagar, cobrança ou aviso '
+        'de vencimento — cartão de crédito, seguro/convênio de saúde, contas de consumo (água, luz, '
+        'internet), mensalidades, financiamentos, etc. Ignore promoções, newsletters, notificações de '
+        'redes sociais, recibos de compras já pagas e emails que não sejam cobrança pendente. '
+        'Responda em JSON com os ids que são cobranças.\n\n'
+        + json.dumps(itens, ensure_ascii=False)
+    )
+    try:
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+                response_schema={
+                    'type': 'object',
+                    'properties': {'ids_fatura': {'type': 'array', 'items': {'type': 'string'}}},
+                    'required': ['ids_fatura'],
+                },
+            ),
+        )
+        return set(json.loads(resp.text).get('ids_fatura', []))
+    except Exception:
+        return set()
+
+
+def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
+    from google.genai import types
+
+    prompt = (
+        'Analise o texto abaixo, extraído de um email/fatura em português. Extraia:\n'
+        '- valor: o valor total a pagar, em reais, como número (ex: 1234.56). null se não achar.\n'
+        '- linha_digitavel: a linha digitável do boleto — uma sequência de 47 ou 48 dígitos (às vezes '
+        'com pontos/espaços) que aparece LITERALMENTE no texto abaixo, copiada exatamente como está. '
+        'IMPORTANTE: nunca invente, estime, complete ou use um exemplo/placeholder — se o texto não '
+        'contém essa sequência de números escrita nele, retorne null. Não é aceitável "chutar" um valor '
+        'plausível.\n'
+        f'- despesa_sugerida: a mais provável entre exatamente estes nomes: {json.dumps(despesas_nomes, ensure_ascii=False)}. '
+        'null se nenhuma corresponder bem ao remetente/assunto/conteúdo.\n\n'
+        f'TEXTO:\n{texto[:8000]}'
+    )
+    try:
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+                response_schema={
+                    'type': 'object',
+                    'properties': {
+                        'valor': {'type': 'number'},
+                        'linha_digitavel': {'type': 'string'},
+                        'despesa_sugerida': {'type': 'string'},
+                    },
+                },
+            ),
+        )
+        return json.loads(resp.text)
+    except Exception:
+        return {}
 
 
 @bp.route('/email/buscar', methods=['POST'])
@@ -222,25 +341,152 @@ def buscar():
     if not token:
         return jsonify({'ok': False, 'msg': 'Email não conectado — clique em "Conectar com Microsoft" antes de buscar.'}), 400
 
-    mes_ref = request.json.get('mes_ref', '')
-    conn = get_db()
-    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
-    ini, fim = periodo_competencia(mes_ref, dia_corte)
+    data = request.json or {}
+    ini, fim = data.get('data_ini'), data.get('data_fim')
+    if not ini or not fim:
+        return jsonify({'ok': False, 'msg': 'data_ini e data_fim são obrigatórios'}), 400
 
-    despesas = conn.execute(
-        "SELECT * FROM despesa WHERE ativo=1 AND tipo_valor='variavel' ORDER BY nome"
-    ).fetchall()
+    conn = get_db()
+    despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
+    regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}
     conn.close()
+    despesas_por_nome = {d['nome']: d for d in despesas}
+    despesas_por_id = {d['id']: d for d in despesas}
 
     try:
         mensagens = _mensagens_no_periodo(token, ini, fim)
     except requests.HTTPError as e:
         return jsonify({'ok': False, 'msg': f'Falha ao consultar o Microsoft Graph: {e}'}), 502
 
-    achados = []
-    for d in despesas:
-        emails = _buscar_despesa(token, d, mensagens)
-        if emails:
-            achados.append({'despesa_id': d['id'], 'despesa_nome': d['nome'], 'emails': emails})
+    client = _gemini_client()
+    ids_fatura = _gemini_classificar(client, mensagens) if client else None
 
-    return jsonify({'ok': True, 'periodo': {'ini': ini, 'fim': fim}, 'despesas_pesquisadas': len(despesas), 'resultados': achados})
+    boletos = []
+    for m in mensagens:
+        assunto = m.get('subject') or ''
+        remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
+        # remetente já associado antes por você — entra na lista e vem
+        # pré-preenchido, sem depender de bater de novo por assunto/IA
+        despesa_conhecida = despesas_por_id.get(regras.get(remetente))
+
+        if client:
+            if m['id'] not in ids_fatura and not despesa_conhecida:
+                continue
+            texto = _texto_completo(token, m)
+            info = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
+            despesa = despesa_conhecida or despesas_por_nome.get(info.get('despesa_sugerida') or '')
+            valor_num = info.get('valor')
+            valor = f'{valor_num:.2f}'.replace('.', ',') if isinstance(valor_num, (int, float)) else None
+            linha_digitavel = info.get('linha_digitavel')
+            # o Gemini pode "alucinar" uma linha plausível em vez de dizer que
+            # não achou — só aceita se for um número real (47/48 dígitos, não
+            # degenerado) E se esses dígitos aparecem de fato no texto extraído
+            if linha_digitavel and _linha_digitavel_valida(linha_digitavel):
+                digitos = re.sub(r'\D', '', linha_digitavel)
+                if digitos not in re.sub(r'\D', '', texto):
+                    linha_digitavel = None
+            else:
+                linha_digitavel = None
+        else:
+            sugerida = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
+            if not sugerida and not _parece_fatura(assunto):
+                continue
+            texto = _texto_completo(token, m)
+            linha_digitavel, valor = _extrair_boleto_regex(texto)
+            if not sugerida and not linha_digitavel and not valor:
+                continue
+            despesa = sugerida
+
+        boletos.append({
+            'id': m['id'],
+            'assunto': assunto,
+            'remetente': remetente,
+            'data': m.get('receivedDateTime'),
+            'valor_encontrado': valor,
+            'linha_digitavel': linha_digitavel,
+            'despesa_sugerida_id': despesa['id'] if despesa else None,
+            'despesa_sugerida_nome': despesa['nome'] if despesa else None,
+        })
+
+    boletos.sort(key=lambda b: b['data'] or '', reverse=True)
+    return jsonify({'ok': True, 'periodo': {'ini': ini, 'fim': fim}, 'despesas_pesquisadas': len(despesas), 'boletos': boletos})
+
+
+@bp.route('/email/associar', methods=['POST'])
+def associar():
+    """Vincula um boleto encontrado a uma despesa/mês — não mexe em status
+    de pagamento, só guarda a linha digitável (e o valor, se ainda não
+    tinha um esperado) pra aparecer em Mês Atual. Também grava o remetente
+    como regra: da próxima vez, esse email já vem pré-associado à despesa."""
+    data = request.json or {}
+    despesa_id = data.get('despesa_id')
+    mes_ref = data.get('mes_ref', '')
+    linha_digitavel = data.get('linha_digitavel')
+    remetente = data.get('remetente')
+    valor = data.get('valor')
+    if isinstance(valor, str):
+        valor = parse_number(valor)
+
+    if not (despesa_id and mes_ref):
+        return jsonify({'ok': False, 'msg': 'despesa_id e mes_ref são obrigatórios'}), 400
+
+    conn = get_db()
+    conn.execute(
+        'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
+        (mes_ref, despesa_id, valor or 0)
+    )
+    conn.execute(
+        'UPDATE lancamento SET linha_digitavel=? WHERE despesa_id=? AND mes_ref=?',
+        (linha_digitavel, despesa_id, mes_ref)
+    )
+
+    if remetente:
+        despesa = conn.execute('SELECT nome FROM despesa WHERE id=?', (despesa_id,)).fetchone()
+        regra_anterior = conn.execute('SELECT despesa_id FROM email_despesa_regra WHERE remetente=?', (remetente,)).fetchone()
+        nova = not regra_anterior or regra_anterior['despesa_id'] != despesa_id
+        conn.execute(
+            'INSERT INTO email_despesa_regra (remetente, despesa_id) VALUES (?,?) '
+            'ON CONFLICT(remetente) DO UPDATE SET despesa_id=excluded.despesa_id',
+            (remetente, despesa_id)
+        )
+        if nova and despesa:
+            _registrar_regra_email(remetente, despesa['nome'])
+
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+def _registrar_regra_email(remetente: str, despesa_nome: str):
+    """Espelha a regra remetente->despesa em docs/, para consulta humana —
+    a fonte de verdade que o app usa é a tabela email_despesa_regra."""
+    if not os.path.exists(DICIONARIO_EMAILS_PATH):
+        os.makedirs(os.path.dirname(DICIONARIO_EMAILS_PATH), exist_ok=True)
+        with open(DICIONARIO_EMAILS_PATH, 'w', encoding='utf-8') as f:
+            f.write(
+                '# Dicionário de Remetentes de Email\n\n'
+                'Toda vez que você associa um boleto encontrado por email a uma despesa, o app\n'
+                'grava o remetente na tabela `email_despesa_regra` — da próxima busca, esse\n'
+                'remetente já vem pré-associado à mesma despesa, só pra você conferir o valor/linha\n'
+                'digitável do mês. Este arquivo é só o espelho legível dessa tabela; a fonte de\n'
+                'verdade que o app consulta é o banco.\n\n'
+                '| Remetente | Despesa |\n'
+                '|---|---|\n'
+            )
+
+    with open(DICIONARIO_EMAILS_PATH, encoding='utf-8') as f:
+        linhas = f.readlines()
+
+    if f'`{remetente}`' in ''.join(linhas):
+        # já existia — atualiza a linha em vez de duplicar
+        linhas = [l for l in linhas if f'`{remetente}`' not in l]
+
+    nova_linha = f'| `{remetente}` | {despesa_nome} |\n'
+    idx_insercao = len(linhas)
+    for i, linha in enumerate(linhas):
+        if linha.startswith('|'):
+            idx_insercao = i + 1
+    linhas.insert(idx_insercao, nova_linha)
+
+    with open(DICIONARIO_EMAILS_PATH, 'w', encoding='utf-8') as f:
+        f.writelines(linhas)

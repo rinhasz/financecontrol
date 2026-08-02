@@ -78,7 +78,7 @@ def list_lancamentos():
 @bp.route('/lancamentos/<int:lid>', methods=['PATCH'])
 def update_lancamento(lid):
     data = request.json or {}
-    allowed = ['valor_esperado', 'status', 'transacao_id', 'valor_real', 'data_pagamento']
+    allowed = ['valor_esperado', 'status', 'transacao_id', 'valor_real', 'data_pagamento', 'linha_digitavel']
     fields = {k: v for k, v in data.items() if k in allowed}
     if not fields:
         return jsonify({'ok': False}), 400
