@@ -69,7 +69,8 @@ export const api = {
     confirmar: (mesRef: string, pares: { transacao_id: number; despesa_id: number; despesa_id_sugerido: number | null }[]) =>
       post('/api/batimento/confirmar', { mes_ref: mesRef, pares }),
     corrigir: (mesRef: string, transacaoId: number, despesaId: number) =>
-      post('/api/batimento/corrigir', { mes_ref: mesRef, transacao_id: transacaoId, despesa_id: despesaId })
+      post('/api/batimento/corrigir', { mes_ref: mesRef, transacao_id: transacaoId, despesa_id: despesaId }),
+    resetar: (mesRef: string) => post('/api/batimento/resetar', { mes_ref: mesRef })
   },
   transacoes: {
     list: (mes: string) => get(`/api/transacoes?mes=${mes}`)

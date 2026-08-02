@@ -85,6 +85,16 @@ export function MesAtual() {
     load()
   }
 
+  async function resetarMes() {
+    const ok = window.confirm(
+      `Resetar ${mesRefLabel(mesRef)}? Isso volta todas as despesas desse mês pra "Em aberto" e desfaz os ` +
+      'casamentos com o extrato. As transações importadas continuam no banco (não precisa reimportar).'
+    )
+    if (!ok) return
+    await api.batimento.resetar(mesRef)
+    load()
+  }
+
   async function copiarBoleto(l: Lancamento) {
     if (!l.linha_digitavel) return
     await navigator.clipboard.writeText(l.linha_digitavel.replace(/\s+/g, ''))
@@ -133,6 +143,10 @@ export function MesAtual() {
           <button onClick={load}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
             <RefreshIcon /> Atualizar
+          </button>
+          <button onClick={resetarMes}
+            className="px-3 py-1.5 rounded-md text-sm text-zinc-500 hover:text-red-400 hover:bg-red-950/20 transition-colors">
+            Resetar mês
           </button>
         </div>
       </div>

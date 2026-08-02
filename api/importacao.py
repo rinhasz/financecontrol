@@ -266,6 +266,22 @@ def importar():
 
     datas = sorted(t['data'] for t in txs)
     conn = get_db()
+
+    # Importar o mesmo período mais de uma vez no mês é o fluxo normal (o
+    # usuário reimporta pra pegar lançamentos novos) — não pode duplicar o
+    # que já foi trazido antes. Mesma (data, descrição, valor) = mesma
+    # transação; aceita o risco raro de duas transações reais idênticas no
+    # mesmo dia serem tratadas como uma só, em troca de nunca duplicar.
+    existentes = {
+        (r['data'], r['descricao'], r['valor'])
+        for r in conn.execute(
+            'SELECT data, descricao, valor FROM transacao WHERE data BETWEEN ? AND ?',
+            (datas[0], datas[-1])
+        ).fetchall()
+    }
+    novas = [t for t in txs if (t['data'], t['descricao'], t['valor']) not in existentes]
+    duplicadas = len(txs) - len(novas)
+
     cur = conn.execute(
         'INSERT INTO importacao (banco, formato, arquivo, periodo_ini, periodo_fim) VALUES (?,?,?,?,?)',
         (banco, formato, filename, datas[0], datas[-1])
@@ -274,19 +290,24 @@ def importar():
     today = date.today().isoformat()
 
     batch = []
-    for t in txs:
+    for t in novas:
         situacao = t.get('situacao') or ('agendada' if t['data'] > today else 'efetivada')
         tipo = 'debito' if t['valor'] < 0 else 'credito'
         batch.append((t['data'], t['descricao'], t['valor'], tipo, situacao, banco, import_id))
 
-    conn.executemany(
-        'INSERT INTO transacao (data, descricao, valor, tipo, situacao, banco_origem, import_id) VALUES (?,?,?,?,?,?,?)',
-        batch
-    )
+    if batch:
+        conn.executemany(
+            'INSERT INTO transacao (data, descricao, valor, tipo, situacao, banco_origem, import_id) VALUES (?,?,?,?,?,?,?)',
+            batch
+        )
     conn.commit()
     conn.close()
 
-    return jsonify({'ok': True, 'msg': f'{len(txs)} transações importadas', 'transacoes': txs, 'import_id': import_id})
+    msg = f'{len(novas)} transações novas importadas'
+    if duplicadas:
+        msg += f' ({duplicadas} já tinham sido importadas antes e foram ignoradas)'
+
+    return jsonify({'ok': True, 'msg': msg, 'transacoes': novas, 'import_id': import_id})
 
 
 @bp.route('/batimento', methods=['POST'])
@@ -495,6 +516,36 @@ def corrigir_batimento():
 
     _registrar_dicionario(transacao['descricao'], despesa['nome'], despesa_errada['despesa_nome'] if despesa_errada else None)
 
+    return jsonify({'ok': True})
+
+
+@bp.route('/batimento/resetar', methods=['POST'])
+def resetar_mes():
+    """Zera o progresso de batimento de um mês — volta todo lançamento pra
+    'nao_encontrado' e desvincula as transações do período. Não apaga o
+    histórico bruto importado (transacao/importacao): as transações
+    voltam a aparecer como 'sobrando' pra bater de novo, sem precisar
+    reimportar o extrato. As regras aprendidas (dicionário, remetente de
+    email) também não são mexidas — são conhecimento geral, não do mês."""
+    data = request.json or {}
+    mes_ref = data.get('mes_ref', '')
+    if not mes_ref:
+        return jsonify({'ok': False, 'msg': 'mes_ref é obrigatório'}), 400
+
+    conn = get_db()
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
+    ini, fim = periodo_competencia(mes_ref, dia_corte)
+
+    conn.execute(
+        "UPDATE transacao SET despesa_id=NULL, classificacao='extra' WHERE data BETWEEN ? AND ? AND despesa_id IS NOT NULL",
+        (ini, fim)
+    )
+    conn.execute(
+        "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, data_pagamento=NULL, linha_digitavel=NULL WHERE mes_ref=?",
+        (mes_ref,)
+    )
+    conn.commit()
+    conn.close()
     return jsonify({'ok': True})
 
 
