@@ -133,6 +133,11 @@ def init_db():
     if 'linha_digitavel' not in colunas:
         conn.execute('ALTER TABLE lancamento ADD COLUMN linha_digitavel TEXT')
 
+    # migração: distingue código de boleto de código Pix "copia e cola" —
+    # ambos ficam guardados em linha_digitavel, este campo só marca qual é
+    if 'tipo_codigo' not in colunas:
+        conn.execute('ALTER TABLE lancamento ADD COLUMN tipo_codigo TEXT')
+
     conn.commit()
     conn.close()
     print(f'[db] initialized at {DB_PATH}')

@@ -46,6 +46,14 @@ GEMINI_BATCH_SIZE = 200
 RE_LINHA_DIGITAVEL = re.compile(
     r'\d{5}[.\s]?\d{5}\s+\d{5}[.\s]?\d{6}\s+\d{5}[.\s]?\d{6}\s+\d\s+\d{14,17}'
 )
+# Código Pix "copia e cola" (BR Code / EMV): sempre começa com o payload
+# format indicator "00020..." e termina no campo de CRC "6304XXXX" — mesma
+# ideia da linha digitável, uma assinatura estrutural fixa que dá pra casar
+# por regex sem precisar entender o conteúdo em si. Aceita espaço/quebra de
+# linha no meio porque o HTML do email pode "reformatar" o texto ao virar
+# texto puro (ver _extrair_texto_html) mesmo o código original não tendo —
+# os espaços são removidos do resultado antes de guardar/validar.
+RE_PIX = re.compile(r'00020\d{2}[0-9A-Za-z.\-/*\s]{40,600}?6304[0-9A-Fa-f]{4}')
 RE_VALOR = re.compile(r'R\$\s*([\d.]{1,12},\d{2})')
 
 
@@ -62,6 +70,22 @@ def _linha_digitavel_valida(s) -> bool:
     if len(set(digitos)) <= 2:  # tudo zero, tudo um dígito repetido etc.
         return False
     if digitos in ('12345678901234567890123456789012345678901234567', '123456789012345678901234567890123456789012345678'):
+        return False
+    return True
+
+
+def _codigo_pix_valido(s) -> bool:
+    """Mesma cautela anti-alucinação que _linha_digitavel_valida, adaptada
+    à estrutura do Pix copia-e-cola: tamanho plausível, começa com o
+    indicador de payload e tem o campo de CRC perto do fim."""
+    if not isinstance(s, str):
+        return False
+    s = s.strip()
+    if not (40 <= len(s) <= 700):
+        return False
+    if not s.startswith('0002'):
+        return False
+    if '6304' not in s[-12:]:
         return False
     return True
 
@@ -291,13 +315,21 @@ def _texto_completo(token: str, m: dict) -> str:
     return texto
 
 
-def _extrair_boleto_regex(texto: str):
-    linha = RE_LINHA_DIGITAVEL.search(texto)
+def _extrair_codigo_regex(texto: str):
+    """Fallback sem Gemini: tenta achar boleto primeiro, depois Pix.
+    Retorna (codigo, tipo_codigo, valor)."""
     valores = RE_VALOR.findall(texto)
-    return (
-        re.sub(r'\s+', ' ', linha.group()).strip() if linha else None,
-        valores[0] if valores else None,
-    )
+    valor = valores[0] if valores else None
+
+    linha = RE_LINHA_DIGITAVEL.search(texto)
+    if linha:
+        return re.sub(r'\s+', ' ', linha.group()).strip(), 'boleto', valor
+
+    pix = RE_PIX.search(texto)
+    if pix:
+        return re.sub(r'\s+', '', pix.group()).strip(), 'pix', valor
+
+    return None, None, valor
 
 
 def _gemini_client():
@@ -366,11 +398,14 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
     prompt = (
         'Analise o texto abaixo, extraído de um email/fatura em português. Extraia:\n'
         '- valor: o valor total a pagar, em reais, como número (ex: 1234.56). null se não achar.\n'
-        '- linha_digitavel: a linha digitável do boleto — uma sequência de 47 ou 48 dígitos (às vezes '
-        'com pontos/espaços) que aparece LITERALMENTE no texto abaixo, copiada exatamente como está. '
-        'IMPORTANTE: nunca invente, estime, complete ou use um exemplo/placeholder — se o texto não '
-        'contém essa sequência de números escrita nele, retorne null. Não é aceitável "chutar" um valor '
-        'plausível.\n'
+        '- linha_digitavel: o código de pagamento — pode ser a linha digitável de um BOLETO (uma '
+        'sequência de 47 ou 48 dígitos, às vezes com pontos/espaços) OU um código PIX "copia e cola" '
+        '(uma string alfanumérica longa que começa com "00020..." e termina perto de "6304" seguido de '
+        '4 caracteres). Copie EXATAMENTE como aparece no texto abaixo — nunca invente, estime, complete '
+        'ou use um exemplo/placeholder; se nenhuma dessas duas sequências aparece literalmente escrita '
+        'no texto, retorne null. Não é aceitável "chutar" um valor plausível.\n'
+        '- tipo_codigo: "boleto" se linha_digitavel for uma linha digitável de boleto, "pix" se for um '
+        'código Pix copia e cola. null se linha_digitavel for null.\n'
         f'- despesa_sugerida: a mais provável entre exatamente estes nomes: {json.dumps(despesas_nomes, ensure_ascii=False)}. '
         'null se nenhuma corresponder bem ao remetente/assunto/conteúdo.\n\n'
         f'TEXTO:\n{texto[:8000]}'
@@ -386,6 +421,7 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
                     'properties': {
                         'valor': {'type': 'number'},
                         'linha_digitavel': {'type': 'string'},
+                        'tipo_codigo': {'type': 'string', 'enum': ['boleto', 'pix']},
                         'despesa_sugerida': {'type': 'string'},
                     },
                 },
@@ -416,30 +452,43 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
         # pré-preenchido, sem depender de bater de novo por assunto/IA
         despesa_conhecida = despesas_por_id.get(regras.get(remetente))
 
+        origem_sugestao = None
         if client:
             if m['id'] not in ids_fatura and not despesa_conhecida:
                 continue
             texto = _texto_completo(token, m)
             info = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
-            despesa = despesa_conhecida or despesas_por_nome.get(info.get('despesa_sugerida') or '')
+            despesa_ia = despesas_por_nome.get(info.get('despesa_sugerida') or '')
+            despesa = despesa_conhecida or despesa_ia
+            origem_sugestao = 'regra' if despesa_conhecida else ('ia' if despesa_ia else None)
             valor_num = info.get('valor')
             valor = f'{valor_num:.2f}'.replace('.', ',') if isinstance(valor_num, (int, float)) else None
             linha_digitavel = info.get('linha_digitavel')
-            # o Gemini pode "alucinar" uma linha plausível em vez de dizer que
-            # não achou — só aceita se for um número real (47/48 dígitos, não
-            # degenerado) E se esses dígitos aparecem de fato no texto extraído
-            if linha_digitavel and _linha_digitavel_valida(linha_digitavel):
-                digitos = re.sub(r'\D', '', linha_digitavel)
-                if digitos not in re.sub(r'\D', '', texto):
-                    linha_digitavel = None
-            else:
-                linha_digitavel = None
+            tipo_codigo = info.get('tipo_codigo') if info.get('tipo_codigo') in ('boleto', 'pix') else None
+            # o Gemini pode "alucinar" um código plausível em vez de dizer
+            # que não achou — só aceita se tiver o formato certo (boleto:
+            # 47/48 dígitos; pix: estrutura 0002...6304XXXX) E se aparecer
+            # de fato, literalmente, no texto extraído do email
+            valido = (
+                (tipo_codigo == 'boleto' and _linha_digitavel_valida(linha_digitavel)) or
+                (tipo_codigo == 'pix' and _codigo_pix_valido(linha_digitavel))
+            )
+            if valido:
+                if tipo_codigo == 'boleto':
+                    achado = re.sub(r'\D', '', linha_digitavel) in re.sub(r'\D', '', texto)
+                else:
+                    achado = re.sub(r'\s+', '', linha_digitavel) in re.sub(r'\s+', '', texto)
+                if not achado:
+                    valido = False
+            if not valido:
+                linha_digitavel, tipo_codigo = None, None
         else:
             sugerida = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
+            origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida else None)
             if not sugerida and not _parece_fatura(assunto):
                 continue
             texto = _texto_completo(token, m)
-            linha_digitavel, valor = _extrair_boleto_regex(texto)
+            linha_digitavel, tipo_codigo, valor = _extrair_codigo_regex(texto)
             if not sugerida and not linha_digitavel and not valor:
                 continue
             despesa = sugerida
@@ -451,8 +500,10 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
             'data': m.get('receivedDateTime'),
             'valor_encontrado': valor,
             'linha_digitavel': linha_digitavel,
+            'tipo_codigo': tipo_codigo,
             'despesa_sugerida_id': despesa['id'] if despesa else None,
             'despesa_sugerida_nome': despesa['nome'] if despesa else None,
+            'origem_sugestao': origem_sugestao,
         })
 
     return boletos, len(mensagens), lotes_com_falha
@@ -557,32 +608,30 @@ def buscar_cancelar():
     return jsonify({'ok': True})
 
 
-@bp.route('/email/associar', methods=['POST'])
-def associar():
-    """Vincula um boleto encontrado a uma despesa/mês — não mexe em status
-    de pagamento, só guarda a linha digitável (e o valor, se ainda não
-    tinha um esperado) pra aparecer em Mês Atual. Também grava o remetente
-    como regra: da próxima vez, esse email já vem pré-associado à despesa."""
-    data = request.json or {}
-    despesa_id = data.get('despesa_id')
-    mes_ref = data.get('mes_ref', '')
-    linha_digitavel = data.get('linha_digitavel')
-    remetente = data.get('remetente')
-    valor = data.get('valor')
+def _aplicar_associacao(conn, item: dict):
+    """Vincula um boleto/pix encontrado a uma despesa/mês — não mexe em
+    status de pagamento, só guarda o código (e o valor, se ainda não tinha
+    um esperado) pra aparecer em Mês Atual. Também grava o remetente como
+    regra: da próxima vez, esse email já vem pré-associado à despesa."""
+    despesa_id = item.get('despesa_id')
+    mes_ref = item.get('mes_ref', '')
+    linha_digitavel = item.get('linha_digitavel')
+    tipo_codigo = item.get('tipo_codigo')
+    remetente = item.get('remetente')
+    valor = item.get('valor')
     if isinstance(valor, str):
         valor = parse_number(valor)
 
     if not (despesa_id and mes_ref):
-        return jsonify({'ok': False, 'msg': 'despesa_id e mes_ref são obrigatórios'}), 400
+        raise ValueError('despesa_id e mes_ref são obrigatórios')
 
-    conn = get_db()
     conn.execute(
         'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
         (mes_ref, despesa_id, valor or 0)
     )
     conn.execute(
-        'UPDATE lancamento SET linha_digitavel=? WHERE despesa_id=? AND mes_ref=?',
-        (linha_digitavel, despesa_id, mes_ref)
+        'UPDATE lancamento SET linha_digitavel=?, tipo_codigo=? WHERE despesa_id=? AND mes_ref=?',
+        (linha_digitavel, tipo_codigo, despesa_id, mes_ref)
     )
 
     if remetente:
@@ -597,9 +646,28 @@ def associar():
         if nova and despesa:
             _registrar_regra_email(remetente, despesa['nome'])
 
+
+@bp.route('/email/associar/lote', methods=['POST'])
+def associar_lote():
+    """Confirma de uma vez todas as associações represadas na tela de
+    busca — nada é gravado antes disso (ver EmailBusca.tsx: 'Confirmar
+    tudo'/'Cancelar tudo'), o mesmo padrão de preview-then-confirm já usado
+    no batimento."""
+    itens = (request.json or {}).get('itens', [])
+    if not itens:
+        return jsonify({'ok': False, 'msg': 'Nenhuma associação para confirmar'}), 400
+
+    conn = get_db()
+    try:
+        for item in itens:
+            _aplicar_associacao(conn, item)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'ok': False, 'msg': str(e)}), 400
+
     conn.commit()
     conn.close()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'aplicadas': len(itens)})
 
 
 def _registrar_regra_email(remetente: str, despesa_nome: str):

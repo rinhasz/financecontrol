@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { cn, currentMesRef } from '../lib/utils'
+import { cn, currentMesRef, mesRefLabel } from '../lib/utils'
 import { DespesaPicker } from '../components/DespesaPicker'
 
 interface Boleto {
@@ -10,11 +10,25 @@ interface Boleto {
   data: string | null
   valor_encontrado: string | null
   linha_digitavel: string | null
+  tipo_codigo: 'boleto' | 'pix' | null
   despesa_sugerida_id: number | null
   despesa_sugerida_nome: string | null
+  origem_sugestao: 'regra' | 'ia' | 'palavra_chave' | null
 }
 
 interface Despesa { id: number; nome: string }
+
+interface Pendente {
+  boletoId: string
+  despesaId: number
+  despesaNome: string
+  mesRef: string
+  linhaDigitavel: string | null
+  tipoCodigo: string | null
+  valor: string | null
+  remetente: string
+  origem: 'manual' | 'regra'
+}
 
 interface BuscaStatus {
   rodando: boolean
@@ -34,7 +48,14 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+function addMonths(dateStr: string, n: number): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  d.setMonth(d.getMonth() + n)
+  return isoDate(d)
+}
+
 const POLL_MS = 1200
+const ULTIMA_BUSCA_KEY = 'financecontrol:ultimaBuscaEmailAssociada'
 
 export function EmailBusca() {
   const [status, setStatus] = useState<{ configurado: boolean; conectado: string | null } | null>(null)
@@ -63,7 +84,19 @@ export function EmailBusca() {
   const [associando, setAssociando] = useState<string | null>(null)
   const [despesaEscolhida, setDespesaEscolhida] = useState('')
   const [mesEscolhido, setMesEscolhido] = useState(currentMesRef())
-  const [associados, setAssociados] = useState<Set<string>>(new Set())
+
+  // associações represadas em tela — nada é gravado até "Confirmar tudo"
+  const [pendentes, setPendentes] = useState<Pendente[]>([])
+  const [confirmados, setConfirmados] = useState<Set<string>>(new Set())
+  const confirmadosRef = useRef<Set<string>>(new Set())
+  const [confirmando, setConfirmando] = useState(false)
+
+  // "Repetir mês anterior": enquanto ativo, boletos com sugestão vinda de
+  // regra já conhecida entram sozinhos em pendentes (ver aplicarStatus)
+  const [repetindo, setRepetindo] = useState(false)
+  const repetindoRef = useRef(false)
+  const mesAlvoRepeticaoRef = useRef(currentMesRef())
+  const [ultimaBusca, setUltimaBusca] = useState<{ ini: string; fim: string } | null>(null)
 
   const [codigoDispositivo, setCodigoDispositivo] = useState<{ verification_uri: string; user_code: string } | null>(null)
   const [aguardandoLogin, setAguardandoLogin] = useState(false)
@@ -80,6 +113,15 @@ export function EmailBusca() {
     }
   }
 
+  function marcarConfirmados(ids: string[]) {
+    setConfirmados(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.add(id))
+      confirmadosRef.current = next
+      return next
+    })
+  }
+
   function aplicarStatus(s: BuscaStatus) {
     setBoletos(s.boletos)
     setTotalEmails(s.total_emails)
@@ -90,6 +132,29 @@ export function EmailBusca() {
     setAvisos(s.avisos || [])
     setBuscaCancelada(s.cancelado)
     if (s.erro) setErro(s.erro)
+
+    if (repetindoRef.current) {
+      setPendentes(prev => {
+        const jaTem = new Set(prev.map(p => p.boletoId))
+        const novos = s.boletos.filter(b =>
+          b.origem_sugestao === 'regra' && b.despesa_sugerida_id != null &&
+          !jaTem.has(b.id) && !confirmadosRef.current.has(b.id)
+        )
+        if (novos.length === 0) return prev
+        return [...prev, ...novos.map(b => ({
+          boletoId: b.id,
+          despesaId: b.despesa_sugerida_id as number,
+          despesaNome: b.despesa_sugerida_nome || '',
+          mesRef: mesAlvoRepeticaoRef.current,
+          linhaDigitavel: b.linha_digitavel,
+          tipoCodigo: b.tipo_codigo,
+          valor: b.valor_encontrado,
+          remetente: b.remetente,
+          origem: 'regra' as const,
+        }))]
+      })
+    }
+
     if (!s.rodando) {
       setBuscando(false)
       setCancelando(false)
@@ -107,6 +172,10 @@ export function EmailBusca() {
   useEffect(() => {
     carregarStatus()
     api.catalogo.list().then(setDespesas)
+    const salvo = localStorage.getItem(ULTIMA_BUSCA_KEY)
+    if (salvo) {
+      try { setUltimaBusca(JSON.parse(salvo)) } catch { /* formato antigo/corrompido — ignora */ }
+    }
     // se a página remontar (ou o usuário navegar de volta) com uma busca já
     // em andamento no servidor, retoma o acompanhamento em vez de perder o progresso
     api.email.buscarStatus().then((s: BuscaStatus) => {
@@ -147,18 +216,24 @@ export function EmailBusca() {
     }
   }
 
-  async function buscar() {
+  async function buscar(iniParam?: string, fimParam?: string, repetir = false) {
+    const ini = iniParam ?? dataIni
+    const fim = fimParam ?? dataFim
     setErro('')
     setAvisos([])
     setBoletos([])
     setTotalEmails(0)
     setDiasProcessados(0)
     setBuscaCancelada(false)
-    setAssociados(new Set())
+    setPendentes([])
+    setConfirmados(new Set())
+    confirmadosRef.current = new Set()
+    setRepetindo(repetir)
+    repetindoRef.current = repetir
     setBuscando(true)
     setBuscaIniciada(true)
     try {
-      const res = await api.email.buscarIniciar(dataIni, dataFim)
+      const res = await api.email.buscarIniciar(ini, fim)
       if (!res.ok) {
         setErro(res.msg || 'Erro ao iniciar busca')
         setBuscando(false)
@@ -170,6 +245,16 @@ export function EmailBusca() {
       setErro(String(e))
       setBuscando(false)
     }
+  }
+
+  function repetirMesAnterior() {
+    if (!ultimaBusca) return
+    const novaIni = addMonths(ultimaBusca.ini, 1)
+    const novaFim = addMonths(ultimaBusca.fim, 1)
+    setDataIni(novaIni)
+    setDataFim(novaFim)
+    mesAlvoRepeticaoRef.current = novaFim.slice(0, 7)
+    buscar(novaIni, novaFim, true)
   }
 
   async function cancelar() {
@@ -194,11 +279,149 @@ export function EmailBusca() {
     setMesEscolhido(currentMesRef())
   }
 
-  async function aplicarAssociacao(b: Boleto) {
+  function adicionarPendente(b: Boleto, despesaId: number, mesRef: string, origem: 'manual' | 'regra') {
+    const despesa = despesas.find(d => d.id === despesaId)
+    setPendentes(prev => {
+      if (prev.some(p => p.boletoId === b.id)) return prev
+      return [...prev, {
+        boletoId: b.id,
+        despesaId,
+        despesaNome: despesa?.nome || b.despesa_sugerida_nome || '',
+        mesRef,
+        linhaDigitavel: b.linha_digitavel,
+        tipoCodigo: b.tipo_codigo,
+        valor: b.valor_encontrado,
+        remetente: b.remetente,
+        origem,
+      }]
+    })
+  }
+
+  function aplicarAssociacao(b: Boleto) {
     if (!despesaEscolhida) return
-    await api.email.associar(Number(despesaEscolhida), mesEscolhido, b.linha_digitavel, b.valor_encontrado, b.remetente)
-    setAssociados(s => new Set(s).add(b.id))
+    adicionarPendente(b, Number(despesaEscolhida), mesEscolhido, 'manual')
     setAssociando(null)
+  }
+
+  function desfazerPendente(boletoId: string) {
+    setPendentes(prev => prev.filter(p => p.boletoId !== boletoId))
+  }
+
+  function cancelarTudo() {
+    setPendentes([])
+  }
+
+  async function confirmarTudo() {
+    if (pendentes.length === 0) return
+    setConfirmando(true)
+    try {
+      const itens = pendentes.map(p => ({
+        despesa_id: p.despesaId,
+        mes_ref: p.mesRef,
+        linha_digitavel: p.linhaDigitavel,
+        tipo_codigo: p.tipoCodigo,
+        valor: p.valor,
+        remetente: p.remetente,
+      }))
+      const res = await api.email.associarLote(itens)
+      if (!res.ok) {
+        setErro(res.msg || 'Erro ao confirmar associações')
+        return
+      }
+      marcarConfirmados(pendentes.map(p => p.boletoId))
+      setPendentes([])
+      const periodo = { ini: dataIni, fim: dataFim }
+      localStorage.setItem(ULTIMA_BUSCA_KEY, JSON.stringify(periodo))
+      setUltimaBusca(periodo)
+    } catch (e) {
+      setErro(String(e))
+    } finally {
+      setConfirmando(false)
+    }
+  }
+
+  const pendentePorBoleto = new Map(pendentes.map(p => [p.boletoId, p]))
+  const temGrupos = pendentes.length > 0 || confirmados.size > 0
+  const associadosOuPendentes = boletos.filter(b => pendentePorBoleto.has(b.id) || confirmados.has(b.id))
+  const naoAssociados = boletos.filter(b => !pendentePorBoleto.has(b.id) && !confirmados.has(b.id))
+
+  function renderBoleto(b: Boleto) {
+    const pendente = pendentePorBoleto.get(b.id)
+    const confirmado = confirmados.has(b.id)
+    return (
+      <div key={b.id} className="px-4 py-3 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-zinc-300 truncate">{b.assunto}</p>
+            <p className="text-zinc-600 text-xs truncate">
+              {b.remetente} — {b.data ? new Date(b.data).toLocaleDateString('pt-BR') : ''}
+              {b.despesa_sugerida_nome && !pendente && !confirmado && (
+                <> — sugestão{b.origem_sugestao === 'regra' ? ' (associação anterior)' : b.origem_sugestao === 'ia' ? ' (IA)' : ''}:{' '}
+                  <span className="text-zinc-400">{b.despesa_sugerida_nome}</span></>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-none">
+            {b.valor_encontrado && (
+              <span className="text-emerald-400 font-medium tabular-nums whitespace-nowrap">R$ {b.valor_encontrado}</span>
+            )}
+            {confirmado ? (
+              <span className="text-xs text-emerald-400 whitespace-nowrap">Associado ✓</span>
+            ) : pendente ? (
+              <button onClick={() => desfazerPendente(b.id)}
+                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-red-600 hover:text-red-400 transition-colors whitespace-nowrap">
+                Desfazer
+              </button>
+            ) : (
+              <button onClick={() => abrirAssociacao(b)}
+                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
+                Associar
+              </button>
+            )}
+          </div>
+        </div>
+
+        {pendente && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Pendente: <span className="text-zinc-300">{pendente.despesaNome}</span> em {mesRefLabel(pendente.mesRef)}
+            {pendente.origem === 'regra' && <span className="text-zinc-600"> (associação anterior)</span>}
+          </p>
+        )}
+
+        {b.linha_digitavel ? (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-zinc-500 flex-none">
+              {b.tipo_codigo === 'pix' ? 'Pix' : 'Boleto'}
+            </span>
+            <code className="text-xs text-zinc-400 bg-zinc-900/60 px-2 py-1 rounded flex-1 truncate">
+              {b.linha_digitavel}
+            </code>
+            <button onClick={() => copiar(b.linha_digitavel!)}
+              className={cn('text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap',
+                copiado === b.linha_digitavel
+                  ? 'border-emerald-700 text-emerald-400'
+                  : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+              {copiado === b.linha_digitavel ? 'Copiado!' : (b.tipo_codigo === 'pix' ? 'Copiar Pix' : 'Copiar linha digitável')}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-zinc-700">Código de pagamento não encontrado — abra o email manualmente.</p>
+        )}
+
+        {associando === b.id && !pendente && !confirmado && (
+          <div className="mt-3 flex items-center gap-2 flex-wrap bg-zinc-900/60 rounded p-3">
+            <DespesaPicker despesas={despesas} value={despesaEscolhida} onChange={setDespesaEscolhida}
+              placeholder="Digite pra buscar a despesa..." className="w-56" />
+            <input type="month" value={mesEscolhido} onChange={e => setMesEscolhido(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+            <button onClick={() => aplicarAssociacao(b)} disabled={!despesaEscolhida}
+              className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+              Adicionar
+            </button>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -206,13 +429,13 @@ export function EmailBusca() {
       <div className="px-6 pb-4 flex-none">
         <h1 className="text-xl font-semibold text-zinc-100">Procurar em Emails</h1>
         <p className="text-sm text-zinc-500 mt-0.5">
-          Busca boletos e faturas (cartão, seguro saúde, etc.) no período escolhido — associe o que encontrar a
-          uma despesa e mês, e a linha digitável fica disponível pra copiar em Mês Atual. Cada associação também
-          vira uma regra: da próxima vez, o mesmo remetente já vem pré-preenchido, só pra você conferir e
-          confirmar. Não cria nem altera nenhum lançamento sozinho.
+          Busca boletos, Pix e faturas (cartão, seguro saúde, etc.) no período escolhido — associe o que encontrar
+          a uma despesa e mês. Nada é gravado na hora: as associações ficam pendentes pra revisão e só valem
+          depois de "Confirmar tudo". Cada confirmação também vira uma regra: da próxima vez, o mesmo remetente já
+          vem pré-preenchido.
         </p>
         <p className="text-xs text-amber-500/80 mt-1">
-          A extração de valor/linha digitável é automática (por IA) — confira sempre contra o email
+          A extração de valor/código de pagamento é automática (por IA) — confira sempre contra o email
           original antes de pagar.
         </p>
       </div>
@@ -274,10 +497,16 @@ export function EmailBusca() {
               <input type="date" value={dataFim} onChange={e => setDataFim(e.target.value)}
                 className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
             </div>
-            <button onClick={buscar} disabled={buscando}
+            <button onClick={() => buscar()} disabled={buscando}
               className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
               {buscando ? 'Buscando...' : 'Buscar'}
             </button>
+            {ultimaBusca && (
+              <button onClick={repetirMesAnterior} disabled={buscando}
+                className="px-4 py-2 rounded-md border border-emerald-700 text-emerald-400 text-sm font-medium disabled:opacity-40 hover:bg-emerald-950/30 transition-colors">
+                Repetir mês anterior
+              </button>
+            )}
             {buscando && (
               <button onClick={cancelar} disabled={cancelando}
                 className="px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 text-sm font-medium disabled:opacity-40 hover:border-red-600 hover:text-red-400 transition-colors">
@@ -315,73 +544,48 @@ export function EmailBusca() {
         )}
 
         {buscaIniciada && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-sm text-zinc-500">
               {totalEmails} emails {buscando ? 'verificados até agora' : 'no período'}, {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados.
             </p>
+
+            {pendentes.length > 0 && (
+              <div className="sticky top-0 z-10 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 shadow-lg">
+                <p className="text-sm text-zinc-300 flex-1">
+                  {pendentes.length} associaç{pendentes.length === 1 ? 'ão pendente' : 'ões pendentes'} — nada foi salvo ainda.
+                </p>
+                <button onClick={cancelarTudo} disabled={confirmando}
+                  className="px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 text-sm hover:border-red-600 hover:text-red-400 transition-colors disabled:opacity-40">
+                  Cancelar tudo
+                </button>
+                <button onClick={confirmarTudo} disabled={confirmando}
+                  className="px-4 py-1.5 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 transition-colors disabled:opacity-40">
+                  {confirmando ? 'Confirmando...' : `Confirmar tudo (${pendentes.length})`}
+                </button>
+              </div>
+            )}
 
             {!buscando && boletos.length === 0 && (
               <p className="text-sm text-zinc-600">Nada encontrado nesse período (de {totalEmails} emails verificados) — tente um intervalo maior ou confira se o email não está em outra pasta.</p>
             )}
 
-            <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
-              {boletos.map(b => (
-                <div key={b.id} className="px-4 py-3 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-zinc-300 truncate">{b.assunto}</p>
-                      <p className="text-zinc-600 text-xs truncate">
-                        {b.remetente} — {b.data ? new Date(b.data).toLocaleDateString('pt-BR') : ''}
-                        {b.despesa_sugerida_nome && <> — sugestão: <span className="text-zinc-400">{b.despesa_sugerida_nome}</span></>}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-none">
-                      {b.valor_encontrado && (
-                        <span className="text-emerald-400 font-medium tabular-nums whitespace-nowrap">R$ {b.valor_encontrado}</span>
-                      )}
-                      {associados.has(b.id) ? (
-                        <span className="text-xs text-emerald-400 whitespace-nowrap">Associado ✓</span>
-                      ) : (
-                        <button onClick={() => abrirAssociacao(b)}
-                          className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                          Associar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {b.linha_digitavel ? (
-                    <div className="mt-2 flex items-center gap-2">
-                      <code className="text-xs text-zinc-400 bg-zinc-900/60 px-2 py-1 rounded flex-1 truncate">
-                        {b.linha_digitavel}
-                      </code>
-                      <button onClick={() => copiar(b.linha_digitavel!)}
-                        className={cn('text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap',
-                          copiado === b.linha_digitavel
-                            ? 'border-emerald-700 text-emerald-400'
-                            : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
-                        {copiado === b.linha_digitavel ? 'Copiado!' : 'Copiar linha digitável'}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-xs text-zinc-700">Linha digitável não encontrada — abra o email manualmente.</p>
-                  )}
-
-                  {associando === b.id && (
-                    <div className="mt-3 flex items-center gap-2 flex-wrap bg-zinc-900/60 rounded p-3">
-                      <DespesaPicker despesas={despesas} value={despesaEscolhida} onChange={setDespesaEscolhida}
-                        placeholder="Digite pra buscar a despesa..." className="w-56" />
-                      <input type="month" value={mesEscolhido} onChange={e => setMesEscolhido(e.target.value)}
-                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
-                      <button onClick={() => aplicarAssociacao(b)} disabled={!despesaEscolhida}
-                        className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-                        Confirmar
-                      </button>
-                    </div>
-                  )}
+            {associadosOuPendentes.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600 mb-2">Associados / pendentes</p>
+                <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
+                  {associadosOuPendentes.map(renderBoleto)}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {naoAssociados.length > 0 && (
+              <div>
+                {temGrupos && <p className="text-xs uppercase tracking-wide text-zinc-600 mb-2">Não associados</p>}
+                <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
+                  {naoAssociados.map(renderBoleto)}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

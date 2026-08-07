@@ -13,6 +13,7 @@ interface Lancamento {
   status: 'pago' | 'agendado' | 'nao_encontrado'
   data_pagamento: string | null
   linha_digitavel: string | null
+  tipo_codigo: 'boleto' | 'pix' | null
 }
 
 interface Resumo {
@@ -255,7 +256,7 @@ export function MesAtual() {
                                   boletoCopiado === l.id
                                     ? 'border-emerald-700 text-emerald-400'
                                     : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
-                                {boletoCopiado === l.id ? 'Copiado!' : 'Copiar boleto'}
+                                {boletoCopiado === l.id ? 'Copiado!' : (l.tipo_codigo === 'pix' ? 'Copiar Pix' : 'Copiar boleto')}
                               </button>
                             )}
                           </td>
