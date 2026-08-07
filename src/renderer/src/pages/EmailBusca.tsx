@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { cn, currentMesRef } from '../lib/utils'
 import { DespesaPicker } from '../components/DespesaPicker'
@@ -16,9 +16,25 @@ interface Boleto {
 
 interface Despesa { id: number; nome: string }
 
+interface BuscaStatus {
+  rodando: boolean
+  cancelado: boolean
+  concluido: boolean
+  erro: string | null
+  avisos: string[]
+  boletos: Boleto[]
+  total_emails: number
+  despesas_pesquisadas: number
+  dia_atual: string | null
+  total_dias: number
+  dias_processados: number
+}
+
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
+
+const POLL_MS = 1200
 
 export function EmailBusca() {
   const [status, setStatus] = useState<{ configurado: boolean; conectado: string | null } | null>(null)
@@ -29,13 +45,20 @@ export function EmailBusca() {
   })
   const [dataFim, setDataFim] = useState(() => isoDate(new Date()))
   const [buscando, setBuscando] = useState(false)
-  const [boletos, setBoletos] = useState<Boleto[] | null>(null)
+  const [cancelando, setCancelando] = useState(false)
+  const [buscaIniciada, setBuscaIniciada] = useState(false)
+  const [boletos, setBoletos] = useState<Boleto[]>([])
   const [pesquisadas, setPesquisadas] = useState(0)
   const [totalEmails, setTotalEmails] = useState(0)
-  const [aviso, setAviso] = useState('')
+  const [totalDias, setTotalDias] = useState(0)
+  const [diasProcessados, setDiasProcessados] = useState(0)
+  const [diaAtual, setDiaAtual] = useState<string | null>(null)
+  const [buscaCancelada, setBuscaCancelada] = useState(false)
+  const [avisos, setAvisos] = useState<string[]>([])
   const [erro, setErro] = useState('')
   const [copiado, setCopiado] = useState<string | null>(null)
   const [despesas, setDespesas] = useState<Despesa[]>([])
+  const pollRef = useRef<number | null>(null)
 
   const [associando, setAssociando] = useState<string | null>(null)
   const [despesaEscolhida, setDespesaEscolhida] = useState('')
@@ -50,7 +73,54 @@ export function EmailBusca() {
     api.email.status().then(setStatus)
   }
 
-  useEffect(() => { carregarStatus() }, [])
+  function pararPolling() {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  function aplicarStatus(s: BuscaStatus) {
+    setBoletos(s.boletos)
+    setTotalEmails(s.total_emails)
+    setPesquisadas(s.despesas_pesquisadas)
+    setTotalDias(s.total_dias)
+    setDiasProcessados(s.dias_processados)
+    setDiaAtual(s.dia_atual)
+    setAvisos(s.avisos || [])
+    setBuscaCancelada(s.cancelado)
+    if (s.erro) setErro(s.erro)
+    if (!s.rodando) {
+      setBuscando(false)
+      setCancelando(false)
+      pararPolling()
+    }
+  }
+
+  function iniciarPolling() {
+    pararPolling()
+    pollRef.current = window.setInterval(() => {
+      api.email.buscarStatus().then(aplicarStatus)
+    }, POLL_MS)
+  }
+
+  useEffect(() => {
+    carregarStatus()
+    api.catalogo.list().then(setDespesas)
+    // se a página remontar (ou o usuário navegar de volta) com uma busca já
+    // em andamento no servidor, retoma o acompanhamento em vez de perder o progresso
+    api.email.buscarStatus().then((s: BuscaStatus) => {
+      if (s.rodando || s.concluido) {
+        setBuscaIniciada(true)
+        aplicarStatus(s)
+        if (s.rodando) {
+          setBuscando(true)
+          iniciarPolling()
+        }
+      }
+    })
+    return pararPolling
+  }, [])
 
   async function conectar() {
     setErroConexao('')
@@ -78,26 +148,37 @@ export function EmailBusca() {
   }
 
   async function buscar() {
-    setBuscando(true)
     setErro('')
-    setAviso('')
-    setBoletos(null)
+    setAvisos([])
+    setBoletos([])
+    setTotalEmails(0)
+    setDiasProcessados(0)
+    setBuscaCancelada(false)
     setAssociados(new Set())
+    setBuscando(true)
+    setBuscaIniciada(true)
     try {
-      const [res, cat] = await Promise.all([api.email.buscar(dataIni, dataFim), api.catalogo.list()])
-      if (res.ok) {
-        setBoletos(res.boletos)
-        setPesquisadas(res.despesas_pesquisadas)
-        setTotalEmails(res.total_emails_periodo ?? 0)
-        setAviso(res.aviso || '')
-        setDespesas(cat)
-      } else {
-        setErro(res.msg || 'Erro ao buscar emails')
+      const res = await api.email.buscarIniciar(dataIni, dataFim)
+      if (!res.ok) {
+        setErro(res.msg || 'Erro ao iniciar busca')
+        setBuscando(false)
+        return
       }
+      setTotalDias(res.total_dias)
+      iniciarPolling()
     } catch (e) {
       setErro(String(e))
-    } finally {
       setBuscando(false)
+    }
+  }
+
+  async function cancelar() {
+    setCancelando(true)
+    try {
+      await api.email.buscarCancelar()
+    } catch (e) {
+      setErro(String(e))
+      setCancelando(false)
     }
   }
 
@@ -197,24 +278,49 @@ export function EmailBusca() {
               className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
               {buscando ? 'Buscando...' : 'Buscar'}
             </button>
+            {buscando && (
+              <button onClick={cancelar} disabled={cancelando}
+                className="px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 text-sm font-medium disabled:opacity-40 hover:border-red-600 hover:text-red-400 transition-colors">
+                {cancelando ? 'Parando...' : 'Parar busca'}
+              </button>
+            )}
             <p className="text-xs text-zinc-600 pb-2">conectado como {status.conectado}</p>
           </div>
         )}
 
-        {erro && <p className="text-sm text-red-400">{erro}</p>}
-        {aviso && (
-          <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-sm text-amber-300">
-            ⚠ {aviso}
+        {buscando && (
+          <div className="max-w-xl space-y-2">
+            <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+              <div className="h-full bg-emerald-600 transition-all duration-300"
+                style={{ width: `${totalDias ? (diasProcessados / totalDias) * 100 : 0}%` }} />
+            </div>
+            <p className="text-xs text-zinc-500">
+              {cancelando
+                ? 'Parando após o dia atual...'
+                : `Buscando dia ${Math.min(diasProcessados + 1, totalDias)} de ${totalDias}${diaAtual ? ` (${new Date(diaAtual + 'T12:00:00').toLocaleDateString('pt-BR')})` : ''} — ${boletos.length} encontrado(s) até agora`}
+            </p>
           </div>
         )}
 
-        {boletos && (
+        {erro && <p className="text-sm text-red-400">{erro}</p>}
+        {avisos.map((a, i) => (
+          <div key={i} className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-sm text-amber-300">
+            ⚠ {a}
+          </div>
+        ))}
+        {buscaCancelada && !buscando && (
+          <p className="text-sm text-zinc-500">
+            Busca interrompida a pedido — mostrando o que foi encontrado até o dia {diasProcessados} de {totalDias} do período.
+          </p>
+        )}
+
+        {buscaIniciada && (
           <div className="space-y-3">
             <p className="text-sm text-zinc-500">
-              {totalEmails} emails no período, {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados.
+              {totalEmails} emails {buscando ? 'verificados até agora' : 'no período'}, {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados.
             </p>
 
-            {boletos.length === 0 && (
+            {!buscando && boletos.length === 0 && (
               <p className="text-sm text-zinc-600">Nada encontrado nesse período (de {totalEmails} emails verificados) — tente um intervalo maior ou confira se o email não está em outra pasta.</p>
             )}
 

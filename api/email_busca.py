@@ -1,4 +1,5 @@
 import base64
+import datetime
 import io
 import json
 import os
@@ -72,6 +73,31 @@ ASSUNTO_FATURA_KEYWORDS = ['fatura', 'boleto', 'conta', 'cobranca', 'cobrança',
 
 _lock = threading.Lock()
 _pending = {}  # device flow em andamento — app desktop de 1 usuário, sem sessão
+
+# Estado da busca de emails em andamento — app desktop de 1 usuário, então uma
+# busca por vez é suficiente (sem necessidade de job_id/sessão). A busca roda
+# dia a dia numa thread de fundo (ver _rodar_busca) para: (1) nunca segurar
+# uma requisição HTTP por minutos — o risco real que travou a busca de 2
+# meses/3005 emails; (2) permitir atualizar a tela incrementalmente conforme
+# cada dia termina; (3) permitir cancelar e ainda assim aproveitar o que já
+# foi encontrado até ali.
+_busca_job = {
+    'rodando': False, 'cancelar': False, 'cancelado': False, 'concluido': False,
+    'erro': None, 'avisos': [], 'boletos': [], 'total_emails': 0,
+    'despesas_pesquisadas': 0, 'dia_atual': None, 'total_dias': 0,
+    'dias_processados': 0, 'periodo': None,
+}
+
+
+def _dias_no_periodo(ini: str, fim: str):
+    d0 = datetime.date.fromisoformat(ini)
+    d1 = datetime.date.fromisoformat(fim)
+    dias = []
+    d = d0
+    while d <= d1:
+        dias.append(d.isoformat())
+        d += datetime.timedelta(days=1)
+    return dias
 
 
 def _load_cache() -> msal.SerializableTokenCache:
@@ -371,30 +397,11 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
         return {}
 
 
-@bp.route('/email/buscar', methods=['POST'])
-def buscar():
-    token = _token_valido()
-    if not token:
-        return jsonify({'ok': False, 'msg': 'Email não conectado — clique em "Conectar com Microsoft" antes de buscar.'}), 400
+def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras, client):
+    """Busca e classifica os emails de um único dia. Retorna
+    (boletos_do_dia, total_emails_do_dia, lotes_de_classificacao_com_falha)."""
+    mensagens = _mensagens_no_periodo(token, dia, dia)
 
-    data = request.json or {}
-    ini, fim = data.get('data_ini'), data.get('data_fim')
-    if not ini or not fim:
-        return jsonify({'ok': False, 'msg': 'data_ini e data_fim são obrigatórios'}), 400
-
-    conn = get_db()
-    despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
-    regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}
-    conn.close()
-    despesas_por_nome = {d['nome']: d for d in despesas}
-    despesas_por_id = {d['id']: d for d in despesas}
-
-    try:
-        mensagens = _mensagens_no_periodo(token, ini, fim)
-    except requests.HTTPError as e:
-        return jsonify({'ok': False, 'msg': f'Falha ao consultar o Microsoft Graph: {e}'}), 502
-
-    client = _gemini_client()
     lotes_com_falha = 0
     if client:
         ids_fatura, lotes_com_falha = _gemini_classificar(client, mensagens)
@@ -448,20 +455,106 @@ def buscar():
             'despesa_sugerida_nome': despesa['nome'] if despesa else None,
         })
 
-    boletos.sort(key=lambda b: b['data'] or '', reverse=True)
+    return boletos, len(mensagens), lotes_com_falha
 
-    aviso = None
-    if lotes_com_falha:
-        total_lotes = (len(mensagens) + GEMINI_BATCH_SIZE - 1) // GEMINI_BATCH_SIZE
-        aviso = (
-            f'{lotes_com_falha} de {total_lotes} lote(s) de classificação por IA falharam — '
-            'o resultado pode estar incompleto. Tente buscar de novo ou reduza o período.'
-        )
 
-    return jsonify({
-        'ok': True, 'periodo': {'ini': ini, 'fim': fim}, 'despesas_pesquisadas': len(despesas),
-        'boletos': boletos, 'total_emails_periodo': len(mensagens), 'aviso': aviso,
-    })
+def _rodar_busca(token, dias):
+    """Roda em thread de fundo: processa um dia por vez, publicando progresso
+    em _busca_job a cada dia concluído para o frontend fazer polling. Verifica
+    o pedido de cancelamento entre dias — se cancelada, para ali e mantém tudo
+    que já foi encontrado (nada é descartado)."""
+    conn = get_db()
+    despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
+    regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}
+    conn.close()
+    despesas_por_nome = {d['nome']: d for d in despesas}
+    despesas_por_id = {d['id']: d for d in despesas}
+    client = _gemini_client()
+
+    with _lock:
+        _busca_job['despesas_pesquisadas'] = len(despesas)
+
+    for dia in dias:
+        with _lock:
+            if _busca_job['cancelar']:
+                break
+            _busca_job['dia_atual'] = dia
+
+        try:
+            boletos_dia, total_dia, falha_dia = _buscar_dia(
+                token, dia, despesas, despesas_por_nome, despesas_por_id, regras, client
+            )
+        except requests.HTTPError as e:
+            with _lock:
+                _busca_job['erro'] = f'Falha ao consultar o Microsoft Graph em {dia}: {e}'
+            break
+        except Exception as e:
+            with _lock:
+                _busca_job['erro'] = f'Falha inesperada ao buscar {dia}: {e}'
+            break
+
+        with _lock:
+            _busca_job['boletos'].extend(boletos_dia)
+            _busca_job['boletos'].sort(key=lambda b: b['data'] or '', reverse=True)
+            _busca_job['total_emails'] += total_dia
+            _busca_job['dias_processados'] += 1
+            if falha_dia:
+                _busca_job['avisos'].append(
+                    f'Falha ao classificar por IA parte dos emails de {dia} — resultado desse dia pode estar incompleto.'
+                )
+
+    with _lock:
+        _busca_job['cancelado'] = _busca_job['cancelar']
+        _busca_job['rodando'] = False
+        _busca_job['concluido'] = True
+        _busca_job['dia_atual'] = None
+
+
+@bp.route('/email/buscar/iniciar', methods=['POST'])
+def buscar_iniciar():
+    token = _token_valido()
+    if not token:
+        return jsonify({'ok': False, 'msg': 'Email não conectado — clique em "Conectar com Microsoft" antes de buscar.'}), 400
+
+    data = request.json or {}
+    ini, fim = data.get('data_ini'), data.get('data_fim')
+    if not ini or not fim:
+        return jsonify({'ok': False, 'msg': 'data_ini e data_fim são obrigatórios'}), 400
+
+    try:
+        dias = _dias_no_periodo(ini, fim)
+    except ValueError:
+        return jsonify({'ok': False, 'msg': 'Datas inválidas'}), 400
+    if not dias:
+        return jsonify({'ok': False, 'msg': 'Período inválido — data final antes da inicial.'}), 400
+
+    with _lock:
+        if _busca_job['rodando']:
+            return jsonify({'ok': False, 'msg': 'Já existe uma busca em andamento — aguarde ou cancele antes de iniciar outra.'}), 409
+        _busca_job.update({
+            'rodando': True, 'cancelar': False, 'cancelado': False, 'concluido': False,
+            'erro': None, 'avisos': [], 'boletos': [], 'total_emails': 0,
+            'despesas_pesquisadas': 0, 'dia_atual': dias[0], 'total_dias': len(dias),
+            'dias_processados': 0, 'periodo': {'ini': ini, 'fim': fim},
+        })
+
+    threading.Thread(target=_rodar_busca, args=(token, dias), daemon=True).start()
+    return jsonify({'ok': True, 'total_dias': len(dias)})
+
+
+@bp.route('/email/buscar/status')
+def buscar_status():
+    with _lock:
+        return jsonify({'ok': True, **_busca_job})
+
+
+@bp.route('/email/buscar/cancelar', methods=['POST'])
+def buscar_cancelar():
+    with _lock:
+        if not _busca_job['rodando']:
+            return jsonify({'ok': False, 'msg': 'Nenhuma busca em andamento.'}), 400
+        _busca_job['cancelar'] = True
+    return jsonify({'ok': True})
 
 
 @bp.route('/email/associar', methods=['POST'])

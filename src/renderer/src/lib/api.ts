@@ -96,7 +96,9 @@ export const api = {
     status: () => get('/api/email/status'),
     conectarIniciar: () => post('/api/email/conectar/iniciar'),
     conectarFinalizar: () => post('/api/email/conectar/finalizar'),
-    buscar: (dataIni: string, dataFim: string) => post('/api/email/buscar', { data_ini: dataIni, data_fim: dataFim }),
+    buscarIniciar: (dataIni: string, dataFim: string) => post('/api/email/buscar/iniciar', { data_ini: dataIni, data_fim: dataFim }),
+    buscarStatus: () => get('/api/email/buscar/status'),
+    buscarCancelar: () => post('/api/email/buscar/cancelar'),
     associar: (despesaId: number, mesRef: string, linhaDigitavel: string | null, valor: string | null, remetente: string) =>
       post('/api/email/associar', { despesa_id: despesaId, mes_ref: mesRef, linha_digitavel: linhaDigitavel, valor, remetente })
   }
