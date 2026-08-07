@@ -1,4 +1,4 @@
-import { useState, useRef, Fragment } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { api } from '../lib/api'
 import { cn, formatBRL } from '../lib/utils'
 import { DespesaPicker } from '../components/DespesaPicker'
@@ -38,7 +38,7 @@ interface Despesa { id: number; nome: string }
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
-export function Importacao() {
+export function Importacao({ active }: { active: boolean }) {
   const [step, setStep] = useState<Step>('selecionar')
   const [banco, setBanco] = useState('Itaú')
   const [file, setFile] = useState<File | null>(null)
@@ -63,6 +63,12 @@ export function Importacao() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // a tela fica sempre montada (ver App.tsx) — sem isso, uma despesa criada
+  // no Catálogo enquanto essa aba já estava aberta nunca apareceria aqui
+  useEffect(() => {
+    if (active) api.catalogo.list().then(setDespesas)
+  }, [active])
 
   async function processar() {
     if (!file) return

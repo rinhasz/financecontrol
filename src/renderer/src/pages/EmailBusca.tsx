@@ -57,7 +57,7 @@ function addMonths(dateStr: string, n: number): string {
 const POLL_MS = 1200
 const ULTIMA_BUSCA_KEY = 'financecontrol:ultimaBuscaEmailAssociada'
 
-export function EmailBusca() {
+export function EmailBusca({ active }: { active: boolean }) {
   const [status, setStatus] = useState<{ configurado: boolean; conectado: string | null } | null>(null)
   const [dataIni, setDataIni] = useState(() => {
     const d = new Date()
@@ -83,6 +83,7 @@ export function EmailBusca() {
 
   const [associando, setAssociando] = useState<string | null>(null)
   const [despesaEscolhida, setDespesaEscolhida] = useState('')
+  const [novaDespesaNome, setNovaDespesaNome] = useState('')
   const [mesEscolhido, setMesEscolhido] = useState(currentMesRef())
 
   // associações represadas em tela — nada é gravado até "Confirmar tudo"
@@ -169,9 +170,14 @@ export function EmailBusca() {
     }, POLL_MS)
   }
 
+  // a tela fica sempre montada (ver App.tsx) — sem isso, uma despesa criada
+  // no Catálogo enquanto essa aba já estava aberta nunca apareceria aqui
+  useEffect(() => {
+    if (active) api.catalogo.list().then(setDespesas)
+  }, [active])
+
   useEffect(() => {
     carregarStatus()
-    api.catalogo.list().then(setDespesas)
     const salvo = localStorage.getItem(ULTIMA_BUSCA_KEY)
     if (salvo) {
       try { setUltimaBusca(JSON.parse(salvo)) } catch { /* formato antigo/corrompido — ignora */ }
@@ -276,17 +282,18 @@ export function EmailBusca() {
   function abrirAssociacao(b: Boleto) {
     setAssociando(associando === b.id ? null : b.id)
     setDespesaEscolhida(b.despesa_sugerida_id ? String(b.despesa_sugerida_id) : '')
+    setNovaDespesaNome('')
     setMesEscolhido(currentMesRef())
   }
 
-  function adicionarPendente(b: Boleto, despesaId: number, mesRef: string, origem: 'manual' | 'regra') {
+  function adicionarPendente(b: Boleto, despesaId: number, mesRef: string, origem: 'manual' | 'regra', despesaNomeOverride?: string) {
     const despesa = despesas.find(d => d.id === despesaId)
     setPendentes(prev => {
       if (prev.some(p => p.boletoId === b.id)) return prev
       return [...prev, {
         boletoId: b.id,
         despesaId,
-        despesaNome: despesa?.nome || b.despesa_sugerida_nome || '',
+        despesaNome: despesaNomeOverride || despesa?.nome || b.despesa_sugerida_nome || '',
         mesRef,
         linhaDigitavel: b.linha_digitavel,
         tipoCodigo: b.tipo_codigo,
@@ -297,9 +304,27 @@ export function EmailBusca() {
     })
   }
 
-  function aplicarAssociacao(b: Boleto) {
-    if (!despesaEscolhida) return
-    adicionarPendente(b, Number(despesaEscolhida), mesEscolhido, 'manual')
+  async function aplicarAssociacao(b: Boleto) {
+    if (despesaEscolhida === 'nova') {
+      const nome = novaDespesaNome.trim()
+      if (!nome) return
+      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+      const valorPadrao = b.valor_encontrado
+        ? Number(b.valor_encontrado.replace(/\./g, '').replace(',', '.'))
+        : undefined
+      const res = await api.catalogo.upsert({
+        nome,
+        tipo_valor: 'variavel',
+        padrao_variabilidade: 'variavel_nao_sazonal',
+        valor_padrao: valorPadrao,
+        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
+      })
+      setDespesas(ds => [...ds, { id: res.id, nome }])
+      adicionarPendente(b, res.id, mesEscolhido, 'manual', nome)
+    } else {
+      if (!despesaEscolhida) return
+      adicionarPendente(b, Number(despesaEscolhida), mesEscolhido, 'manual')
+    }
     setAssociando(null)
   }
 
@@ -411,10 +436,18 @@ export function EmailBusca() {
         {associando === b.id && !pendente && !confirmado && (
           <div className="mt-3 flex items-center gap-2 flex-wrap bg-zinc-900/60 rounded p-3">
             <DespesaPicker despesas={despesas} value={despesaEscolhida} onChange={setDespesaEscolhida}
-              placeholder="Digite pra buscar a despesa..." className="w-56" />
+              placeholder="Digite pra buscar a despesa..." allowNova
+              onSelectNova={q => { setDespesaEscolhida('nova'); setNovaDespesaNome(q) }}
+              className="w-56" />
+            {despesaEscolhida === 'nova' && (
+              <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
+                placeholder="Nome da nova despesa" autoFocus
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+            )}
             <input type="month" value={mesEscolhido} onChange={e => setMesEscolhido(e.target.value)}
               className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
-            <button onClick={() => aplicarAssociacao(b)} disabled={!despesaEscolhida}
+            <button onClick={() => aplicarAssociacao(b)}
+              disabled={!despesaEscolhida || (despesaEscolhida === 'nova' && !novaDespesaNome.trim())}
               className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
               Adicionar
             </button>

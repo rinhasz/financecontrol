@@ -64,8 +64,8 @@ export default function App(): JSX.Element {
               não perder o estado (ex: importação em andamento) ao trocar de aba */}
           <div className={cn('h-full', page !== 'mes' && 'hidden')}><MesAtual /></div>
           <div className={cn('h-full', page !== 'catalogo' && 'hidden')}><Catalogo /></div>
-          <div className={cn('h-full', page !== 'importacao' && 'hidden')}><Importacao /></div>
-          <div className={cn('h-full', page !== 'email' && 'hidden')}><EmailBusca /></div>
+          <div className={cn('h-full', page !== 'importacao' && 'hidden')}><Importacao active={page === 'importacao'} /></div>
+          <div className={cn('h-full', page !== 'email' && 'hidden')}><EmailBusca active={page === 'email'} /></div>
         </div>
       </main>
     </div>
