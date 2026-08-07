@@ -610,9 +610,12 @@ def buscar_cancelar():
 
 def _aplicar_associacao(conn, item: dict):
     """Vincula um boleto/pix encontrado a uma despesa/mês — não mexe em
-    status de pagamento, só guarda o código (e o valor, se ainda não tinha
-    um esperado) pra aparecer em Mês Atual. Também grava o remetente como
-    regra: da próxima vez, esse email já vem pré-associado à despesa."""
+    status de pagamento, só guarda o código de pagamento e atualiza o valor
+    esperado pro valor real encontrado no email (a maioria dos meses já tem
+    uma linha prevista herdada do histórico, então só gravar o valor quando
+    o lançamento ainda não existia deixava o valor da fatura de fora quase
+    sempre). Também grava o remetente como regra: da próxima vez, esse email
+    já vem pré-associado à despesa."""
     despesa_id = item.get('despesa_id')
     mes_ref = item.get('mes_ref', '')
     linha_digitavel = item.get('linha_digitavel')
@@ -629,10 +632,16 @@ def _aplicar_associacao(conn, item: dict):
         'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
         (mes_ref, despesa_id, valor or 0)
     )
-    conn.execute(
-        'UPDATE lancamento SET linha_digitavel=?, tipo_codigo=? WHERE despesa_id=? AND mes_ref=?',
-        (linha_digitavel, tipo_codigo, despesa_id, mes_ref)
-    )
+    if valor:
+        conn.execute(
+            'UPDATE lancamento SET linha_digitavel=?, tipo_codigo=?, valor_esperado=? WHERE despesa_id=? AND mes_ref=?',
+            (linha_digitavel, tipo_codigo, valor, despesa_id, mes_ref)
+        )
+    else:
+        conn.execute(
+            'UPDATE lancamento SET linha_digitavel=?, tipo_codigo=? WHERE despesa_id=? AND mes_ref=?',
+            (linha_digitavel, tipo_codigo, despesa_id, mes_ref)
+        )
 
     if remetente:
         despesa = conn.execute('SELECT nome FROM despesa WHERE id=?', (despesa_id,)).fetchone()
