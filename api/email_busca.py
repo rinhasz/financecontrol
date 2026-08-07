@@ -34,6 +34,12 @@ GRAPH = 'https://graph.microsoft.com/v1.0'
 # lógica por palavra-chave/regex abaixo.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GEMINI_MODEL = 'gemini-flash-latest'
+# Caixas de entrada reais têm milhares de emails por período (propaganda,
+# newsletter etc.) — mandar tudo numa chamada só pro Gemini é frágil (prompt
+# gigante, mais chance de estourar limite/truncar) e, se falhar, derruba a
+# busca inteira sem avisar. Processar em lotes limita o dano de uma falha
+# isolada e mantém cada chamada num tamanho previsível.
+GEMINI_BATCH_SIZE = 200
 
 # Linha digitável de boleto: 5 blocos de dígitos (com ou sem pontuação)
 RE_LINHA_DIGITAVEL = re.compile(
@@ -185,13 +191,18 @@ def _extrair_pdf(conteudo_base64: str) -> str:
 
 
 def _mensagens_no_periodo(token: str, ini: str, fim: str):
-    """Busca todas as mensagens do INBOX no período uma única vez (evita
-    repetir a mesma consulta para cada despesa)."""
+    """Busca metadados de todas as mensagens do INBOX no período uma única
+    vez (evita repetir a mesma consulta para cada despesa). Não inclui o
+    corpo — uma caixa de entrada real pode ter milhares de emails num
+    período de 1-2 meses (propaganda, newsletter etc.), e baixar o HTML
+    completo de todos de uma vez é lento e consome muita memória à toa; o
+    corpo só é buscado depois, sob demanda, para quem passar na
+    classificação (ver _texto_completo)."""
     headers = {'Authorization': f'Bearer {token}'}
     url = f'{GRAPH}/me/mailFolders/inbox/messages'
     params = {
         '$filter': f'receivedDateTime ge {ini}T00:00:00Z and receivedDateTime le {fim}T23:59:59Z',
-        '$select': 'id,subject,from,receivedDateTime,body,hasAttachments',
+        '$select': 'id,subject,from,receivedDateTime,hasAttachments',
         '$top': '100',
     }
 
@@ -229,9 +240,17 @@ def _parece_fatura(assunto: str) -> bool:
 
 
 def _texto_completo(token: str, m: dict) -> str:
-    """Texto do corpo + PDFs anexados de uma mensagem."""
+    """Texto do corpo + PDFs anexados de uma mensagem — busca o corpo sob
+    demanda (só é chamada pra quem já passou na classificação/filtro)."""
     headers = {'Authorization': f'Bearer {token}'}
-    texto = _extrair_texto_html((m.get('body') or {}).get('content', ''))
+    texto = ''
+    try:
+        body_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}', headers=headers,
+                                  params={'$select': 'body'}, timeout=30)
+        body_resp.raise_for_status()
+        texto = _extrair_texto_html(body_resp.json().get('body', {}).get('content', ''))
+    except Exception as e:
+        print(f'[email_busca] falha ao buscar corpo de {m["id"]}: {e}')
 
     if m.get('hasAttachments'):
         try:
@@ -240,8 +259,8 @@ def _texto_completo(token: str, m: dict) -> str:
             for att in att_resp.json().get('value', []):
                 if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
                     texto += '\n' + _extrair_pdf(att['contentBytes'])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f'[email_busca] falha ao buscar anexos de {m["id"]}: {e}')
 
     return texto
 
@@ -259,44 +278,60 @@ def _gemini_client():
     if not GEMINI_API_KEY:
         return None
     from google import genai
-    return genai.Client(api_key=GEMINI_API_KEY)
+    from google.genai import types
+    # Sem timeout explícito, uma chamada que trava (rede, sobrecarga da API)
+    # fica pendurada pra sempre e a busca nunca termina nem retorna erro —
+    # foi exatamente o que aconteceu numa caixa de entrada com ~3000 emails
+    # no período. 60s é generoso pra um lote de classificação ou extração.
+    return genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=60_000))
 
 
-def _gemini_classificar(client, mensagens: list) -> set:
-    """Uma chamada só (barata: só assunto+remetente) pra descobrir quais
-    mensagens parecem fatura/boleto/conta a pagar."""
+def _gemini_classificar(client, mensagens: list):
+    """Descobre quais mensagens parecem fatura/boleto/conta a pagar (barato:
+    só assunto+remetente). Processa em lotes de GEMINI_BATCH_SIZE — uma
+    caixa de entrada real pode ter milhares de emails num período de 1-2
+    meses, e um prompt com tudo de uma vez é frágil (mais chance de estourar
+    limite, truncar ou dar timeout); em lotes, uma falha isolada não derruba
+    a busca inteira. Retorna (ids_fatura, lotes_com_falha)."""
     from google.genai import types
 
-    itens = [
-        {'id': m['id'], 'assunto': m.get('subject') or '',
-         'remetente': (m.get('from') or {}).get('emailAddress', {}).get('address') or ''}
-        for m in mensagens
-    ]
-    prompt = (
-        'Você recebe uma lista de emails (id, assunto, remetente) de uma caixa de entrada pessoal '
-        'no Brasil. Identifique quais parecem ser fatura, boleto, conta a pagar, cobrança ou aviso '
-        'de vencimento — cartão de crédito, seguro/convênio de saúde, contas de consumo (água, luz, '
-        'internet), mensalidades, financiamentos, etc. Ignore promoções, newsletters, notificações de '
-        'redes sociais, recibos de compras já pagas e emails que não sejam cobrança pendente. '
-        'Responda em JSON com os ids que são cobranças.\n\n'
-        + json.dumps(itens, ensure_ascii=False)
-    )
-    try:
-        resp = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type='application/json',
-                response_schema={
-                    'type': 'object',
-                    'properties': {'ids_fatura': {'type': 'array', 'items': {'type': 'string'}}},
-                    'required': ['ids_fatura'],
-                },
-            ),
+    schema = {
+        'type': 'object',
+        'properties': {'ids_fatura': {'type': 'array', 'items': {'type': 'string'}}},
+        'required': ['ids_fatura'],
+    }
+
+    ids_fatura = set()
+    falhas = 0
+
+    for i in range(0, len(mensagens), GEMINI_BATCH_SIZE):
+        lote = mensagens[i:i + GEMINI_BATCH_SIZE]
+        itens = [
+            {'id': m['id'], 'assunto': m.get('subject') or '',
+             'remetente': (m.get('from') or {}).get('emailAddress', {}).get('address') or ''}
+            for m in lote
+        ]
+        prompt = (
+            'Você recebe uma lista de emails (id, assunto, remetente) de uma caixa de entrada pessoal '
+            'no Brasil. Identifique quais parecem ser fatura, boleto, conta a pagar, cobrança ou aviso '
+            'de vencimento — cartão de crédito, seguro/convênio de saúde, contas de consumo (água, luz, '
+            'internet), mensalidades, financiamentos, etc. Ignore promoções, newsletters, notificações de '
+            'redes sociais, recibos de compras já pagas e emails que não sejam cobrança pendente. '
+            'Responda em JSON com os ids que são cobranças.\n\n'
+            + json.dumps(itens, ensure_ascii=False)
         )
-        return set(json.loads(resp.text).get('ids_fatura', []))
-    except Exception:
-        return set()
+        try:
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type='application/json', response_schema=schema),
+            )
+            ids_fatura |= set(json.loads(resp.text).get('ids_fatura', []))
+        except Exception as e:
+            falhas += 1
+            print(f'[email_busca] falha ao classificar lote {i}-{i + len(lote)} de {len(mensagens)}: {e}')
+
+    return ids_fatura, falhas
 
 
 def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
@@ -331,7 +366,8 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
             ),
         )
         return json.loads(resp.text)
-    except Exception:
+    except Exception as e:
+        print(f'[email_busca] falha ao extrair dados do email: {e}')
         return {}
 
 
@@ -359,7 +395,11 @@ def buscar():
         return jsonify({'ok': False, 'msg': f'Falha ao consultar o Microsoft Graph: {e}'}), 502
 
     client = _gemini_client()
-    ids_fatura = _gemini_classificar(client, mensagens) if client else None
+    lotes_com_falha = 0
+    if client:
+        ids_fatura, lotes_com_falha = _gemini_classificar(client, mensagens)
+    else:
+        ids_fatura = None
 
     boletos = []
     for m in mensagens:
@@ -409,7 +449,19 @@ def buscar():
         })
 
     boletos.sort(key=lambda b: b['data'] or '', reverse=True)
-    return jsonify({'ok': True, 'periodo': {'ini': ini, 'fim': fim}, 'despesas_pesquisadas': len(despesas), 'boletos': boletos})
+
+    aviso = None
+    if lotes_com_falha:
+        total_lotes = (len(mensagens) + GEMINI_BATCH_SIZE - 1) // GEMINI_BATCH_SIZE
+        aviso = (
+            f'{lotes_com_falha} de {total_lotes} lote(s) de classificação por IA falharam — '
+            'o resultado pode estar incompleto. Tente buscar de novo ou reduza o período.'
+        )
+
+    return jsonify({
+        'ok': True, 'periodo': {'ini': ini, 'fim': fim}, 'despesas_pesquisadas': len(despesas),
+        'boletos': boletos, 'total_emails_periodo': len(mensagens), 'aviso': aviso,
+    })
 
 
 @bp.route('/email/associar', methods=['POST'])

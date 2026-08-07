@@ -31,6 +31,8 @@ export function EmailBusca() {
   const [buscando, setBuscando] = useState(false)
   const [boletos, setBoletos] = useState<Boleto[] | null>(null)
   const [pesquisadas, setPesquisadas] = useState(0)
+  const [totalEmails, setTotalEmails] = useState(0)
+  const [aviso, setAviso] = useState('')
   const [erro, setErro] = useState('')
   const [copiado, setCopiado] = useState<string | null>(null)
   const [despesas, setDespesas] = useState<Despesa[]>([])
@@ -78,6 +80,7 @@ export function EmailBusca() {
   async function buscar() {
     setBuscando(true)
     setErro('')
+    setAviso('')
     setBoletos(null)
     setAssociados(new Set())
     try {
@@ -85,6 +88,8 @@ export function EmailBusca() {
       if (res.ok) {
         setBoletos(res.boletos)
         setPesquisadas(res.despesas_pesquisadas)
+        setTotalEmails(res.total_emails_periodo ?? 0)
+        setAviso(res.aviso || '')
         setDespesas(cat)
       } else {
         setErro(res.msg || 'Erro ao buscar emails')
@@ -197,15 +202,20 @@ export function EmailBusca() {
         )}
 
         {erro && <p className="text-sm text-red-400">{erro}</p>}
+        {aviso && (
+          <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-sm text-amber-300">
+            ⚠ {aviso}
+          </div>
+        )}
 
         {boletos && (
           <div className="space-y-3">
             <p className="text-sm text-zinc-500">
-              {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados no período.
+              {totalEmails} emails no período, {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados.
             </p>
 
             {boletos.length === 0 && (
-              <p className="text-sm text-zinc-600">Nada encontrado nesse período — tente um intervalo maior.</p>
+              <p className="text-sm text-zinc-600">Nada encontrado nesse período (de {totalEmails} emails verificados) — tente um intervalo maior ou confira se o email não está em outra pasta.</p>
             )}
 
             <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
