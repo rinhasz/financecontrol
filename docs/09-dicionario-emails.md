@@ -13,3 +13,4 @@ verdade que o app consulta é o banco.
 | `boleto@jaime.com.br` | condominio |
 | `faturadigital@minhaclaro.com.br` | net |
 | `faturadigital@itaupersonnalite.com.br` | cartao black |
+| `grp-sousulamerica@sulamerica.com.br` | convenio sogra |
