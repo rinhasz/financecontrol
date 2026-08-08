@@ -3,6 +3,7 @@ import { MesAtual } from './pages/MesAtual'
 import { Catalogo } from './pages/Catalogo'
 import { Importacao } from './pages/Importacao'
 import { EmailBusca } from './pages/EmailBusca'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { cn } from './lib/utils'
 
 type Page = 'mes' | 'catalogo' | 'importacao' | 'email'
@@ -62,10 +63,18 @@ export default function App(): JSX.Element {
         <div className="flex-1 overflow-auto -mt-8">
           {/* As três telas ficam sempre montadas — só a visibilidade muda — para
               não perder o estado (ex: importação em andamento) ao trocar de aba */}
-          <div className={cn('h-full', page !== 'mes' && 'hidden')}><MesAtual /></div>
-          <div className={cn('h-full', page !== 'catalogo' && 'hidden')}><Catalogo /></div>
-          <div className={cn('h-full', page !== 'importacao' && 'hidden')}><Importacao active={page === 'importacao'} /></div>
-          <div className={cn('h-full', page !== 'email' && 'hidden')}><EmailBusca active={page === 'email'} /></div>
+          <div className={cn('h-full', page !== 'mes' && 'hidden')}>
+            <ErrorBoundary nome="Mês Atual"><MesAtual /></ErrorBoundary>
+          </div>
+          <div className={cn('h-full', page !== 'catalogo' && 'hidden')}>
+            <ErrorBoundary nome="Catálogo"><Catalogo /></ErrorBoundary>
+          </div>
+          <div className={cn('h-full', page !== 'importacao' && 'hidden')}>
+            <ErrorBoundary nome="Importar Extrato"><Importacao active={page === 'importacao'} /></ErrorBoundary>
+          </div>
+          <div className={cn('h-full', page !== 'email' && 'hidden')}>
+            <ErrorBoundary nome="Procurar em Emails"><EmailBusca active={page === 'email'} /></ErrorBoundary>
+          </div>
         </div>
       </main>
     </div>

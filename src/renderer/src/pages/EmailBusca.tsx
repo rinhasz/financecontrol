@@ -102,9 +102,18 @@ export function EmailBusca({ active }: { active: boolean }) {
   const [codigoDispositivo, setCodigoDispositivo] = useState<{ verification_uri: string; user_code: string } | null>(null)
   const [aguardandoLogin, setAguardandoLogin] = useState(false)
   const [erroConexao, setErroConexao] = useState('')
+  const [carregandoStatus, setCarregandoStatus] = useState(true)
+  const [statusErro, setStatusErro] = useState('')
 
   function carregarStatus() {
-    api.email.status().then(setStatus)
+    setStatusErro('')
+    setCarregandoStatus(true)
+    api.email.status()
+      .then(setStatus)
+      // erro aqui não pode virar tela vazia (nem "Azure não configurado",
+      // que seria enganoso) — mostra o que houve e deixa tentar de novo
+      .catch(e => setStatusErro(e instanceof Error ? e.message : String(e)))
+      .finally(() => setCarregandoStatus(false))
   }
 
   function pararPolling() {
@@ -474,22 +483,34 @@ export function EmailBusca({ active }: { active: boolean }) {
       </div>
 
       <div className="px-6 pb-6 flex-1 overflow-auto space-y-4">
-        {status && !status.configurado && (
-          <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4 text-sm text-amber-300 max-w-xl">
-            App do Azure ainda não configurado. Veja o passo a passo em{' '}
-            <code className="text-amber-200">.env.example</code> — registre um app gratuito no Azure e cole o
-            "ID do aplicativo (cliente)" em <code className="text-amber-200">EMAIL_CLIENT_ID</code> no{' '}
-            <code className="text-amber-200">.env</code>, depois reinicie o app.
+        {carregandoStatus && !status && !statusErro && (
+          <p className="text-sm text-zinc-500">Verificando conexão com o email...</p>
+        )}
+
+        {statusErro && (
+          <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-4 max-w-xl">
+            <p className="text-sm text-red-300 mb-1">Não consegui verificar a conexão com o email.</p>
+            <p className="text-xs text-zinc-500 mb-3">{statusErro}</p>
+            <button onClick={carregarStatus}
+              className="px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 text-sm hover:border-emerald-600 hover:text-emerald-400 transition-colors">
+              Tentar de novo
+            </button>
           </div>
         )}
 
-        {status?.configurado && !status.conectado && !codigoDispositivo && (
+        {status && !status.conectado && !codigoDispositivo && (
           <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-4 max-w-xl">
             <p className="text-sm text-zinc-400 mb-3">Email ainda não conectado.</p>
-            <button onClick={conectar}
-              className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 transition-colors">
+            <button onClick={conectar} disabled={!status.configurado}
+              className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
               Conectar com Microsoft
             </button>
+            {!status.configurado && (
+              <p className="text-xs text-amber-500/80 mt-2">
+                Para conectar, configure <code className="text-amber-400">EMAIL_CLIENT_ID</code> no arquivo{' '}
+                <code className="text-amber-400">.env</code> (veja <code>.env.example</code>) e reinicie o app.
+              </p>
+            )}
             {erroConexao && <p className="text-sm text-red-400 mt-2">{erroConexao}</p>}
           </div>
         )}

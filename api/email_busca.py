@@ -157,10 +157,22 @@ def _configurado() -> bool:
 
 
 def _conta_conectada():
-    if not CLIENT_ID:
+    """Lê a conta direto do arquivo de cache, sem instanciar o MSAL — que
+    faria descoberta de autoridade pela rede. Esta função responde ao
+    /email/status, chamado toda vez que a tela de busca abre; se ela
+    depender de rede, uma rede lenta deixa a tela inteira sem renderizar.
+    A tela só precisa saber *se* há conta conectada, o que está no cache."""
+    if not CLIENT_ID or not os.path.exists(TOKEN_CACHE_PATH):
         return None
-    accounts = _msal_app().get_accounts()
-    return accounts[0]['username'] if accounts else None
+    try:
+        with open(TOKEN_CACHE_PATH, encoding='utf-8') as f:
+            contas = json.load(f).get('Account', {})
+        for conta in contas.values():
+            if conta.get('username'):
+                return conta['username']
+    except (OSError, ValueError) as e:
+        print(f'[email_busca] não consegui ler o cache de token: {e}')
+    return None
 
 
 def _token_valido():

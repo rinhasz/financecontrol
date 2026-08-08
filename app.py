@@ -10,6 +10,11 @@ import sys
 from dotenv import load_dotenv
 load_dotenv()
 
+# antes de qualquer coisa que use rede: sem isso, cada chamada à Microsoft
+# espera ~21s tentando um IPv6 que esta rede anuncia mas não roteia
+from api.net import preferir_ipv4
+preferir_ipv4()
+
 from flask import Flask, send_from_directory
 
 from api.db import init_db, seed_db

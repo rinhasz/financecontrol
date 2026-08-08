@@ -1,17 +1,41 @@
 const BASE = ''  // same origin (Flask serves both frontend and API)
 
-async function get(path: string) {
-  const r = await fetch(BASE + path)
+// Sem timeout, uma chamada que nunca responde deixa a tela presa pra
+// sempre no estado "carregando" — foi o que aconteceu quando a rede
+// travava o backend por 20s+ e a tela de email ficava em branco. Com
+// timeout a chamada falha e a tela consegue mostrar o erro e oferecer
+// "tentar de novo". Exceção: conectar/finalizar espera o login no
+// navegador e por isso passa timeoutMs: 0 (sem limite).
+const DEFAULT_TIMEOUT_MS = 20_000
+
+async function comTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  if (!timeoutMs) return fetch(url, init)
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`A resposta demorou mais de ${Math.round(timeoutMs / 1000)}s — o app pode estar sem conexão.`)
+    }
+    throw e
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function get(path: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const r = await comTimeout(BASE + path, {}, timeoutMs)
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
 
-async function post(path: string, body?: unknown) {
-  const r = await fetch(BASE + path, {
+async function post(path: string, body?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const r = await comTimeout(BASE + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body !== undefined ? JSON.stringify(body) : undefined
-  })
+  }, timeoutMs)
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
@@ -95,7 +119,8 @@ export const api = {
   email: {
     status: () => get('/api/email/status'),
     conectarIniciar: () => post('/api/email/conectar/iniciar'),
-    conectarFinalizar: () => post('/api/email/conectar/finalizar'),
+    // espera você confirmar o login no navegador — pode levar minutos
+    conectarFinalizar: () => post('/api/email/conectar/finalizar', undefined, 0),
     buscarIniciar: (dataIni: string, dataFim: string) => post('/api/email/buscar/iniciar', { data_ini: dataIni, data_fim: dataFim }),
     buscarStatus: () => get('/api/email/buscar/status'),
     buscarCancelar: () => post('/api/email/buscar/cancelar'),
