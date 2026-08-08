@@ -124,22 +124,32 @@ def _dias_no_periodo(ini: str, fim: str):
     return dias
 
 
-def _load_cache() -> msal.SerializableTokenCache:
-    cache = msal.SerializableTokenCache()
-    if os.path.exists(TOKEN_CACHE_PATH):
-        with open(TOKEN_CACHE_PATH, 'r', encoding='utf-8') as f:
-            cache.deserialize(f.read())
-    return cache
+_msal_cache: 'msal.SerializableTokenCache | None' = None
+_msal_client: 'msal.PublicClientApplication | None' = None
 
 
-def _save_cache(cache: msal.SerializableTokenCache):
-    if cache.has_state_changed:
+def _msal_app() -> msal.PublicClientApplication:
+    """Reaproveita a mesma instância entre chamadas. Construir um
+    PublicClientApplication faz o MSAL validar/descobrir a autoridade da
+    Microsoft pela rede — isso já levou 20s+ (ou nem terminava) quando a
+    rede estava ruim, e como /email/status é chamado toda vez que a tela
+    de busca de email abre, recriar o client a cada request deixava até a
+    checagem mais simples travada."""
+    global _msal_cache, _msal_client
+    with _lock:
+        if _msal_client is None:
+            _msal_cache = msal.SerializableTokenCache()
+            if os.path.exists(TOKEN_CACHE_PATH):
+                with open(TOKEN_CACHE_PATH, 'r', encoding='utf-8') as f:
+                    _msal_cache.deserialize(f.read())
+            _msal_client = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=_msal_cache)
+        return _msal_client
+
+
+def _save_msal_cache():
+    if _msal_cache is not None and _msal_cache.has_state_changed:
         with open(TOKEN_CACHE_PATH, 'w', encoding='utf-8') as f:
-            f.write(cache.serialize())
-
-
-def _msal_app(cache: msal.SerializableTokenCache) -> msal.PublicClientApplication:
-    return msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
+            f.write(_msal_cache.serialize())
 
 
 def _configurado() -> bool:
@@ -149,8 +159,7 @@ def _configurado() -> bool:
 def _conta_conectada():
     if not CLIENT_ID:
         return None
-    app_ = _msal_app(_load_cache())
-    accounts = app_.get_accounts()
+    accounts = _msal_app().get_accounts()
     return accounts[0]['username'] if accounts else None
 
 
@@ -158,13 +167,12 @@ def _token_valido():
     """Tenta obter um token de acesso do cache local, sem interação do usuário."""
     if not CLIENT_ID:
         return None
-    cache = _load_cache()
-    app_ = _msal_app(cache)
+    app_ = _msal_app()
     accounts = app_.get_accounts()
     if not accounts:
         return None
     result = app_.acquire_token_silent(SCOPES, account=accounts[0])
-    _save_cache(cache)
+    _save_msal_cache()
     return result.get('access_token') if result else None
 
 
@@ -178,15 +186,13 @@ def conectar_iniciar():
     if not CLIENT_ID:
         return jsonify({'ok': False, 'msg': 'EMAIL_CLIENT_ID não configurado no .env — veja .env.example.'}), 400
 
-    cache = _load_cache()
-    app_ = _msal_app(cache)
+    app_ = _msal_app()
     flow = app_.initiate_device_flow(scopes=SCOPES)
     if 'user_code' not in flow:
         return jsonify({'ok': False, 'msg': f'Falha ao iniciar login: {flow.get("error_description", flow)}'}), 502
 
     with _lock:
         _pending['flow'] = flow
-        _pending['cache'] = cache
 
     return jsonify({
         'ok': True,
@@ -203,18 +209,16 @@ def conectar_finalizar():
     travar o resto do app."""
     with _lock:
         flow = _pending.get('flow')
-        cache = _pending.get('cache')
 
     if not flow:
         return jsonify({'ok': False, 'msg': 'Nenhum login em andamento — clique em "Conectar" de novo.'}), 400
 
-    app_ = _msal_app(cache)
+    app_ = _msal_app()
     result = app_.acquire_token_by_device_flow(flow)
-    _save_cache(cache)
+    _save_msal_cache()
 
     with _lock:
         _pending.pop('flow', None)
-        _pending.pop('cache', None)
 
     if 'access_token' not in result:
         return jsonify({'ok': False, 'msg': result.get('error_description', 'Login não concluído ou expirado.')}), 400
