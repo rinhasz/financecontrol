@@ -26,6 +26,14 @@ interface FormState {
   palavras_chave: string
 }
 
+type Ordem = 'categoria' | 'valor' | 'dia_vencimento'
+
+const ORDEM_LABEL: Record<Ordem, string> = {
+  categoria: 'Categoria',
+  valor: 'Maior valor',
+  dia_vencimento: 'Dia de vencimento'
+}
+
 function despesaParaForm(d: Despesa): FormState {
   let palavras_chave = ''
   try { palavras_chave = (JSON.parse(d.regras_match).palavras_chave ?? []).join(', ') } catch { /* regras_match inválido, deixa vazio */ }
@@ -45,6 +53,7 @@ export function Catalogo() {
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [busca, setBusca] = useState('')
   const [apenasAtivas, setApenasAtivas] = useState(true)
+  const [ordem, setOrdem] = useState<Ordem>('categoria')
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState<number | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
@@ -106,6 +115,22 @@ export function Catalogo() {
     return true
   })
 
+  // por categoria a lista continua agrupada; nas outras ordens vira lista
+  // única, porque agrupar por categoria quebraria a ordenação pedida
+  const ordenadas = [...filtradas].sort((a, b) => {
+    if (ordem === 'valor') {
+      const diff = (b.valor_padrao ?? 0) - (a.valor_padrao ?? 0)
+      return diff !== 0 ? diff : a.nome.localeCompare(b.nome)
+    }
+    if (ordem === 'dia_vencimento') {
+      // sem dia definido vai pro fim, senão ocuparia o topo sem informar nada
+      const da = a.dia_vencimento ?? Infinity
+      const db = b.dia_vencimento ?? Infinity
+      return da !== db ? da - db : a.nome.localeCompare(b.nome)
+    }
+    return 0
+  })
+
   const byCategory = filtradas.reduce<Record<string, Despesa[]>>((acc, d) => {
     const cat = d.categoria_nome || 'Outros'
     if (!acc[cat]) acc[cat] = []
@@ -159,6 +184,70 @@ export function Catalogo() {
     </div>
   )
 
+  function tabela(items: Despesa[], mostrarCategoria: boolean) {
+    const nColunas = mostrarCategoria ? 7 : 6
+    return (
+      <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-zinc-800 bg-zinc-900/40">
+              <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Nome</th>
+              {mostrarCategoria && <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Categoria</th>}
+              <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Padrão</th>
+              <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsão</th>
+              <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Dia Venc.</th>
+              <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((d, i) => (
+              <Fragment key={d.id}>
+                <tr className={cn('transition-colors hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40', !d.ativo && 'opacity-40')}>
+                  <td className="px-4 py-2.5 text-zinc-300">{d.nome}</td>
+                  {mostrarCategoria && (
+                    <td className="px-4 py-2.5 text-zinc-500 text-xs">{d.categoria_nome || 'Outros'}</td>
+                  )}
+                  <td className="px-4 py-2.5">
+                    <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
+                      {PADRAO_LABEL[d.padrao_variabilidade] ?? d.padrao_variabilidade}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">
+                    {d.valor_padrao > 0 ? formatBRL(d.valor_padrao) : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia_vencimento ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    <button onClick={() => toggle(d.id)}
+                      className={cn('text-xs px-2 py-0.5 rounded border transition-colors',
+                        d.ativo
+                          ? 'border-emerald-800/50 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-950/60'
+                          : 'border-zinc-700 text-zinc-500 hover:bg-zinc-800')}>
+                      {d.ativo ? 'Ativa' : 'Inativa'}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button onClick={() => abrirEdicao(d)}
+                      className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors">
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+                {editando === d.id && (
+                  <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                    <td colSpan={nColunas} className="px-4 py-3">
+                      {formFields}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full pt-3">
       <div className="px-6 pb-4 flex items-center justify-between flex-none">
@@ -167,6 +256,13 @@ export function Catalogo() {
           <p className="text-sm text-zinc-500 mt-0.5">{filtradas.length} despesas</p>
         </div>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-zinc-400">
+            Ordenar por
+            <select value={ordem} onChange={e => setOrdem(e.target.value as Ordem)}
+              className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+              {Object.entries(ORDEM_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
             <input type="checkbox" checked={apenasAtivas} onChange={e => setApenasAtivas(e.target.checked)} className="rounded" />
             Apenas ativas
@@ -197,7 +293,7 @@ export function Catalogo() {
 
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500">Carregando...</div>
-        ) : (
+        ) : ordem === 'categoria' ? (
           <div className="space-y-4">
             {Object.entries(byCategory).map(([cat, items]) => (
               <div key={cat}>
@@ -206,63 +302,12 @@ export function Catalogo() {
                   <div className="flex-1 h-px bg-zinc-800" />
                   <span className="text-xs text-zinc-600">{items.length} despesas</span>
                 </div>
-                <div className="rounded-lg overflow-hidden border border-zinc-800/60">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-zinc-800 bg-zinc-900/40">
-                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Nome</th>
-                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Padrão</th>
-                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsão</th>
-                        <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Dia Venc.</th>
-                        <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
-                        <th className="px-4 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((d, i) => (
-                        <Fragment key={d.id}>
-                          <tr className={cn('transition-colors hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40', !d.ativo && 'opacity-40')}>
-                            <td className="px-4 py-2.5 text-zinc-300">{d.nome}</td>
-                            <td className="px-4 py-2.5">
-                              <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
-                                {PADRAO_LABEL[d.padrao_variabilidade] ?? d.padrao_variabilidade}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">
-                              {d.valor_padrao > 0 ? formatBRL(d.valor_padrao) : '—'}
-                            </td>
-                            <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia_vencimento ?? '—'}</td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button onClick={() => toggle(d.id)}
-                                className={cn('text-xs px-2 py-0.5 rounded border transition-colors',
-                                  d.ativo
-                                    ? 'border-emerald-800/50 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-950/60'
-                                    : 'border-zinc-700 text-zinc-500 hover:bg-zinc-800')}>
-                                {d.ativo ? 'Ativa' : 'Inativa'}
-                              </button>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <button onClick={() => abrirEdicao(d)}
-                                className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors">
-                                Editar
-                              </button>
-                            </td>
-                          </tr>
-                          {editando === d.id && (
-                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
-                              <td colSpan={6} className="px-4 py-3">
-                                {formFields}
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {tabela(items, false)}
               </div>
             ))}
           </div>
+        ) : (
+          tabela(ordenadas, true)
         )}
       </div>
     </div>
