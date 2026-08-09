@@ -17,6 +17,13 @@ interface DetalheMatch {
   valor: number
   data: string
   status: 'pago' | 'agendado'
+  // presente só quando o casamento já existia e o status mudou desde então
+  // (ex: estava agendado e o débito caiu) — ver rodar_batimento
+  status_anterior?: 'pago' | 'agendado' | 'nao_encontrado'
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  pago: 'Pago', agendado: 'Agendado', nao_encontrado: 'Em aberto'
 }
 
 interface NaoEncontrado {
@@ -345,7 +352,12 @@ export function Importacao({ active }: { active: boolean }) {
                             <td className="px-4 py-2 text-zinc-200 font-medium">{d.despesa_nome}</td>
                             <td className="px-4 py-2 text-zinc-400">{d.descricao_transacao}</td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(d.valor)}</td>
-                            <td className="px-4 py-2 text-center">
+                            <td className="px-4 py-2 text-center whitespace-nowrap">
+                              {d.status_anterior && (
+                                <span className="text-xs text-zinc-600 mr-1.5 line-through">
+                                  {STATUS_LABEL[d.status_anterior] ?? d.status_anterior}
+                                </span>
+                              )}
                               <span className={cn('text-xs px-2 py-0.5 rounded',
                                 d.status === 'pago' ? 'text-emerald-400 bg-emerald-950/40' : 'text-blue-400 bg-blue-950/40')}>
                                 {d.status === 'pago' ? 'Pago' : 'Agendado'}

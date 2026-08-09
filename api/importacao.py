@@ -267,33 +267,57 @@ def importar():
     datas = sorted(t['data'] for t in txs)
     conn = get_db()
 
+    today = date.today().isoformat()
+
+    def _situacao(t):
+        # o parser só marca 'agendada' (seção "lançamentos futuros" do Itaú);
+        # o resto veio da parte já debitada do extrato
+        return t.get('situacao') or ('agendada' if t['data'] > today else 'efetivada')
+
     # Importar o mesmo período mais de uma vez no mês é o fluxo normal (o
     # usuário reimporta pra pegar lançamentos novos) — não pode duplicar o
     # que já foi trazido antes. Mesma (data, descrição, valor) = mesma
     # transação; aceita o risco raro de duas transações reais idênticas no
     # mesmo dia serem tratadas como uma só, em troca de nunca duplicar.
     existentes = {
-        (r['data'], r['descricao'], r['valor'])
+        (r['data'], r['descricao'], r['valor']): r
         for r in conn.execute(
-            'SELECT data, descricao, valor FROM transacao WHERE data BETWEEN ? AND ?',
+            'SELECT id, data, descricao, valor, situacao FROM transacao WHERE data BETWEEN ? AND ?',
             (datas[0], datas[-1])
         ).fetchall()
     }
-    novas = [t for t in txs if (t['data'], t['descricao'], t['valor']) not in existentes]
-    duplicadas = len(txs) - len(novas)
+
+    novas = []
+    efetivadas = []
+    for t in txs:
+        anterior = existentes.get((t['data'], t['descricao'], t['valor']))
+        if anterior is None:
+            novas.append(t)
+        elif anterior['situacao'] == 'agendada' and _situacao(t) == 'efetivada':
+            # É a mesma transação de antes, mas saiu de "lançamentos futuros"
+            # para debitada de fato. Tratar como duplicata a deixaria agendada
+            # pra sempre e o lançamento nunca viraria "Pago"; atualizar no
+            # lugar preserva o vínculo com a despesa que já foi confirmado.
+            efetivadas.append(anterior['id'])
+
+    duplicadas = len(txs) - len(novas) - len(efetivadas)
 
     cur = conn.execute(
         'INSERT INTO importacao (banco, formato, arquivo, periodo_ini, periodo_fim) VALUES (?,?,?,?,?)',
         (banco, formato, filename, datas[0], datas[-1])
     )
     import_id = cur.lastrowid
-    today = date.today().isoformat()
+
+    if efetivadas:
+        conn.executemany(
+            "UPDATE transacao SET situacao='efetivada' WHERE id=?",
+            [(i,) for i in efetivadas]
+        )
 
     batch = []
     for t in novas:
-        situacao = t.get('situacao') or ('agendada' if t['data'] > today else 'efetivada')
         tipo = 'debito' if t['valor'] < 0 else 'credito'
-        batch.append((t['data'], t['descricao'], t['valor'], tipo, situacao, banco, import_id))
+        batch.append((t['data'], t['descricao'], t['valor'], tipo, _situacao(t), banco, import_id))
 
     if batch:
         conn.executemany(
@@ -304,6 +328,8 @@ def importar():
     conn.close()
 
     msg = f'{len(novas)} transações novas importadas'
+    if efetivadas:
+        msg += f', {len(efetivadas)} que estavam agendadas foram debitadas'
     if duplicadas:
         msg += f' ({duplicadas} já tinham sido importadas antes e foram ignoradas)'
 
@@ -402,6 +428,35 @@ def rodar_batimento():
             'status': status,
         })
 
+    # Lançamentos já casados antes, cuja transação mudou de situação desde
+    # então — tipicamente estavam "Agendado" e o débito acabou de cair. Sem
+    # isto eles nunca reapareceriam na revisão (a busca acima só olha
+    # 'nao_encontrado') e ficariam presos no status antigo pra sempre.
+    defasados = conn.execute("""
+        SELECT l.id, l.despesa_id, l.status, d.nome as despesa_nome,
+               t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
+               t.data as tx_data, t.situacao as tx_situacao
+        FROM lancamento l
+        JOIN despesa d ON d.id = l.despesa_id
+        JOIN transacao t ON t.id = l.transacao_id
+        WHERE l.mes_ref = ?
+          AND l.status != (CASE WHEN t.situacao = 'efetivada' THEN 'pago' ELSE 'agendado' END)
+    """, (mes_ref,)).fetchall()
+
+    for l in defasados:
+        detalhes.append({
+            'lancamento_id': l['id'],
+            'despesa_id': l['despesa_id'],
+            'despesa_id_sugerido': l['despesa_id'],
+            'despesa_nome': l['despesa_nome'],
+            'transacao_id': l['tx_id'],
+            'descricao_transacao': l['tx_descricao'],
+            'valor': abs(l['tx_valor']),
+            'data': l['tx_data'],
+            'status': 'pago' if l['tx_situacao'] == 'efetivada' else 'agendado',
+            'status_anterior': l['status'],
+        })
+
     nao_encontrados = [
         {'lancamento_id': l['id'], 'despesa_id': l['despesa_id'], 'despesa_nome': l['despesa_nome'], 'valor_esperado': l['valor_esperado']}
         for l in lancamentos if l['id'] not in lanc_sugerido
@@ -410,7 +465,10 @@ def rodar_batimento():
 
     conn.close()
     return jsonify({
-        'ok': True, 'matched': len(detalhes), 'total': len(lancamentos), 'periodo': {'ini': ini, 'fim': fim},
+        # total inclui os defasados: eles também entram em detalhes, e sem
+        # somá-los aqui o contador da tela mostraria coisas como "15/12"
+        'ok': True, 'matched': len(detalhes), 'total': len(lancamentos) + len(defasados),
+        'periodo': {'ini': ini, 'fim': fim},
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,
         'transacoes_sobrando': transacoes_sobrando,
