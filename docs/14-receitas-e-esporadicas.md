@@ -638,3 +638,35 @@ lançamento no mês. Isso tornou `sempre_disponiveis` redundante — foi removid
 **O selo de status da seção 1 tinha texto fixo** (`Pago`/`Agendado`), então um
 salário já creditado aparecia como "Agendado" na aba de entradas. O vocabulário
 correto dos dois lados já existia em `STATUS_LABEL` e não estava sendo usado ali.
+
+---
+
+## Estorno é obrigatório dizer o que anula
+
+Um crédito associado a item de tipo `estorno` **precisa** apontar o débito que
+anula, e a informação é sempre gravada em `transacao.estorna_transacao_id`.
+
+Sem o alvo, o estorno não estorna nada: o crédito vira uma entrada solta e o
+débito continua contando como despesa paga — os dois erros que a classificação
+existe para evitar.
+
+**Validado no backend, não só na tela.** `/api/batimento/confirmar` recusa o par
+com HTTP 400 e mensagem nomeando o item. A tela cobra antes (bloqueia
+"Confirmar tudo" e aponta quantos faltam), mas é a gravação que precisa ser
+confiável — a regra não pode depender de o caminho da interface ter sido
+percorrido.
+
+Antes disso a obrigatoriedade existia só na associação manual da seção 3. Um
+estorno que o batimento casasse sozinho, ou que surgisse de um "Não é essa
+receita", era gravado sem alvo.
+
+### O débito estornado é desfeito
+
+Confirmar um estorno **desfaz o vínculo do débito anulado**: o lançamento volta
+para `nao_encontrado` e a transação perde o `despesa_id`. Se o banco devolveu o
+dinheiro, o pagamento não aconteceu — deixar a despesa marcada como paga faria o
+mês fechar com um pagamento que não existe. A despesa volta para a seção 2 e
+pode ser casada com a cobrança de verdade (no caso real, o boleto refeito).
+
+Por isso o seletor oferece **todos** os débitos do período, não só os sem
+despesa: uma cobrança já casada também pode ser estornada.

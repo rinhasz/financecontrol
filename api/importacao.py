@@ -631,6 +631,18 @@ def confirmar_batimento():
         if not transacao or not item:
             continue
 
+        # Estorno sem alvo não é estorno: sem saber qual débito foi anulado, o
+        # crédito vira uma entrada solta e o débito estornado continua contando
+        # como despesa paga. A regra é validada aqui, e não só na tela, porque
+        # é a gravação que precisa ser confiável.
+        if natureza == 'receita' and item['tipo'] == 'estorno' and not par.get('estorna_transacao_id'):
+            conn.close()
+            return jsonify({
+                'ok': False,
+                'msg': f'"{item["nome"]}" é do tipo estorno: informe qual débito ele anula.',
+                'transacao_id': transacao_id,
+            }), 400
+
         _persistir_par(conn, mes_ref, item_id, transacao_id, transacao, natureza)
         confirmados += 1
 
@@ -642,8 +654,18 @@ def confirmar_batimento():
             conn.execute('UPDATE transacao SET objetivo=? WHERE id=?',
                          (par['objetivo'] or None, transacao_id))
         if par.get('estorna_transacao_id'):
+            anulada = par['estorna_transacao_id']
             conn.execute('UPDATE transacao SET estorna_transacao_id=? WHERE id=?',
-                         (par['estorna_transacao_id'], transacao_id))
+                         (anulada, transacao_id))
+            # Débito estornado não aconteceu: se alguma despesa estava marcada
+            # como paga por ele, volta para "em aberto" — senão o mês fecharia
+            # com um pagamento que o banco devolveu. O vínculo da transação
+            # também cai, para ela não disputar casamento.
+            conn.execute(
+                "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, "
+                'valor_real=NULL, data_pagamento=NULL WHERE transacao_id=?', (anulada,))
+            conn.execute("UPDATE transacao SET despesa_id=NULL, classificacao='extra' WHERE id=?",
+                         (anulada,))
 
         if item_id_sugerido and item_id_sugerido != item_id:
             # o usuário rejeitou esta sugestão: desaprende, senão a regra errada

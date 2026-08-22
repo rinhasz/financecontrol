@@ -148,7 +148,11 @@ export function Importacao({ active }: { active: boolean }) {
   // detalhes que só existem por ocorrência (doc 14 §5)
   const [objetivoVal, setObjetivoVal] = useState('')
   const [estornaVal, setEstornaVal] = useState('')
+  // seção 1: par de estorno que ainda não diz qual débito anula
+  const [definindoEstorno, setDefinindoEstorno] = useState<number | null>(null)
+  const [estornaSec1, setEstornaSec1] = useState('')
   const [confirmando, setConfirmando] = useState(false)
+  const [erroConfirmar, setErroConfirmar] = useState('')
   const [confirmado, setConfirmado] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
@@ -177,7 +181,7 @@ export function Importacao({ active }: { active: boolean }) {
   // trocar de lado fecha qualquer edição aberta: os ids são de outra lista
   function trocarNatureza(n: Natureza) {
     setNatureza(n)
-    setCorrigindo(null); setAssociando(null); setBuscandoTx(null)
+    setCorrigindo(null); setAssociando(null); setBuscandoTx(null); setDefinindoEstorno(null)
   }
 
   async function processar() {
@@ -341,6 +345,21 @@ export function Importacao({ active }: { active: boolean }) {
     setAssociando(null)
   }
 
+  function abrirDefinicaoEstorno(d: DetalheMatch) {
+    setDefinindoEstorno(definindoEstorno === d.transacao_id ? null : d.transacao_id)
+    setEstornaSec1(d.estorna_transacao_id ? String(d.estorna_transacao_id) : '')
+  }
+
+  function aplicarDefinicaoEstorno(d: DetalheMatch) {
+    if (!estornaSec1) return
+    setLado(r => ({
+      ...r,
+      detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id
+        ? { ...x, estorna_transacao_id: Number(estornaSec1) } : x)
+    }))
+    setDefinindoEstorno(null)
+  }
+
   function abrirBuscaTx(despesaId: number) {
     setBuscandoTx(buscandoTx === despesaId ? null : despesaId)
     setTxSelecionada('')
@@ -356,6 +375,16 @@ export function Importacao({ active }: { active: boolean }) {
   // O que já estava gravado e não foi tocado não é reenviado: regravar o mesmo
   // par não muda nada no banco e ainda contaria como mais um acerto da regra
   // aprendida, inflando o placar a cada vez que o batimento roda.
+  /** Estorno tem que dizer o que anula — sem isso o crédito vira entrada solta
+   *  e o débito estornado segue contando como despesa paga. O backend recusa,
+   *  então a tela cobra antes de deixar confirmar. */
+  const ehEstorno = (itemId: number) => catalogos.receita.find(x => x.id === itemId)?.tipo === 'estorno'
+
+  const estornosIncompletos = (['despesa', 'receita'] as Natureza[]).flatMap(n =>
+    n === 'receita'
+      ? pendentesDe(resultado?.receita).filter(d => ehEstorno(d.item_id) && !d.estorna_transacao_id)
+      : [])
+
   function pendentesDe(l: LadoBatimento | null | undefined) {
     return (l?.detalhes ?? []).filter(d => !d.ja_gravado || d.item_id !== d.item_id_sugerido)
   }
@@ -376,6 +405,11 @@ export function Importacao({ active }: { active: boolean }) {
         })))
       const res = await api.batimento.confirmar(mesRef, pares)
       setConfirmado(res.confirmados ?? pares.length)
+      setErroConfirmar('')
+    } catch (e) {
+      let msg = String(e)
+      try { msg = JSON.parse(msg.replace(/^Error:\s*/, '')).msg ?? msg } catch { /* não era JSON */ }
+      setErroConfirmar(msg)
     } finally {
       setConfirmando(false)
     }
@@ -403,12 +437,22 @@ export function Importacao({ active }: { active: boolean }) {
       id: t.id,
       nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
     }))
-  // Débitos que um estorno pode anular: os que sobraram do lado da despesa.
-  // Vêm do outro lado do batimento, não do lado corrente.
-  const opcoesDebito = (resultado?.despesa.transacoes_sobrando ?? []).map(t => ({
-    id: t.id,
-    nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
-  }))
+  // Débitos que um estorno pode anular: **todos** os do período, não só os sem
+  // despesa. Uma cobrança já casada também pode ser estornada — e nesse caso o
+  // vínculo dela é desfeito na confirmação, porque o pagamento não aconteceu.
+  const dataCurta = (d: string) =>
+    new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+
+  const opcoesDebito = [
+    ...(resultado?.despesa.transacoes_sobrando ?? []).map(t => ({
+      id: t.id,
+      nome: `${dataCurta(t.data)}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+    })),
+    ...(resultado?.despesa.detalhes ?? []).map(d => ({
+      id: d.transacao_id,
+      nome: `${dataCurta(d.data)}  ·  ${d.descricao_transacao}  ·  ${formatBRL(d.valor)}  ·  ${d.item_nome}`
+    }))
+  ]
 
   // Sai da lista quem já casou — a não ser que o catálogo diga que aquele item
   // pode acontecer mais de uma vez no mês. Antes isso era deduzido da
@@ -643,15 +687,41 @@ export function Importacao({ active }: { active: boolean }) {
                                 {STATUS_LABEL[d.status] ?? d.status}
                               </span>
                             </td>
-                            <td className="px-4 py-2 text-right">
+                            <td className="px-4 py-2 text-right whitespace-nowrap">
+                              {confirmado === null && ehEstorno(d.item_id) && (
+                                <button onClick={() => abrirDefinicaoEstorno(d)}
+                                  className={cn('text-xs mr-3 transition-colors',
+                                    d.estorna_transacao_id
+                                      ? 'text-zinc-500 hover:text-emerald-400'
+                                      : 'text-amber-400 font-medium hover:text-amber-300')}>
+                                  {d.estorna_transacao_id ? 'trocar estornado' : 'definir o que estorna'}
+                                </button>
+                              )}
                               {confirmado === null && (
                                 <button onClick={() => abrirCorrecao(d.transacao_id)}
-                                  className="text-xs text-zinc-500 hover:text-amber-400 transition-colors whitespace-nowrap">
+                                  className="text-xs text-zinc-500 hover:text-amber-400 transition-colors">
                                   {t.trocar}
                                 </button>
                               )}
                             </td>
                           </tr>
+                          {definindoEstorno === d.transacao_id && (
+                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                              <td colSpan={5} className="px-4 py-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs text-zinc-500">Este crédito anula qual débito?</span>
+                                  <DespesaPicker despesas={opcoesDebito} value={estornaSec1} onChange={setEstornaSec1}
+                                    placeholder="Digite pra buscar o débito estornado..."
+                                    vazio="Nenhum débito no período"
+                                    className="w-80" />
+                                  <button onClick={() => aplicarDefinicaoEstorno(d)} disabled={!estornaSec1}
+                                    className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                                    Confirmar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
                           {corrigindo === d.transacao_id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={5} className="px-4 py-3">
@@ -828,11 +898,21 @@ export function Importacao({ active }: { active: boolean }) {
 
             {confirmado === null ? (
               <div className="flex items-center gap-3 pt-2">
-                <button onClick={confirmarTudo} disabled={confirmando || totalPendente === 0}
+                <button onClick={confirmarTudo}
+                  disabled={confirmando || totalPendente === 0 || estornosIncompletos.length > 0}
                   className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                   {confirmando ? 'Gravando...' : `Confirmar tudo (${totalPendente})`}
                 </button>
-                <p className="text-sm text-zinc-500">Nada é gravado até você clicar aqui — pode sair e voltar sem perder o que já revisou.</p>
+                {erroConfirmar ? (
+                  <p className="text-sm text-red-400">{erroConfirmar}</p>
+                ) : estornosIncompletos.length > 0 ? (
+                  <p className="text-sm text-amber-400">
+                    {estornosIncompletos.length === 1 ? 'Falta dizer' : `Faltam ${estornosIncompletos.length} estornos: diga`}
+                    {' '}qual débito o estorno anula (aba Entradas, seção 1).
+                  </p>
+                ) : (
+                  <p className="text-sm text-zinc-500">Nada é gravado até você clicar aqui — pode sair e voltar sem perder o que já revisou.</p>
+                )}
               </div>
             ) : (
               <>
