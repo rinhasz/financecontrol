@@ -5,10 +5,20 @@ from .db import get_db, get_config_value, periodo_competencia
 bp = Blueprint('lancamentos', __name__)
 
 
-def _valor_previsto(conn, despesa_id, mes_ref, padrao, valor_padrao):
+def _valor_previsto(conn, despesa_id, mes_ref, padrao, valor_padrao, natureza='despesa'):
+    """Prevê o valor do mês a partir do histórico (doc 03).
+
+    `natureza` escolhe de qual par tabela/coluna o histórico vem — receita usa
+    `lancamento_receita`/`receita_id`. O algoritmo é o mesmo: o que muda é onde
+    a série está guardada.
+    """
+    from .motor_batimento import cfg
+    c = cfg(natureza)
+    tab, fk = c['lancamento'], c['fk']
+
     mes = int(mes_ref.split('-')[1])
     ultimo = conn.execute(
-        "SELECT COALESCE(valor_real, valor_esperado) as v FROM lancamento WHERE despesa_id=? AND mes_ref<? ORDER BY mes_ref DESC LIMIT 1",
+        f"SELECT COALESCE(valor_real, valor_esperado) as v FROM {tab} WHERE {fk}=? AND mes_ref<? ORDER BY mes_ref DESC LIMIT 1",
         (despesa_id, mes_ref)
     ).fetchone()
 
@@ -21,7 +31,7 @@ def _valor_previsto(conn, despesa_id, mes_ref, padrao, valor_padrao):
     if padrao == 'variavel_sazonal':
         mes_str = str(mes).zfill(2)
         rows = conn.execute(
-            "SELECT COALESCE(valor_real, valor_esperado) as v FROM lancamento WHERE despesa_id=? AND mes_ref LIKE ? ORDER BY mes_ref DESC LIMIT 3",
+            f"SELECT COALESCE(valor_real, valor_esperado) as v FROM {tab} WHERE {fk}=? AND mes_ref LIKE ? ORDER BY mes_ref DESC LIMIT 3",
             (despesa_id, f'%-{mes_str}')
         ).fetchall()
         if rows:
@@ -29,7 +39,7 @@ def _valor_previsto(conn, despesa_id, mes_ref, padrao, valor_padrao):
 
     if padrao == 'variavel_nao_sazonal':
         rows = conn.execute(
-            "SELECT COALESCE(valor_real, valor_esperado) as v FROM lancamento WHERE despesa_id=? AND mes_ref<? ORDER BY mes_ref DESC LIMIT 3",
+            f"SELECT COALESCE(valor_real, valor_esperado) as v FROM {tab} WHERE {fk}=? AND mes_ref<? ORDER BY mes_ref DESC LIMIT 3",
             (despesa_id, mes_ref)
         ).fetchall()
         if rows:
@@ -38,7 +48,7 @@ def _valor_previsto(conn, despesa_id, mes_ref, padrao, valor_padrao):
     if padrao == 'anual':
         mes_str = str(mes).zfill(2)
         n = conn.execute(
-            "SELECT COUNT(*) FROM lancamento WHERE despesa_id=? AND mes_ref LIKE ?",
+            f"SELECT COUNT(*) FROM {tab} WHERE {fk}=? AND mes_ref LIKE ?",
             (despesa_id, f'%-{mes_str}')
         ).fetchone()[0]
         if not n:
@@ -54,13 +64,9 @@ def list_lancamentos():
 
     # Garantir que o mês está aberto. Só as fixas: esporádica não tem previsão
     # a fazer e só existe no mês em que acontecer (doc 14).
-    despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 AND recorrencia='fixa'").fetchall()
-    for d in despesas:
-        prev = _valor_previsto(conn, d['id'], mes_ref, d['padrao_variabilidade'], d['valor_padrao'])
-        conn.execute(
-            'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,"nao_encontrado")',
-            (mes_ref, d['id'], prev)
-        )
+    from .motor_batimento import garantir_lancamentos
+    garantir_lancamentos(conn, 'despesa', mes_ref)
+    garantir_lancamentos(conn, 'receita', mes_ref)
     conn.commit()
 
     # Despesa desativada não deve poluir o mês. A exceção é a que teve

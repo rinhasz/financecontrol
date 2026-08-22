@@ -303,16 +303,25 @@ def padrao_descricao(descricao: str) -> str:
     return ' '.join(t for t in tokens if t and re.search(r'[a-z]', t))
 
 
-def registrar_regra_transacao(conn, descricao: str, despesa_id: int):
-    """Grava (ou reforça) 'esse padrão de descrição é essa despesa'."""
+def registrar_regra(conn, tabela: str, fk: str, descricao: str, item_id: int):
+    """Grava (ou reforça) 'esse padrão de descrição é esse item'.
+
+    `tabela`/`fk` vêm de motor_batimento.NATUREZAS — o mesmo aprendizado vale
+    para despesa e receita, mudando só onde é guardado.
+    """
     padrao = padrao_descricao(descricao)
-    if not padrao or not despesa_id:
+    if not padrao or not item_id:
         return
     conn.execute(
-        'INSERT INTO transacao_despesa_regra (padrao, despesa_id) VALUES (?,?) '
-        'ON CONFLICT(padrao, despesa_id) DO UPDATE SET acertos = acertos + 1',
-        (padrao, despesa_id)
+        f'INSERT INTO {tabela} (padrao, {fk}) VALUES (?,?) '
+        f'ON CONFLICT(padrao, {fk}) DO UPDATE SET acertos = acertos + 1',
+        (padrao, item_id)
     )
+
+
+def registrar_regra_transacao(conn, descricao: str, despesa_id: int):
+    """Atalho para o lado da despesa (usado pela semeadura do dicionário)."""
+    registrar_regra(conn, 'transacao_despesa_regra', 'despesa_id', descricao, despesa_id)
 
 
 def get_config_value(conn, chave: str, default: str) -> str:

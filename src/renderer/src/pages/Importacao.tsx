@@ -7,17 +7,20 @@ type Step = 'selecionar' | 'revisar' | 'concluido'
 
 interface ParsedTx { data: string; descricao: string; valor: number }
 
+type Natureza = 'despesa' | 'receita'
+
 interface DetalheMatch {
   lancamento_id: number
-  despesa_id: number
-  despesa_id_sugerido: number | null
-  despesa_nome: string
+  item_id: number
+  item_id_sugerido: number | null
+  item_nome: string
   valor_esperado: number
   transacao_id: number
   descricao_transacao: string
   valor: number
   data: string
-  status: 'pago' | 'agendado'
+  // o vocabulário muda de lado: uma despesa fica "Paga", uma receita "Recebida"
+  status: 'pago' | 'agendado' | 'recebido' | 'previsto'
   // presente só quando o casamento já existia e o status mudou desde então
   // (ex: estava agendado e o débito caiu) — ver rodar_batimento
   status_anterior?: 'pago' | 'agendado' | 'nao_encontrado'
@@ -27,14 +30,49 @@ interface DetalheMatch {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  pago: 'Pago', agendado: 'Agendado', nao_encontrado: 'Em aberto'
+  pago: 'Pago', agendado: 'Agendado', nao_encontrado: 'Em aberto',
+  recebido: 'Recebido', previsto: 'Previsto'
+}
+
+const STATUS_CONFIRMADO = new Set(['pago', 'recebido'])
+
+/** Rótulos que mudam conforme o lado. Manter num lugar só evita a tela dizer
+ *  "despesa" no bloco de entradas. */
+const TEXTO: Record<Natureza, {
+  item: string; itens: string; sec1: string; sec2: string; sec3: string
+  associarTx: string; associarItem: string; novoItem: string; trocar: string
+}> = {
+  despesa: {
+    item: 'despesa', itens: 'Despesas',
+    sec1: 'Despesas casadas',
+    sec2: 'Despesas ativas que não encontrei no extrato',
+    sec3: 'Débitos do extrato sem despesa',
+    associarTx: 'Associar débito', associarItem: 'Associar despesa',
+    novoItem: 'Nova despesa', trocar: 'Não é essa despesa'
+  },
+  receita: {
+    item: 'receita', itens: 'Receitas',
+    sec1: 'Receitas casadas',
+    sec2: 'Receitas ativas que não encontrei no extrato',
+    sec3: 'Créditos do extrato sem receita',
+    associarTx: 'Associar crédito', associarItem: 'Associar receita',
+    novoItem: 'Nova receita', trocar: 'Não é essa receita'
+  }
 }
 
 interface NaoEncontrado {
   lancamento_id: number
-  despesa_id: number
-  despesa_nome: string
+  item_id: number
+  item_nome: string
   valor_esperado: number
+}
+
+interface LadoBatimento {
+  matched: number
+  total: number
+  detalhes: DetalheMatch[]
+  nao_encontrados: NaoEncontrado[]
+  transacoes_sobrando: TransacaoSobrando[]
 }
 
 interface TransacaoSobrando {
@@ -73,10 +111,9 @@ export function Importacao({ active }: { active: boolean }) {
     const n = new Date()
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
   })
-  const [resultado, setResultado] = useState<{
-    matched: number; total: number; detalhes: DetalheMatch[]
-    nao_encontrados: NaoEncontrado[]; transacoes_sobrando: TransacaoSobrando[]
-  } | null>(null)
+  // O batimento devolve os dois lados de uma vez; a tela mostra um por vez.
+  const [resultado, setResultado] = useState<Record<Natureza, LadoBatimento> | null>(null)
+  const [natureza, setNatureza] = useState<Natureza>('despesa')
   const [despesas, setDespesas] = useState<Despesa[]>([])
   const [corrigindo, setCorrigindo] = useState<number | null>(null)
   const [selecionada, setSelecionada] = useState('')
@@ -98,6 +135,20 @@ export function Importacao({ active }: { active: boolean }) {
   useEffect(() => {
     if (active) api.catalogo.list().then(setDespesas)
   }, [active])
+
+  const lado = resultado?.[natureza] ?? null
+  const t = TEXTO[natureza]
+
+  /** Atualiza apenas o lado que está sendo revisado. */
+  function setLado(fn: (l: LadoBatimento) => LadoBatimento) {
+    setResultado(r => r ? { ...r, [natureza]: fn(r[natureza]) } : r)
+  }
+
+  // trocar de lado fecha qualquer edição aberta: os ids são de outra lista
+  function trocarNatureza(n: Natureza) {
+    setNatureza(n)
+    setCorrigindo(null); setAssociando(null); setBuscandoTx(null)
+  }
 
   async function processar() {
     if (!file) return
@@ -153,27 +204,26 @@ export function Importacao({ active }: { active: boolean }) {
     }
 
     // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
-    setResultado(r => {
-      if (!r) return r
+    setLado(r => {
       const detalhes = r.detalhes.map(x =>
-        x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
+        x.transacao_id === d.transacao_id ? { ...x, item_id: despesaId, item_nome: despesaNome } : x)
 
       // Trocar a despesa deste casamento mexe nas outras duas seções: a nova
       // deixa de estar em aberto, e a antiga volta a estar (a não ser que
       // tenha casado com outra transação). Sem isso a despesa liberada sumia
       // da tela e a recém-escolhida continuava aparecendo como não encontrada.
       const antiga = r.detalhes.find(x => x.transacao_id === d.transacao_id)
-      const liberada = antiga && antiga.despesa_id !== despesaId
-        && !detalhes.some(x => x.despesa_id === antiga.despesa_id)
-        ? [{ lancamento_id: antiga.lancamento_id, despesa_id: antiga.despesa_id,
-             despesa_nome: antiga.despesa_nome, valor_esperado: antiga.valor_esperado }]
+      const liberada = antiga && antiga.item_id !== despesaId
+        && !detalhes.some(x => x.item_id === antiga.item_id)
+        ? [{ lancamento_id: antiga.lancamento_id, item_id: antiga.item_id,
+             item_nome: antiga.item_nome, valor_esperado: antiga.valor_esperado }]
         : []
 
       return {
         ...r,
         detalhes,
-        nao_encontrados: [...r.nao_encontrados.filter(x => x.despesa_id !== despesaId), ...liberada]
-          .sort((a, b) => a.despesa_nome.localeCompare(b.despesa_nome, 'pt-BR'))
+        nao_encontrados: [...r.nao_encontrados.filter(x => x.item_id !== despesaId), ...liberada]
+          .sort((a, b) => a.item_nome.localeCompare(b.item_nome, 'pt-BR'))
       }
     })
     setCorrigindo(null)
@@ -183,17 +233,18 @@ export function Importacao({ active }: { active: boolean }) {
    *  As duas direções de associação terminam aqui — só muda por qual ponta o
    *  usuário começou. Só mexe no estado local; nada é gravado até "Confirmar tudo". */
   function associarPar(t: TransacaoSobrando, despesaId: number, despesaNome: string) {
-    setResultado(r => {
-      if (!r) return r
-      const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
-      const emAberto = r.nao_encontrados.find(x => x.despesa_id === despesaId)
+    setLado(r => {
+      const status = t.situacao === 'efetivada'
+        ? (natureza === 'receita' ? 'recebido' as const : 'pago' as const)
+        : (natureza === 'receita' ? 'previsto' as const : 'agendado' as const)
+      const emAberto = r.nao_encontrados.find(x => x.item_id === despesaId)
       return {
         ...r,
-        nao_encontrados: r.nao_encontrados.filter(x => x.despesa_id !== despesaId),
+        nao_encontrados: r.nao_encontrados.filter(x => x.item_id !== despesaId),
         transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== t.id),
         detalhes: [...r.detalhes, {
-          lancamento_id: emAberto?.lancamento_id ?? 0, despesa_id: despesaId,
-          despesa_id_sugerido: null, despesa_nome: despesaNome,
+          lancamento_id: emAberto?.lancamento_id ?? 0, item_id: despesaId,
+          item_id_sugerido: null, item_nome: despesaNome,
           valor_esperado: emAberto?.valor_esperado ?? Math.abs(t.valor),
           transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
         }]
@@ -203,13 +254,19 @@ export function Importacao({ active }: { active: boolean }) {
 
   async function criarDespesa(nome: string, valor: number) {
     const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
-    const res = await api.catalogo.upsert({
+    const comum = {
       nome,
       tipo_valor: 'variavel',
       padrao_variabilidade: 'variavel_nao_sazonal',
       valor_padrao: valor,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
-    })
+    }
+    // receita criada aqui nasce como 'outra' — o tipo (salário, resgate...) é
+    // escolha do usuário no Catálogo, e chutar aqui poderia classificar um
+    // resgate como renda, que é justamente o erro que o tipo existe para evitar
+    const res = natureza === 'receita'
+      ? await api.receitas.upsert({ ...comum, tipo: 'outra' })
+      : await api.catalogo.upsert(comum)
     setDespesas(ds => [...ds, { id: res.id, nome }])
     return res.id as number
   }
@@ -231,7 +288,7 @@ export function Importacao({ active }: { active: boolean }) {
     } else {
       if (!selecionadaAssoc) return
       despesaId = Number(selecionadaAssoc)
-      despesaNome = resultado?.nao_encontrados.find(x => x.despesa_id === despesaId)?.despesa_nome
+      despesaNome = lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome
         ?? despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
     associarPar(t, despesaId, despesaNome)
@@ -244,26 +301,34 @@ export function Importacao({ active }: { active: boolean }) {
   }
 
   function aplicarBuscaTx(n: NaoEncontrado) {
-    const t = resultado?.transacoes_sobrando.find(x => String(x.id) === txSelecionada)
-    if (!t) return
-    associarPar(t, n.despesa_id, n.despesa_nome)
+    const tx = lado?.transacoes_sobrando.find(x => String(x.id) === txSelecionada)
+    if (!tx) return
+    associarPar(tx, n.item_id, n.item_nome)
     setBuscandoTx(null)
   }
 
   // O que já estava gravado e não foi tocado não é reenviado: regravar o mesmo
   // par não muda nada no banco e ainda contaria como mais um acerto da regra
   // aprendida, inflando o placar a cada vez que o batimento roda.
-  const paresPendentes = (resultado?.detalhes ?? [])
-    .filter(d => !d.ja_gravado || d.despesa_id !== d.despesa_id_sugerido)
+  function pendentesDe(l: LadoBatimento | null | undefined) {
+    return (l?.detalhes ?? []).filter(d => !d.ja_gravado || d.item_id !== d.item_id_sugerido)
+  }
+  const paresPendentes = pendentesDe(lado)
+  // "Confirmar tudo" grava os dois lados: o usuário revisa saídas e entradas na
+  // mesma passada, e ter que confirmar duas vezes seria fácil de esquecer.
+  const totalPendente = pendentesDe(resultado?.despesa).length + pendentesDe(resultado?.receita).length
 
   async function confirmarTudo() {
-    if (paresPendentes.length === 0) return
+    if (totalPendente === 0) return
     setConfirmando(true)
     try {
-      const res = await api.batimento.confirmar(mesRef, paresPendentes.map(d => ({
-        transacao_id: d.transacao_id, despesa_id: d.despesa_id, despesa_id_sugerido: d.despesa_id_sugerido
-      })))
-      setConfirmado(res.confirmados ?? paresPendentes.length)
+      const pares = (['despesa', 'receita'] as Natureza[]).flatMap(n =>
+        pendentesDe(resultado?.[n]).map(d => ({
+          natureza: n, transacao_id: d.transacao_id,
+          item_id: d.item_id, item_id_sugerido: d.item_id_sugerido
+        })))
+      const res = await api.batimento.confirmar(mesRef, pares)
+      setConfirmado(res.confirmados ?? pares.length)
     } finally {
       setConfirmando(false)
     }
@@ -277,25 +342,25 @@ export function Importacao({ active }: { active: boolean }) {
   // conforme os pares vão sendo montados.
   //
   // "Ainda não associada" tem três fontes, e as duas combos respeitam as três:
-  // não pode ter dono gravado no banco (o backend filtra `despesa_id IS NULL`),
+  // não pode ter dono gravado no banco (o backend filtra `item_id IS NULL`),
   // não pode estar num casamento sugerido nesta rodada, e não pode ter sido
   // usada num par montado aqui na tela. Só a primeira vem pronta do servidor;
   // as outras duas mudam a cada clique, então são conferidas no render — o que
   // já está na seção 1 nunca aparece como opção nas seções 2 e 3.
-  const txAssociadas = new Set((resultado?.detalhes ?? []).map(d => d.transacao_id))
-  const despesasAssociadas = new Set((resultado?.detalhes ?? []).map(d => d.despesa_id))
+  const txAssociadas = new Set((lado?.detalhes ?? []).map(d => d.transacao_id))
+  const despesasAssociadas = new Set((lado?.detalhes ?? []).map(d => d.item_id))
 
-  const opcoesTransacao = (resultado?.transacoes_sobrando ?? [])
+  const opcoesTransacao = (lado?.transacoes_sobrando ?? [])
     .filter(t => !txAssociadas.has(t.id))
     .map(t => ({
       id: t.id,
       nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
     }))
-  const opcoesDespesa = (resultado?.nao_encontrados ?? [])
-    .filter(n => !despesasAssociadas.has(n.despesa_id))
+  const opcoesDespesa = (lado?.nao_encontrados ?? [])
+    .filter(n => !despesasAssociadas.has(n.item_id))
     .map(n => ({
-      id: n.despesa_id,
-      nome: n.valor_esperado > 0 ? `${n.despesa_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.despesa_nome
+      id: n.item_id,
+      nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome
     }))
 
   return (
@@ -419,8 +484,23 @@ export function Importacao({ active }: { active: boolean }) {
         )}
 
         {/* Step 3 — concluído */}
-        {step === 'concluido' && resultado && (
+        {step === 'concluido' && resultado && lado && (
           <div className="space-y-6 max-w-4xl">
+            {/* Saídas e entradas são revisadas na mesma tela, uma de cada vez.
+                O contador de pendências fica no botão, que grava as duas. */}
+            <div className="flex rounded-md border border-zinc-700 overflow-hidden w-fit">
+              {(['despesa', 'receita'] as Natureza[]).map(n => (
+                <button key={n} onClick={() => trocarNatureza(n)}
+                  className={cn('px-4 py-1.5 text-sm transition-colors',
+                    natureza === n ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200')}>
+                  {n === 'despesa' ? 'Saídas' : 'Entradas'}
+                  <span className="ml-2 text-xs opacity-70 tabular-nums">
+                    {resultado[n].matched}/{resultado[n].total}
+                  </span>
+                </button>
+              ))}
+            </div>
+
             {confirmado !== null ? (
               <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-8 text-center">
                 <div className="text-5xl font-bold text-emerald-400 mb-2">{confirmado}</div>
@@ -428,15 +508,18 @@ export function Importacao({ active }: { active: boolean }) {
               </div>
             ) : (
               <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-8 text-center">
-                <div className="text-5xl font-bold text-zinc-200 mb-2">{resultado.matched}/{resultado.total}</div>
-                <p className="text-zinc-500 text-sm">sugestões automáticas — revise abaixo e clique em "Confirmar tudo" para gravar. Nada é salvo antes disso.</p>
+                <div className="text-5xl font-bold text-zinc-200 mb-2">{lado.matched}/{lado.total}</div>
+                <p className="text-zinc-500 text-sm">
+                  {t.itens.toLowerCase()} casadas — revise abaixo e clique em "Confirmar tudo" para gravar.
+                  Nada é salvo antes disso.
+                </p>
               </div>
             )}
 
             {/* ---- 1. casadas ---- */}
-            {resultado.detalhes.length > 0 && (
+            {lado.detalhes.length > 0 && (
               <div>
-                <Secao n={1} titulo="Despesas casadas" qtd={resultado.detalhes.length}
+                <Secao n={1} titulo={t.sec1} qtd={lado.detalhes.length}
                   ajuda={'Inclui o que já foi gravado antes. Se alguma despesa estiver errada, corrija na linha — '
                     + 'só o que você trocar é regravado.'} />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
@@ -451,12 +534,12 @@ export function Importacao({ active }: { active: boolean }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {resultado.detalhes.map((d, i) => (
+                      {lado.detalhes.map((d, i) => (
                         <Fragment key={d.transacao_id}>
                           <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
                             <td className="px-4 py-2 text-zinc-200 font-medium">
-                              {d.despesa_nome}
-                              {d.ja_gravado && d.despesa_id === d.despesa_id_sugerido && (
+                              {d.item_nome}
+                              {d.ja_gravado && d.item_id === d.item_id_sugerido && (
                                 <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">gravado</span>
                               )}
                             </td>
@@ -477,7 +560,7 @@ export function Importacao({ active }: { active: boolean }) {
                               {confirmado === null && (
                                 <button onClick={() => abrirCorrecao(d.transacao_id)}
                                   className="text-xs text-zinc-500 hover:text-amber-400 transition-colors whitespace-nowrap">
-                                  Não é essa despesa
+                                  {t.trocar}
                                 </button>
                               )}
                             </td>
@@ -487,12 +570,12 @@ export function Importacao({ active }: { active: boolean }) {
                               <td colSpan={5} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <DespesaPicker despesas={despesas} value={selecionada} onChange={setSelecionada}
-                                    placeholder="Digite pra buscar a despesa certa..." allowNova
+                                    placeholder={`Digite pra buscar a ${t.item} certa...`} allowNova
                                     onSelectNova={q => { setSelecionada('nova'); setNovaDespesaNome(q) }}
                                     className="w-56" />
                                   {selecionada === 'nova' && (
                                     <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
-                                      placeholder="Nome da nova despesa" autoFocus
+                                      placeholder={`Nome da nova ${t.item}`} autoFocus
                                       className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
                                   )}
                                   <button onClick={() => aplicarCorrecao(d)}
@@ -515,35 +598,35 @@ export function Importacao({ active }: { active: boolean }) {
             {/* ---- 2. despesas ativas que não foram encontradas no extrato ----
                  O combo aqui lista as TRANSAÇÕES sobrando: parte-se da despesa
                  e procura-se o débito. É o inverso exato da seção 3. */}
-            {resultado.nao_encontrados.length > 0 && (
+            {lado.nao_encontrados.length > 0 && (
               <div>
-                <Secao n={2} titulo="Despesas ativas que não encontrei no extrato" qtd={resultado.nao_encontrados.length}
-                  ajuda="Se o débito existe e eu não achei, escolha a transação correspondente." />
+                <Secao n={2} titulo={t.sec2} qtd={lado.nao_encontrados.length}
+                  ajuda="Se a transação existe e eu não achei, escolha a linha correspondente do extrato." />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-zinc-800 bg-zinc-900/40">
-                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">{t.itens.slice(0, -1)}</th>
                         <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsto</th>
                         <th className="px-4 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {resultado.nao_encontrados.map((n, i) => (
-                        <Fragment key={n.despesa_id}>
+                      {lado.nao_encontrados.map((n, i) => (
+                        <Fragment key={n.item_id}>
                           <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
-                            <td className="px-4 py-2 text-zinc-200 font-medium">{n.despesa_nome}</td>
+                            <td className="px-4 py-2 text-zinc-200 font-medium">{n.item_nome}</td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-500">{formatBRL(n.valor_esperado)}</td>
                             <td className="px-4 py-2 text-right">
                               {confirmado === null && (
-                                <button onClick={() => abrirBuscaTx(n.despesa_id)}
+                                <button onClick={() => abrirBuscaTx(n.item_id)}
                                   className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                                  Associar transação
+                                  {t.associarTx}
                                 </button>
                               )}
                             </td>
                           </tr>
-                          {buscandoTx === n.despesa_id && (
+                          {buscandoTx === n.item_id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={3} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -570,10 +653,10 @@ export function Importacao({ active }: { active: boolean }) {
                  O combo lista só as despesas da seção 2 (ativas e ainda não
                  associadas neste mês) — oferecer o catálogo inteiro deixava
                  escolher uma despesa que já casou com outra transação. */}
-            {resultado.transacoes_sobrando.length > 0 && (
+            {lado.transacoes_sobrando.length > 0 && (
               <div>
-                <Secao n={3} titulo="Transações do extrato sem despesa" qtd={resultado.transacoes_sobrando.length}
-                  ajuda="Associe a uma despesa ativa ainda em aberto, ou crie uma despesa nova." />
+                <Secao n={3} titulo={t.sec3} qtd={lado.transacoes_sobrando.length}
+                  ajuda={`Associe a uma ${t.item} ativa ainda em aberto, ou crie uma ${t.item} nova.`} />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
@@ -585,38 +668,38 @@ export function Importacao({ active }: { active: boolean }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {resultado.transacoes_sobrando.map((t, i) => (
-                        <Fragment key={t.id}>
+                      {lado.transacoes_sobrando.map((tx, i) => (
+                        <Fragment key={tx.id}>
                           <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
                             <td className="px-4 py-2 text-zinc-500 text-xs tabular-nums">
-                              {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')}
+                              {new Date(tx.data + 'T00:00:00').toLocaleDateString('pt-BR')}
                             </td>
-                            <td className="px-4 py-2 text-zinc-300">{t.descricao}</td>
-                            <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(t.valor))}</td>
+                            <td className="px-4 py-2 text-zinc-300">{tx.descricao}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(tx.valor))}</td>
                             <td className="px-4 py-2 text-right">
                               {confirmado === null && (
-                                <button onClick={() => abrirAssociacao(t.id)}
+                                <button onClick={() => abrirAssociacao(tx.id)}
                                   className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                                  Associar despesa
+                                  {t.associarItem}
                                 </button>
                               )}
                             </td>
                           </tr>
-                          {associando === t.id && (
+                          {associando === tx.id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={4} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <DespesaPicker despesas={opcoesDespesa} value={selecionadaAssoc} onChange={setSelecionadaAssoc}
-                                    placeholder="Digite pra buscar a despesa..." allowNova
-                                    vazio="Nenhuma despesa em aberto neste mês"
+                                    placeholder={`Digite pra buscar a ${t.item}...`} allowNova
+                                    vazio={`Nenhuma ${t.item} em aberto neste mês`}
                                     onSelectNova={q => { setSelecionadaAssoc('nova'); setNovaDespesaNomeAssoc(q) }}
                                     className="w-72" />
                                   {selecionadaAssoc === 'nova' && (
                                     <input value={novaDespesaNomeAssoc} onChange={e => setNovaDespesaNomeAssoc(e.target.value)}
-                                      placeholder="Nome da nova despesa" autoFocus
+                                      placeholder={`Nome da nova ${t.item}`} autoFocus
                                       className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
                                   )}
-                                  <button onClick={() => aplicarAssociacao(t)}
+                                  <button onClick={() => aplicarAssociacao(tx)}
                                     disabled={!selecionadaAssoc || (selecionadaAssoc === 'nova' && !novaDespesaNomeAssoc.trim())}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
@@ -635,9 +718,9 @@ export function Importacao({ active }: { active: boolean }) {
 
             {confirmado === null ? (
               <div className="flex items-center gap-3 pt-2">
-                <button onClick={confirmarTudo} disabled={confirmando || paresPendentes.length === 0}
+                <button onClick={confirmarTudo} disabled={confirmando || totalPendente === 0}
                   className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-                  {confirmando ? 'Gravando...' : `Confirmar tudo (${paresPendentes.length})`}
+                  {confirmando ? 'Gravando...' : `Confirmar tudo (${totalPendente})`}
                 </button>
                 <p className="text-sm text-zinc-500">Nada é gravado até você clicar aqui — pode sair e voltar sem perder o que já revisou.</p>
               </div>

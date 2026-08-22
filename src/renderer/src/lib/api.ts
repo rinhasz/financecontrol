@@ -102,8 +102,10 @@ export const api = {
   },
   batimento: {
     rodar: (mesRef: string) => post('/api/batimento', { mes_ref: mesRef }),
-    confirmar: (mesRef: string, pares: { transacao_id: number; despesa_id: number; despesa_id_sugerido: number | null }[]) =>
-      post('/api/batimento/confirmar', { mes_ref: mesRef, pares }),
+    confirmar: (mesRef: string, pares: {
+      natureza: 'despesa' | 'receita'; transacao_id: number
+      item_id: number; item_id_sugerido: number | null
+    }[]) => post('/api/batimento/confirmar', { mes_ref: mesRef, pares }),
     corrigir: (mesRef: string, transacaoId: number, despesaId: number) =>
       post('/api/batimento/corrigir', { mes_ref: mesRef, transacao_id: transacaoId, despesa_id: despesaId }),
     resetar: (mesRef: string) => post('/api/batimento/resetar', { mes_ref: mesRef })

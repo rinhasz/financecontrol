@@ -5,7 +5,8 @@ import os
 from datetime import date
 from flask import Blueprint, jsonify, request
 from .db import (get_db, get_config_value, periodo_competencia,
-                 padrao_descricao, registrar_regra_transacao)
+                 padrao_descricao, registrar_regra)
+from . import motor_batimento as motor
 
 DICIONARIO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', '07-dicionario-despesas.md')
 
@@ -399,271 +400,134 @@ def importar():
     return jsonify({'ok': True, 'msg': msg, 'transacoes': txs, 'import_id': import_id})
 
 
-def _garantir_lancamentos(conn, mes_ref: str) -> None:
-    """Abre o mês: cria o lançamento de cada despesa ativa que ainda não tem.
-
-    Mesma operação que /api/lancamentos faz ao listar o Mês Atual. Precisa
-    acontecer aqui também porque a seção "despesas ativas que não encontrei"
-    do batimento sai dos lançamentos do mês — sem isso, quem importa o extrato
-    antes de abrir o Mês Atual veria uma lista incompleta.
-    """
-    from .lancamentos import _valor_previsto
-    # esporádica não tem previsão a fazer: só existe no mês em que acontecer
-    for d in conn.execute("SELECT * FROM despesa WHERE ativo=1 AND recorrencia='fixa'").fetchall():
-        prev = _valor_previsto(conn, d['id'], mes_ref, d['padrao_variabilidade'], d['valor_padrao'])
-        conn.execute(
-            'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) '
-            'VALUES (?,?,?,\'nao_encontrado\')',
-            (mes_ref, d['id'], prev)
-        )
-
-
 @bp.route('/batimento', methods=['POST'])
 def rodar_batimento():
     """Calcula as sugestões de casamento (preview) — não grava nada no banco.
+
+    Devolve os dois lados: `despesa` (débitos) e `receita` (créditos). O motor é
+    o mesmo para ambos (`motor_batimento`); o que muda é de qual tabela vêm os
+    lançamentos e qual o sinal da transação.
+
     Só é persistido quando o usuário confirma via /api/batimento/confirmar,
     para não perder o trabalho de quem ainda não terminou de revisar (rodar
     duas vezes sem confirmar não deve fazer nada desaparecer)."""
-    mes_ref = request.json.get('mes_ref', '')
+    mes_ref = (request.json or {}).get('mes_ref', '')
 
     conn = get_db()
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
 
-    # Garante o lançamento de toda despesa ativa do mês, para a seção "despesas
-    # que não encontrei" ficar completa mesmo se o usuário ainda não abriu o Mês
-    # Atual (é o mesmo INSERT OR IGNORE de /api/lancamentos).
-    _garantir_lancamentos(conn, mes_ref)
+    # Abre o mês antes de casar, para a seção "não encontrei" ficar completa
+    # mesmo se o usuário ainda não abriu o Mês Atual.
+    for natureza in ('despesa', 'receita'):
+        motor.garantir_lancamentos(conn, natureza, mes_ref)
     conn.commit()
 
-    # d.ativo=1: despesa desativada não pode disputar transação com uma ativa —
-    # é assim que uma despesa velha e genérica (ex: "cartao xp") acabava
-    # roubando o casamento de outra parecida que ainda está em uso.
-    # recorrencia='fixa': esporádica nem lançamento tem (doc 14), mas o filtro
-    # fica explícito para o caso de sobrar lançamento de antes da migração.
-    lancamentos = conn.execute("""
-        SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.regras_match, d.dia_vencimento
-        FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
-        WHERE l.mes_ref=? AND l.status='nao_encontrado' AND d.ativo=1 AND d.recorrencia='fixa'
-    """, (mes_ref,)).fetchall()
+    resultado = {natureza: _batimento_de(conn, natureza, mes_ref, ini, fim)
+                 for natureza in ('despesa', 'receita')}
+    conn.close()
 
-    transacoes = conn.execute("""
-        SELECT * FROM transacao
-        WHERE data BETWEEN ? AND ? AND tipo='debito' AND despesa_id IS NULL
-    """, (ini, fim)).fetchall()
+    return jsonify({
+        'ok': True,
+        'periodo': {'ini': ini, 'fim': fim},
+        **resultado,
+    })
 
-    import json as _json
 
-    # Regras aprendidas das confirmações anteriores: padrão de descrição ->
-    # despesas que o usuário já disse pertencerem àquele texto.
-    regras_aprendidas = {}
-    for r in conn.execute('SELECT padrao, despesa_id FROM transacao_despesa_regra'):
-        regras_aprendidas.setdefault(r['padrao'], set()).add(r['despesa_id'])
-    padrao_por_tx = {t['id']: padrao_descricao(t['descricao']) for t in transacoes}
+def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict:
+    """Um lado do batimento — mesma lógica para despesa e receita."""
+    c = motor.cfg(natureza)
 
-    # Transações cujo valor encaixa quase exato no previsto de alguma despesa.
-    # Só nessas o valor tem força para conter uma regra aprendida (abaixo):
-    # se ninguém encaixa no valor, o previsto provavelmente é que está
-    # desatualizado, e aí a regra continua sendo a melhor evidência.
-    tx_com_dono_por_valor = set()
-    for t in transacoes:
-        tx_abs = abs(t['valor'])
-        for l in lancamentos:
-            esp = l['valor_esperado']
-            if esp > 0 and abs(tx_abs - esp) / esp <= 0.01:
-                tx_com_dono_por_valor.add(t['id'])
-                break
+    lancamentos = motor.carregar_lancamentos(conn, natureza, mes_ref)
+    transacoes = motor.carregar_transacoes(conn, natureza, ini, fim)
+    regras = motor.carregar_regras(conn, natureza)
 
-    # Monta todos os pares (lançamento, transação) com score >= 3 primeiro,
-    # sem travar nenhum casamento ainda — evita que uma despesa processada
-    # antes "roube" a transação de outra despesa com palavra-chave parecida
-    # (ex: "cartao xp" vs "cartao black" concorrendo pela mesma palavra "cartao").
-    candidatos = []
-    for l in lancamentos:
-        regras = _json.loads(l['regras_match'])
-        keywords = [kw for kw in regras.get('palavras_chave', []) if kw]
-        janela = regras.get('janela_dias', 5)
-
-        for t in transacoes:
-            tx_abs = abs(t['valor'])
-            esperado = l['valor_esperado']
-            score = 0
-
-            bateu_valor = False
-            if l['tipo_valor'] == 'fixo':
-                if esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.005:
-                    score += 3
-                    bateu_valor = True
-            else:
-                if esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.15:
-                    score += 2
-                    bateu_valor = esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.01
-
-            if l['dia_vencimento']:
-                tx_dia = int(t['data'].split('-')[2])
-                if abs(tx_dia - l['dia_vencimento']) <= janela:
-                    score += 2
-
-            desc_norm = normalize_text(t['descricao'])
-            if keywords:
-                matched_kw = sum(1 for kw in keywords if tem_palavra(desc_norm, kw))
-                if matched_kw == len(keywords):
-                    # Quanto mais palavras-chave a despesa exige (mais específica),
-                    # mais peso o casamento completo ganha — uma despesa com uma
-                    # única palavra genérica (ex: só "cartao") não pode mais vencer
-                    # sozinha, sem nenhuma corroboração de valor ou data.
-                    score += 2 * len(keywords)
-                elif matched_kw > 0:
-                    score += 1
-
-            # O que o usuário já confirmou vale mais que qualquer heurística:
-            # ele viu o extrato e disse de quem era. E o inverso também é
-            # informação — se este texto pertence a outra despesa, casá-lo
-            # aqui provavelmente repete um erro já corrigido antes.
-            # Vários pagamentos ao mesmo destinatário dividem a descrição
-            # (salário, adiantamento e vale transporte da mesma pessoa) e só o
-            # valor os separa. Quando o valor desta transação encaixa exato em
-            # OUTRA despesa e destoa muito desta, a regra aprendida não pode
-            # atropelar — mas a condição é essa, não só o valor destoar: com
-            # previsto desatualizado (ou placeholder), a regra ainda é a
-            # melhor evidência que existe.
-            valor_contradiz = (esperado > 0
-                               and abs(tx_abs - esperado) / esperado > 0.5
-                               and t['id'] in tx_com_dono_por_valor)
-
-            donos = regras_aprendidas.get(padrao_por_tx.get(t['id']))
-            if donos:
-                if l['despesa_id'] in donos:
-                    if not valor_contradiz:
-                        score += 8
-                elif not bateu_valor:
-                    # penalidade, não desqualificação: uma mesma descrição
-                    # pode servir a duas despesas (ex: mensalidade e material
-                    # da mesma escola, separadas só pelo valor) e a segunda
-                    # ainda precisa conseguir casar antes de ser aprendida.
-                    # Por isso valor batendo na mosca isenta da penalidade:
-                    # é evidência mais forte que a regra aprendida de outra
-                    # despesa que divide o mesmo texto.
-                    score -= 4
-
-            if score >= 3:
-                candidatos.append((score, l, t))
-
-    # Casamentos com maior confiança (score) são resolvidos primeiro
-    candidatos.sort(key=lambda c: c[0], reverse=True)
-
-    lanc_sugerido = set()
-    tx_sugerida = set()
-    detalhes = []
-
-    for score, l, t in candidatos:
-        if l['id'] in lanc_sugerido or t['id'] in tx_sugerida:
-            continue
-        status = 'pago' if t['situacao'] == 'efetivada' else 'agendado'
-        lanc_sugerido.add(l['id'])
-        tx_sugerida.add(t['id'])
-        detalhes.append({
-            'lancamento_id': l['id'],
-            'despesa_id': l['despesa_id'],
-            'despesa_id_sugerido': l['despesa_id'],
-            'despesa_nome': l['despesa_nome'],
-            # previsto vai junto porque a tela precisa devolver a despesa para a
-            # seção "não encontrei" se o usuário trocar este casamento por outra
-            'valor_esperado': l['valor_esperado'],
-            'transacao_id': t['id'],
-            'descricao_transacao': t['descricao'],
-            'valor': abs(t['valor']),
-            'data': t['data'],
-            'status': status,
-        })
+    candidatos = motor.parear(lancamentos, transacoes, regras)
+    detalhes, lanc_sugerido, tx_sugerida = motor.resolver(candidatos, natureza)
 
     # Lançamentos já casados antes, cuja transação mudou de situação desde
     # então — tipicamente estavam "Agendado" e o débito acabou de cair. Sem
     # isto eles nunca reapareceriam na revisão (a busca acima só olha
     # 'nao_encontrado') e ficariam presos no status antigo pra sempre.
-    defasados = conn.execute("""
-        SELECT l.id, l.despesa_id, l.status, l.valor_esperado, d.nome as despesa_nome,
+    defasados = conn.execute(f"""
+        SELECT l.id, l.{c['fk']} as item_id, l.status, l.valor_esperado, d.nome as item_nome,
                t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
                t.data as tx_data, t.situacao as tx_situacao
-        FROM lancamento l
-        JOIN despesa d ON d.id = l.despesa_id
+        FROM {c['lancamento']} l
+        JOIN {c['catalogo']} d ON d.id = l.{c['fk']}
         JOIN transacao t ON t.id = l.transacao_id
         WHERE l.mes_ref = ?
-          AND l.status != (CASE WHEN t.situacao = 'efetivada' THEN 'pago' ELSE 'agendado' END)
-    """, (mes_ref,)).fetchall()
-
-    for l in defasados:
-        detalhes.append({
-            'lancamento_id': l['id'],
-            'despesa_id': l['despesa_id'],
-            'despesa_id_sugerido': l['despesa_id'],
-            'despesa_nome': l['despesa_nome'],
-            'valor_esperado': l['valor_esperado'],
-            'transacao_id': l['tx_id'],
-            'descricao_transacao': l['tx_descricao'],
-            'valor': abs(l['tx_valor']),
-            'data': l['tx_data'],
-            'status': 'pago' if l['tx_situacao'] == 'efetivada' else 'agendado',
-            'status_anterior': l['status'],
-        })
+          AND l.status != (CASE WHEN t.situacao = 'efetivada' THEN ? ELSE ? END)
+    """, (mes_ref, c['status_ok'], c['status_pendente'])).fetchall()
 
     # Casamentos já gravados e coerentes (o complemento exato de `defasados`).
-    # Sem eles a seção "despesas casadas" mostrava só as sugestões novas, e um
-    # vínculo confirmado errado ficava intocável: a despesa some da busca por
-    # 'nao_encontrado' e a transação some do `despesa_id IS NULL`, então o par
-    # não aparecia em nenhuma das três seções e não havia como desfazê-lo sem
+    # Sem eles a seção "casadas" mostraria só as sugestões novas, e um vínculo
+    # confirmado errado ficaria intocável: o item some da busca por
+    # 'nao_encontrado' e a transação some do `<fk> IS NULL`, então o par não
+    # apareceria em nenhuma das três seções e não haveria como desfazê-lo sem
     # resetar o mês inteiro.
-    ja_gravados = conn.execute("""
-        SELECT l.id, l.despesa_id, l.valor_esperado, d.nome as despesa_nome,
+    ja_gravados = conn.execute(f"""
+        SELECT l.id, l.{c['fk']} as item_id, l.valor_esperado, d.nome as item_nome,
                t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
                t.data as tx_data, t.situacao as tx_situacao
-        FROM lancamento l
-        JOIN despesa d ON d.id = l.despesa_id
+        FROM {c['lancamento']} l
+        JOIN {c['catalogo']} d ON d.id = l.{c['fk']}
         JOIN transacao t ON t.id = l.transacao_id
         WHERE l.mes_ref = ?
-          AND l.status = (CASE WHEN t.situacao = 'efetivada' THEN 'pago' ELSE 'agendado' END)
+          AND l.status = (CASE WHEN t.situacao = 'efetivada' THEN ? ELSE ? END)
         ORDER BY t.data
-    """, (mes_ref,)).fetchall()
+    """, (mes_ref, c['status_ok'], c['status_pendente'])).fetchall()
 
+    for l in defasados:
+        detalhes.append(_detalhe_de_lancamento(l, natureza, status_anterior=l['status']))
     for l in ja_gravados:
-        detalhes.append({
-            'lancamento_id': l['id'],
-            'despesa_id': l['despesa_id'],
-            'despesa_id_sugerido': l['despesa_id'],
-            'despesa_nome': l['despesa_nome'],
-            'valor_esperado': l['valor_esperado'],
-            'transacao_id': l['tx_id'],
-            'descricao_transacao': l['tx_descricao'],
-            'valor': abs(l['tx_valor']),
-            'data': l['tx_data'],
-            'status': 'pago' if l['tx_situacao'] == 'efetivada' else 'agendado',
-            'ja_gravado': True,
-        })
+        detalhes.append(_detalhe_de_lancamento(l, natureza, ja_gravado=True))
 
     nao_encontrados = [
-        {'lancamento_id': l['id'], 'despesa_id': l['despesa_id'], 'despesa_nome': l['despesa_nome'], 'valor_esperado': l['valor_esperado']}
+        {'natureza': natureza, 'lancamento_id': l['id'], 'item_id': l['item_id'],
+         'item_nome': l['item_nome'], 'valor_esperado': l['valor_esperado']}
         for l in lancamentos if l['id'] not in lanc_sugerido
     ]
-    transacoes_sobrando = [dict(t) for t in transacoes if t['id'] not in tx_sugerida]
+    sobrando = [{**dict(t), 'natureza': natureza, 'valor': abs(t['valor'])}
+                for t in transacoes if t['id'] not in tx_sugerida]
 
-    conn.close()
-    return jsonify({
+    return {
         # total é derivado das próprias listas devolvidas — casadas + em aberto.
-        # Contar só `lancamentos` deixava o placar mentir conforme entravam
+        # Contar só os lançamentos deixava o placar mentir conforme entravam
         # defasados e já gravados, que não estão naquela busca.
-        'ok': True, 'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
-        'periodo': {'ini': ini, 'fim': fim},
+        'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,
-        'transacoes_sobrando': transacoes_sobrando,
-    })
+        'transacoes_sobrando': sobrando,
+    }
+
+
+def _detalhe_de_lancamento(l, natureza: str, status_anterior=None, ja_gravado=False) -> dict:
+    d = {
+        'natureza': natureza,
+        'lancamento_id': l['id'],
+        'item_id': l['item_id'],
+        'item_id_sugerido': l['item_id'],
+        'item_nome': l['item_nome'],
+        'valor_esperado': l['valor_esperado'],
+        'transacao_id': l['tx_id'],
+        'descricao_transacao': l['tx_descricao'],
+        'valor': abs(l['tx_valor']),
+        'data': l['tx_data'],
+        'status': motor.status_de(natureza, l['tx_situacao']),
+    }
+    if status_anterior is not None:
+        d['status_anterior'] = status_anterior
+    if ja_gravado:
+        d['ja_gravado'] = True
+    return d
 
 
 @bp.route('/batimento/confirmar', methods=['POST'])
 def confirmar_batimento():
-    """Grava de uma vez só os pares (transação, despesa) que o usuário
-    revisou na tela — sugestões automáticas aceitas + correções + associações
-    manuais. Nada do preview em /api/batimento é persistido antes disso."""
+    """Grava de uma vez só os pares (transação, item) que o usuário revisou na
+    tela — sugestões automáticas aceitas + correções + associações manuais.
+    Nada do preview em /api/batimento é persistido antes disso."""
     data = request.json or {}
     mes_ref = data.get('mes_ref', '')
     pares = data.get('pares', [])
@@ -673,95 +537,103 @@ def confirmar_batimento():
     conn = get_db()
     confirmados = 0
     for par in pares:
+        natureza = par.get('natureza', 'despesa')
         transacao_id = par.get('transacao_id')
-        despesa_id = par.get('despesa_id')
-        despesa_id_sugerido = par.get('despesa_id_sugerido')
-        if not transacao_id or not despesa_id:
+        item_id = par.get('item_id')
+        item_id_sugerido = par.get('item_id_sugerido')
+        if not transacao_id or not item_id:
             continue
 
+        c = motor.cfg(natureza)
         transacao = conn.execute('SELECT * FROM transacao WHERE id=?', (transacao_id,)).fetchone()
-        despesa = conn.execute('SELECT * FROM despesa WHERE id=?', (despesa_id,)).fetchone()
-        if not transacao or not despesa:
+        item = conn.execute(f"SELECT * FROM {c['catalogo']} WHERE id=?", (item_id,)).fetchone()
+        if not transacao or not item:
             continue
 
-        _persistir_par(conn, mes_ref, despesa_id, transacao_id, transacao)
+        _persistir_par(conn, mes_ref, item_id, transacao_id, transacao, natureza)
         confirmados += 1
 
-        if despesa_id_sugerido != despesa_id:
-            nome_sugerido = None
-            if despesa_id_sugerido:
-                row = conn.execute('SELECT nome FROM despesa WHERE id=?', (despesa_id_sugerido,)).fetchone()
-                nome_sugerido = row['nome'] if row else None
-                # o usuário rejeitou esta sugestão: desaprende, senão a regra
-                # errada continuaria disputando com a certa nos próximos meses.
-                # (não basta o desaprender de _persistir_par: ali só cai o
-                # vínculo já gravado, e uma sugestão recusada nunca chegou a
-                # ser gravada)
-                conn.execute(
-                    'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
-                    (padrao_descricao(transacao['descricao']), despesa_id_sugerido)
-                )
-            _registrar_dicionario(transacao['descricao'], despesa['nome'], nome_sugerido)
+        if item_id_sugerido and item_id_sugerido != item_id:
+            # o usuário rejeitou esta sugestão: desaprende, senão a regra errada
+            # continuaria disputando com a certa nos próximos meses. (não basta o
+            # desaprender de _persistir_par: ali só cai o vínculo já gravado, e
+            # uma sugestão recusada nunca chegou a ser gravada)
+            conn.execute(
+                f"DELETE FROM {c['regra']} WHERE padrao=? AND {c['fk']}=?",
+                (padrao_descricao(transacao['descricao']), item_id_sugerido)
+            )
+            if natureza == 'despesa':
+                # o dicionário legível em docs/07 é só do lado da despesa; do
+                # lado da receita a tabela de regras já é a fonte de verdade
+                row = conn.execute('SELECT nome FROM despesa WHERE id=?', (item_id_sugerido,)).fetchone()
+                _registrar_dicionario(transacao['descricao'], item['nome'], row['nome'] if row else None)
 
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'confirmados': confirmados})
 
 
-def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, transacao):
-    """Vincula uma transação a uma despesa: garante que o lançamento do mês
-    existe, marca como pago/agendado conforme a situação da transação, e
-    reverte qualquer vínculo anterior errado que a transação já tivesse.
+def _persistir_par(conn, mes_ref: str, item_id: int, transacao_id: int, transacao,
+                   natureza: str = 'despesa'):
+    """Vincula uma transação a um item do catálogo: garante que o lançamento do
+    mês existe, marca o status conforme a situação da transação, e reverte
+    qualquer vínculo anterior errado que a transação já tivesse.
 
-    Despesa esporádica não passa por lançamento (doc 14): a própria transação,
-    com `despesa_id` preenchido, é o registro do fato."""
-    despesa_errada = conn.execute(
-        'SELECT id, despesa_id FROM lancamento WHERE transacao_id=? AND despesa_id != ?',
-        (transacao_id, despesa_id)
+    Item esporádico não passa por lançamento (doc 14): a própria transação, com
+    a FK preenchida, é o registro do fato."""
+    c = motor.cfg(natureza)
+    tab, fk, regra = c['lancamento'], c['fk'], c['regra']
+
+    item_errado = conn.execute(
+        f'SELECT id, {fk} as item_id FROM {tab} WHERE transacao_id=? AND {fk} != ?',
+        (transacao_id, item_id)
     ).fetchone()
-    if despesa_errada:
+    if item_errado:
         conn.execute(
-            "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, data_pagamento=NULL WHERE id=?",
-            (despesa_errada['id'],)
+            f"UPDATE {tab} SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, "
+            f"{c['data_mov']}=NULL WHERE id=?",
+            (item_errado['id'],)
         )
-        # desaprende: sem isto a regra errada continuaria competindo com a
-        # certa todo mês, e o usuário corrigiria o mesmo caso para sempre
+        # desaprende: sem isto a regra errada continuaria competindo com a certa
+        # todo mês, e o usuário corrigiria o mesmo caso para sempre
         conn.execute(
-            'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
-            (padrao_descricao(transacao['descricao']), despesa_errada['despesa_id'])
+            f'DELETE FROM {regra} WHERE padrao=? AND {fk}=?',
+            (padrao_descricao(transacao['descricao']), item_errado['item_id'])
         )
-    elif transacao['despesa_id'] and transacao['despesa_id'] != despesa_id:
+    elif transacao[fk] and transacao[fk] != item_id:
         # a transação estava com outro dono e esse dono não tinha lançamento
-        # (caso da esporádica) — o desaprender acima não pegaria
+        # (caso do item esporádico) — o desaprender acima não pegaria
         conn.execute(
-            'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
-            (padrao_descricao(transacao['descricao']), transacao['despesa_id'])
+            f'DELETE FROM {regra} WHERE padrao=? AND {fk}=?',
+            (padrao_descricao(transacao['descricao']), transacao[fk])
         )
 
-    esporadica = conn.execute(
-        "SELECT recorrencia='esporadica' FROM despesa WHERE id=?", (despesa_id,)
+    esporadico = conn.execute(
+        f"SELECT recorrencia='esporadica' FROM {c['catalogo']} WHERE id=?", (item_id,)
     ).fetchone()[0]
 
-    if not esporadica:
+    if not esporadico:
         conn.execute(
-            'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
-            (mes_ref, despesa_id, abs(transacao['valor']))
+            f"INSERT OR IGNORE INTO {tab} (mes_ref, {fk}, valor_esperado, status) "
+            "VALUES (?,?,?,'nao_encontrado')",
+            (mes_ref, item_id, abs(transacao['valor']))
         )
-        status = 'pago' if transacao['situacao'] == 'efetivada' else 'agendado'
         conn.execute(
-            """UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=?
-               WHERE despesa_id=? AND mes_ref=?""",
-            (status, transacao_id, abs(transacao['valor']), transacao['data'], despesa_id, mes_ref)
+            f"""UPDATE {tab} SET status=?, transacao_id=?, valor_real=?, {c['data_mov']}=?
+                WHERE {fk}=? AND mes_ref=?""",
+            (motor.status_de(natureza, transacao['situacao']), transacao_id,
+             abs(transacao['valor']), transacao['data'], item_id, mes_ref)
         )
 
+    classificacao = 'receita' if natureza == 'receita' else ('extra' if esporadico else 'recorrente')
     conn.execute(
-        'UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
-        (despesa_id, 'extra' if esporadica else 'recorrente', transacao_id)
+        f'UPDATE transacao SET {fk}=?, classificacao=? WHERE id=?',
+        (item_id, classificacao, transacao_id)
     )
-    # Confirmar é o usuário dizendo "esse texto é essa despesa" — vale tanto
-    # quando ele corrigiu quanto quando aceitou a sugestão. É o que faz o
-    # batimento do mês que vem já nascer certo.
-    registrar_regra_transacao(conn, transacao['descricao'], despesa_id)
+    # Confirmar é o usuário dizendo "esse texto é esse item" — vale tanto quando
+    # ele corrigiu quanto quando aceitou a sugestão. É o que faz o batimento do
+    # mês que vem já nascer certo.
+    registrar_regra(conn, regra, fk, transacao['descricao'], item_id)
 
 
 @bp.route('/batimento/corrigir', methods=['POST'])
@@ -814,11 +686,18 @@ def resetar_mes():
     ini, fim = periodo_competencia(mes_ref, dia_corte)
 
     conn.execute(
-        "UPDATE transacao SET despesa_id=NULL, classificacao='extra' WHERE data BETWEEN ? AND ? AND despesa_id IS NOT NULL",
+        "UPDATE transacao SET despesa_id=NULL, receita_id=NULL, classificacao='extra' "
+        "WHERE data BETWEEN ? AND ? AND (despesa_id IS NOT NULL OR receita_id IS NOT NULL)",
         (ini, fim)
     )
     conn.execute(
-        "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, data_pagamento=NULL, linha_digitavel=NULL WHERE mes_ref=?",
+        "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, "
+        "data_pagamento=NULL, linha_digitavel=NULL WHERE mes_ref=?",
+        (mes_ref,)
+    )
+    conn.execute(
+        "UPDATE lancamento_receita SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, "
+        "data_recebimento=NULL WHERE mes_ref=?",
         (mes_ref,)
     )
     conn.commit()

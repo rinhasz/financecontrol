@@ -170,6 +170,8 @@ lançamento (ver `recorrencia` acima).
 ## transacao_receita_regra
 
 Espelho exato de `transacao_despesa_regra`, com a mesma `padrao_descricao()`.
+Quem grava nas duas é `registrar_regra(conn, tabela, fk, ...)` — o aprendizado
+é o mesmo, muda só onde fica.
 
 ---
 

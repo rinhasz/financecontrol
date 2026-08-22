@@ -123,6 +123,33 @@ de novo é inofensivo.
 O mesmo padrão preview→confirmar é usado na importação de catálogo (doc 11) e
 na associação de emails (doc 08).
 
+### Um motor, duas naturezas
+
+O casamento é o **mesmo** para saídas e entradas: despesa casa com débito,
+receita casa com crédito, e scoring, resolução de conflito e regras aprendidas
+são idênticos. Duplicar o motor significaria manter dois scorings em sincronia
+para sempre, então ele vive em `api/motor_batimento.py`, parametrizado.
+
+Tudo que difere está num dicionário só, `NATUREZAS`:
+
+| | despesa | receita |
+|---|---|---|
+| catálogo | `despesa` | `receita` |
+| lançamento | `lancamento` | `lancamento_receita` |
+| FK | `despesa_id` | `receita_id` |
+| dia | `dia_vencimento` | `dia_recebimento` |
+| sinal da transação | `debito` | `credito` |
+| regras aprendidas | `transacao_despesa_regra` | `transacao_receita_regra` |
+| status casado | `pago` / `agendado` | `recebido` / `previsto` |
+
+`POST /api/batimento` devolve os dois lados de uma vez
+(`{despesa: {...}, receita: {...}}`), e a tela mostra um por vez com um seletor
+**Saídas / Entradas**. "Confirmar tudo" grava os dois — o usuário revisa na
+mesma passada, e confirmar duas vezes seria fácil de esquecer.
+
+O payload usa nomes genéricos (`item_id`, `item_nome`, `item_id_sugerido`) em
+vez de `despesa_*`, para a tela ter um caminho só.
+
 ### Quem entra no batimento
 
 ```sql
@@ -130,9 +157,14 @@ na associação de emails (doc 08).
 WHERE l.mes_ref = ? AND l.status = 'nao_encontrado'
   AND d.ativo = 1 AND d.recorrencia = 'fixa'
 
--- transações candidatas
-WHERE data BETWEEN <competência> AND tipo='debito' AND despesa_id IS NULL
+-- transações candidatas  (tipo e FK vêm da natureza)
+WHERE data BETWEEN <competência> AND tipo=<debito|credito> AND <fk> IS NULL
 ```
+
+Não há filtro por classificação no lado do crédito: um `RESGATE CDB DI` é
+candidato legítimo, porque "resgate mensal" é um item do catálogo como qualquer
+outro (doc 14). Quem impede o resgate de roubar o casamento do salário são as
+mesmas defesas de sempre — palavra-chave, valor, data e regra aprendida.
 
 `d.ativo = 1` importa: sem ele, uma despesa velha e genérica (ex.: "cartao xp",
 desativada) vencia a disputa por uma transação contra outra ainda em uso.

@@ -1,8 +1,8 @@
 # Receitas, Esporádicas e Resgates — Especificação
 
-**Status:** **fases 1 e 2 implementadas** — recorrência fixa/esporádica nas
-despesas, e o catálogo de receitas com `tipo`. O schema do lado da receita está
-inteiro no banco; falta a lógica (batimento de créditos, Mês Atual, estorno).
+**Status:** **fases 1 a 3 implementadas** — recorrência fixa/esporádica,
+catálogo de receitas com `tipo`, e o batimento de créditos com motor único.
+Faltam o Mês Atual em dois blocos (fase 4) e o estorno (fase 5).
 Este documento é o contrato; ver §9 para o que já saiu.
 
 Até aqui o app só enxerga **saídas recorrentes**. Este documento estende o
@@ -436,7 +436,7 @@ Cada fase é utilizável sozinha e commitável separadamente.
 |---|---|---|
 | **1** ✅ | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
 | **2** ✅ | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
-| **3** | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
+| **3** ✅ | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
 | **4** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
 | **5** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
 
@@ -508,3 +508,20 @@ tabela antiga estava vazia.
 **Importar catálogo por planilha não existe no lado da receita.** A operação
 desativa tudo que não está no arquivo, o que faz sentido para 58 despesas vindas
 de uma planilha e nenhum para meia dúzia de entradas.
+
+**Fase 3 extraiu o motor em vez de copiá-lo.** `api/motor_batimento.py` contém
+o scoring, a resolução de conflito e as regras aprendidas, parametrizados por um
+dicionário `NATUREZAS` que concentra tudo que difere entre os dois lados. O
+lado da despesa foi medido antes e depois com `tools/avaliar_batimento.py`:
+resultado idêntico (ACERTO 28 | ERRO 6 | PERDIDO 0), que era o critério para
+aceitar a refatoração.
+
+**O payload ficou genérico** (`item_id`/`item_nome` no lugar de `despesa_*`),
+para a tela ter um caminho só em vez de dois componentes espelhados.
+
+**"+ Nova receita" criada no batimento nasce com tipo `outra`.** Chutar o tipo
+poderia classificar um resgate como renda — exatamente o erro que o campo existe
+para evitar. O tipo é escolha explícita no Catálogo.
+
+**`avaliar_batimento.py` teve de ser atualizado** junto: a resposta agora é
+aninhada por natureza, e o gabarito de `docs/07` é só do lado da despesa.

@@ -48,10 +48,12 @@ def carregar_gabarito():
 def avaliar(mes_ref: str):
     import app as appmod
     cli = appmod.app.test_client()
-    d = cli.post('/api/batimento', json={'mes_ref': mes_ref}).get_json()
+    # a resposta traz os dois lados desde o doc 14 fase 3; o gabarito de
+    # docs/07 é só do lado da despesa
+    d = cli.post('/api/batimento', json={'mes_ref': mes_ref}).get_json()['despesa']
 
     gabarito = carregar_gabarito()
-    faltantes = {x['despesa_nome'] for x in d['nao_encontrados']}
+    faltantes = {x['item_nome'] for x in d['nao_encontrados']}
 
     acertos, erros, perdidos = [], [], []
 
@@ -70,17 +72,17 @@ def avaliar(mes_ref: str):
         possiveis = gabarito.get(x['descricao_transacao'].strip())
         if not possiveis:
             continue
-        if x['despesa_nome'] in possiveis:
-            acertos.append(x['despesa_nome'])
+        if x['item_nome'] in possiveis:
+            acertos.append(x['item_nome'])
             continue
         # Descrição compartilhada: se o valor bate na mosca com o previsto
         # desta despesa, o casamento está certo mesmo não constando no
         # dicionário — o dicionário só registra o que já foi corrigido.
-        esp = previsto.get(x['despesa_nome'])
+        esp = previsto.get(x['item_nome'])
         if esp and abs(x['valor'] - esp) / esp <= 0.01:
-            acertos.append(x['despesa_nome'])
+            acertos.append(x['item_nome'])
         else:
-            erros.append((x['descricao_transacao'], x['despesa_nome'], '/'.join(sorted(possiveis))))
+            erros.append((x['descricao_transacao'], x['item_nome'], '/'.join(sorted(possiveis))))
 
     for t in d['transacoes_sobrando']:
         possiveis = gabarito.get(t['descricao'].strip()) or set()
