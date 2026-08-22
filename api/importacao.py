@@ -348,10 +348,13 @@ def rodar_batimento():
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
 
+    # d.ativo=1: despesa desativada não pode disputar transação com uma ativa —
+    # é assim que uma despesa velha e genérica (ex: "cartao xp") acabava
+    # roubando o casamento de outra parecida que ainda está em uso
     lancamentos = conn.execute("""
         SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.regras_match, d.dia_vencimento
         FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
-        WHERE l.mes_ref=? AND l.status='nao_encontrado'
+        WHERE l.mes_ref=? AND l.status='nao_encontrado' AND d.ativo=1
     """, (mes_ref,)).fetchall()
 
     transacoes = conn.execute("""

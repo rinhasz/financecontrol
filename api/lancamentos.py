@@ -62,6 +62,10 @@ def list_lancamentos():
         )
     conn.commit()
 
+    # Despesa desativada não deve poluir o mês. A exceção é a que teve
+    # movimento de verdade no mês (paga/agendada antes de ser desativada):
+    # escondê-la tiraria um pagamento real da lista e dos totais, fazendo o
+    # mês fechar com número errado.
     rows = conn.execute("""
         SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.padrao_variabilidade,
                c.nome as categoria_nome, c.id as categoria_id
@@ -69,6 +73,7 @@ def list_lancamentos():
         JOIN despesa d ON d.id = l.despesa_id
         LEFT JOIN categoria c ON c.id = d.categoria_id
         WHERE l.mes_ref = ?
+          AND (d.ativo = 1 OR l.status != 'nao_encontrado')
         ORDER BY c.nome, d.nome
     """, (mes_ref,)).fetchall()
     conn.close()
@@ -94,10 +99,15 @@ def update_lancamento(lid):
 def resumo():
     mes_ref = request.args.get('mes', '')
     conn = get_db()
+    # mesmo filtro de /lancamentos — se o resumo somasse despesas que a lista
+    # não mostra, o total da tela não bateria com as linhas exibidas
     rows = conn.execute("""
-        SELECT status,
-               SUM(CASE WHEN status='pago' THEN valor_real ELSE valor_esperado END) as total
-        FROM lancamento WHERE mes_ref=? GROUP BY status
+        SELECT l.status,
+               SUM(CASE WHEN l.status='pago' THEN l.valor_real ELSE l.valor_esperado END) as total
+        FROM lancamento l
+        JOIN despesa d ON d.id = l.despesa_id
+        WHERE l.mes_ref=? AND (d.ativo = 1 OR l.status != 'nao_encontrado')
+        GROUP BY l.status
     """, (mes_ref,)).fetchall()
 
     pago = next((r['total'] for r in rows if r['status'] == 'pago'), 0) or 0
