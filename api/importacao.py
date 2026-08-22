@@ -575,6 +575,9 @@ def rodar_batimento():
             'despesa_id': l['despesa_id'],
             'despesa_id_sugerido': l['despesa_id'],
             'despesa_nome': l['despesa_nome'],
+            # previsto vai junto porque a tela precisa devolver a despesa para a
+            # seção "não encontrei" se o usuário trocar este casamento por outra
+            'valor_esperado': l['valor_esperado'],
             'transacao_id': t['id'],
             'descricao_transacao': t['descricao'],
             'valor': abs(t['valor']),
@@ -587,7 +590,7 @@ def rodar_batimento():
     # isto eles nunca reapareceriam na revisão (a busca acima só olha
     # 'nao_encontrado') e ficariam presos no status antigo pra sempre.
     defasados = conn.execute("""
-        SELECT l.id, l.despesa_id, l.status, d.nome as despesa_nome,
+        SELECT l.id, l.despesa_id, l.status, l.valor_esperado, d.nome as despesa_nome,
                t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
                t.data as tx_data, t.situacao as tx_situacao
         FROM lancamento l
@@ -603,6 +606,7 @@ def rodar_batimento():
             'despesa_id': l['despesa_id'],
             'despesa_id_sugerido': l['despesa_id'],
             'despesa_nome': l['despesa_nome'],
+            'valor_esperado': l['valor_esperado'],
             'transacao_id': l['tx_id'],
             'descricao_transacao': l['tx_descricao'],
             'valor': abs(l['tx_valor']),

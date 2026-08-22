@@ -238,8 +238,26 @@ pontas opostas. Quem sabe qual despesa está faltando começa pela 2; quem olha
 um débito estranho no extrato começa pela 3.
 
 Ambas alimentam a mesma função (`associarPar`) e comem da mesma lista — o par
-montado some das duas e aparece na seção 1, então as listas encolhem juntas e
-nunca oferecem algo já usado.
+montado some das duas e aparece na seção 1, então as listas encolhem juntas.
+
+**Invariante das duas combos: só aparece o que ainda não tem par.** "Ainda não
+associado" tem três fontes, e as três são respeitadas:
+
+1. não tem dono gravado no banco — o backend filtra `despesa_id IS NULL`;
+2. não está num casamento sugerido nesta rodada — `tx_sugerida` / `lanc_sugerido`;
+3. não foi usado num par montado na tela — conferido no render contra
+   `detalhes`, porque essa parte muda a cada clique.
+
+Só a primeira vem pronta do servidor. Depender só dela deixava a invariante
+valer por acidente: qualquer caminho novo que mexesse em `detalhes` sem mexer
+nas outras listas furaria a regra — foi o que aconteceu com "Não é essa
+despesa", que trocava a despesa do casamento sem tirá-la da seção 2 nem
+devolver a que tinha sido liberada. Por isso o filtro é derivado de `detalhes`
+no render, e não mantido à mão em cada ação.
+
+Trocar a despesa de um casamento devolve a antiga para a seção 2 (a não ser que
+ela tenha casado com outra transação) — daí `valor_esperado` viajar junto em
+`detalhes`, senão não haveria previsto para exibir na volta.
 
 O combo da seção 3 lista **só as despesas da seção 2** (ativas e ainda não
 associadas no mês), não o catálogo inteiro: oferecer tudo deixava escolher uma

@@ -12,6 +12,7 @@ interface DetalheMatch {
   despesa_id: number
   despesa_id_sugerido: number | null
   despesa_nome: string
+  valor_esperado: number
   transacao_id: number
   descricao_transacao: string
   valor: number
@@ -149,10 +150,29 @@ export function Importacao({ active }: { active: boolean }) {
     }
 
     // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
-    setResultado(r => r ? {
-      ...r,
-      detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
-    } : r)
+    setResultado(r => {
+      if (!r) return r
+      const detalhes = r.detalhes.map(x =>
+        x.transacao_id === d.transacao_id ? { ...x, despesa_id: despesaId, despesa_nome: despesaNome } : x)
+
+      // Trocar a despesa deste casamento mexe nas outras duas seções: a nova
+      // deixa de estar em aberto, e a antiga volta a estar (a não ser que
+      // tenha casado com outra transação). Sem isso a despesa liberada sumia
+      // da tela e a recém-escolhida continuava aparecendo como não encontrada.
+      const antiga = r.detalhes.find(x => x.transacao_id === d.transacao_id)
+      const liberada = antiga && antiga.despesa_id !== despesaId
+        && !detalhes.some(x => x.despesa_id === antiga.despesa_id)
+        ? [{ lancamento_id: antiga.lancamento_id, despesa_id: antiga.despesa_id,
+             despesa_nome: antiga.despesa_nome, valor_esperado: antiga.valor_esperado }]
+        : []
+
+      return {
+        ...r,
+        detalhes,
+        nao_encontrados: [...r.nao_encontrados.filter(x => x.despesa_id !== despesaId), ...liberada]
+          .sort((a, b) => a.despesa_nome.localeCompare(b.despesa_nome, 'pt-BR'))
+      }
+    })
     setCorrigindo(null)
   }
 
@@ -163,12 +183,15 @@ export function Importacao({ active }: { active: boolean }) {
     setResultado(r => {
       if (!r) return r
       const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
+      const emAberto = r.nao_encontrados.find(x => x.despesa_id === despesaId)
       return {
         ...r,
         nao_encontrados: r.nao_encontrados.filter(x => x.despesa_id !== despesaId),
         transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== t.id),
         detalhes: [...r.detalhes, {
-          lancamento_id: 0, despesa_id: despesaId, despesa_id_sugerido: null, despesa_nome: despesaNome,
+          lancamento_id: emAberto?.lancamento_id ?? 0, despesa_id: despesaId,
+          despesa_id_sugerido: null, despesa_nome: despesaNome,
+          valor_esperado: emAberto?.valor_esperado ?? Math.abs(t.valor),
           transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
         }]
       }
@@ -243,14 +266,28 @@ export function Importacao({ active }: { active: boolean }) {
   // As duas seções de associação são espelho uma da outra e comem da mesma
   // lista: o que sobrou de um lado é a opção do outro. Ambas encolhem sozinhas
   // conforme os pares vão sendo montados.
-  const opcoesTransacao = (resultado?.transacoes_sobrando ?? []).map(t => ({
-    id: t.id,
-    nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
-  }))
-  const opcoesDespesa = (resultado?.nao_encontrados ?? []).map(n => ({
-    id: n.despesa_id,
-    nome: n.valor_esperado > 0 ? `${n.despesa_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.despesa_nome
-  }))
+  //
+  // "Ainda não associada" tem três fontes, e as duas combos respeitam as três:
+  // não pode ter dono gravado no banco (o backend filtra `despesa_id IS NULL`),
+  // não pode estar num casamento sugerido nesta rodada, e não pode ter sido
+  // usada num par montado aqui na tela. Só a primeira vem pronta do servidor;
+  // as outras duas mudam a cada clique, então são conferidas no render — o que
+  // já está na seção 1 nunca aparece como opção nas seções 2 e 3.
+  const txAssociadas = new Set((resultado?.detalhes ?? []).map(d => d.transacao_id))
+  const despesasAssociadas = new Set((resultado?.detalhes ?? []).map(d => d.despesa_id))
+
+  const opcoesTransacao = (resultado?.transacoes_sobrando ?? [])
+    .filter(t => !txAssociadas.has(t.id))
+    .map(t => ({
+      id: t.id,
+      nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+    }))
+  const opcoesDespesa = (resultado?.nao_encontrados ?? [])
+    .filter(n => !despesasAssociadas.has(n.despesa_id))
+    .map(n => ({
+      id: n.despesa_id,
+      nome: n.valor_esperado > 0 ? `${n.despesa_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.despesa_nome
+    }))
 
   return (
     <div className="flex flex-col h-full pt-3">
