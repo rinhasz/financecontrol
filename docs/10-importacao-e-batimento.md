@@ -46,32 +46,33 @@ agendada, o resto é efetivada (`_situacao()` em `importar()`).
 
 ---
 
-## Importação incremental (reimportar é o fluxo normal)
+## Importação substitui o período (reimportar é o fluxo normal)
 
-O usuário reimporta o extrato várias vezes ao longo do mês para pegar o que
-apareceu de novo. A importação **nunca pode duplicar** nem perder o que já foi
-confirmado.
+O usuário reimporta o extrato várias vezes ao longo do mês. **O extrato é a
+verdade sobre o intervalo que ele cobre**: importar apaga as transações daquele
+intervalo e reinsere as do arquivo.
 
-**Chave de deduplicação:** `(data, descricao, valor)`. Aceita o risco raro de
-duas transações reais idênticas no mesmo dia virarem uma só, em troca de nunca
-duplicar.
+```
+DELETE FROM transacao WHERE data BETWEEN <primeira> AND <última do arquivo>
+                        AND banco_origem = <banco selecionado>
+```
 
-### A armadilha do agendado → pago (bug real, corrigido)
+O recorte por banco não é detalhe: sem ele, importar o extrato de outra conta
+apagaria as transações desta no mesmo período.
 
-Quando uma transação agendada é finalmente debitada, ela reaparece no extrato
-seguinte com **data, descrição e valor idênticos** — só a situação muda. Como a
-chave de dedupe é exatamente esses três campos, a versão debitada era
-descartada como duplicata e a transação ficava `agendada` para sempre: o
-lançamento nunca virava "Pago", por mais vezes que o usuário reimportasse.
+### Por que não é mais incremental
 
-**Regra atual:** se a transação já existe como `agendada` e reaparece como
-`efetivada`, ela é **atualizada no lugar** em vez de ignorada. Atualizar (e não
-inserir outra) preserva o `despesa_id` de um casamento já confirmado.
+A versão anterior deduplicava por `(data, descricao, valor)` e só sabia
+**acrescentar**. Nada removia nada, e o lixo se acumulava para sempre:
 
-### Quando o banco troca a descrição ao debitar (segundo bug, mesma família)
+- um PIX **agendado para 12/08 que foi cancelado** continuava aparecendo como
+  transação disponível para associar, semanas depois de o extrato ter deixado
+  de mencioná-lo;
+- quando o banco reescrevia a descrição ao debitar, a versão antiga virava uma
+  linha órfã e o batimento podia casar a despesa com ela — mostrando "Agendado"
+  num mês em que o extrato já dizia pago.
 
-A regra acima só resolve quando o texto continua idêntico — e o Itaú **muda o
-texto** na maioria dos casos:
+O Itaú **muda o texto** nessa transição na maioria dos casos:
 
 | Em "lançamentos futuros" | Depois de debitado |
 |---|---|
@@ -81,30 +82,33 @@ texto** na maioria dos casos:
 | `DA  CLARO BL/IT 77712744` | `DA  CLARO S.A. 77712744` |
 | `PIX QRS SUL AMERICA` | `PIX QRS SUL AMERICA10/08` |
 
-Com a descrição diferente, a dedupe não reconhece a transação e as **duas
-versões coexistem**: uma linha `agendada` órfã e a linha `efetivada` real. O
-batimento então podia casar a despesa com a órfã e mostrar **"Agendado" num mês
-em que o extrato já dizia pago** — o sintoma relatado pelo usuário.
+Substituir o período resolve os dois problemas de uma vez, e é uma regra só em
+vez de duas heurísticas de reconciliação. Medido em agosto/2026: 93 transações
+no banco contra 91 no extrato — as 2 sobrando eram lixo de importações antigas.
 
-**`_reconciliar_agendadas(conn, ini, fim)`** colapsa o par. Data e valor **não**
-mudam nessa transição, então são a chave. Salvaguardas:
+### Preservar o que o usuário confirmou
 
-- só colapsa quando o par é inequívoco: exatamente **uma** agendada e **uma**
-  efetivada para aquele `(data, valor)`;
-- só para data **já passada** — agendamento futuro não tem o que reconciliar
-  (é o que mantém, corretamente, um `DA VIVO-SP` marcado para daqui a 4 dias);
-- um vínculo já confirmado apontando para a órfã é **migrado** para a linha real
-  antes de apagá-la, senão o lançamento perderia a transação.
+Casamento confirmado é trabalho manual e tem que atravessar a troca. Depois de
+reinserir, cada transação nova reencontra seu vínculo:
 
-É idempotente. Roda na importação (sobre o intervalo do arquivo) **e** no início
-do batimento (sobre a competência) — este segundo ponto é o que cura os
-fantasmas que já estavam no banco, sem exigir reimportação.
+1. por chave exata `(data, descricao, valor)`;
+2. senão por `(data, valor)` — o que sobrevive quando o banco reescreve a
+   descrição. **Só quando não há ambiguidade**: com duas candidatas, chutar
+   arrastaria o vínculo para a despesa errada.
 
-Medido em agosto/2026: 9 transações passadas marcadas `agendada`, das quais 6
-eram fantasmas; depois da correção, nenhum lançamento casado voltou como
-"Agendado".
+O `lancamento` é repontado para o novo `id` (com status, `valor_real` e
+`data_pagamento` recalculados a partir da linha nova).
 
----
+**Transação que sumiu do extrato** (agendamento cancelado, estorno, correção do
+banco): o lançamento volta para `nao_encontrado` em vez de apontar para algo
+que não existe mais. É lossy de propósito — se o extrato não menciona mais o
+débito, ele não aconteceu.
+
+> **Cuidado:** importar um extrato **antigo** faz o período voltar ao que aquele
+> arquivo diz, removendo o que só existe no mais recente. É a consequência
+> direta de "o extrato é a verdade", e o efeito é reversível reimportando o
+> arquivo novo — mas os vínculos das transações removidas ficam em aberto para
+> o batimento refazer.
 
 ## Batimento — preview, nunca gravação direta
 
@@ -351,7 +355,7 @@ intenção é refazer a conferência sem precisar reenviar arquivo.
 
 | Rota | Método | O que faz |
 |------|--------|-----------|
-| `/api/importacao` | POST | Recebe arquivo (multipart), deduplica, insere novas, promove agendada→efetivada |
+| `/api/importacao` | POST | Recebe arquivo (multipart) e **substitui** o período que ele cobre, preservando os vínculos confirmados |
 | `/api/batimento` | POST | Preview do casamento — não grava |
 | `/api/batimento/confirmar` | POST | Grava os pares revisados |
 | `/api/batimento/corrigir` | POST | Corrige um casamento já gravado |

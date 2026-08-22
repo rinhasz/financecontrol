@@ -2,7 +2,7 @@
 
 > **Este documento é a especificação conceitual original.** A implementação
 > evoluiu em pontos importantes (mês de competência, preview antes de gravar,
-> importação incremental, filtro de despesas ativas). Onde os dois divergirem,
+> importação que substitui o período, filtro de despesas ativas). Onde os dois divergirem,
 > vale [10-importacao-e-batimento.md](10-importacao-e-batimento.md).
 
 ## Fluxo completo
@@ -14,7 +14,7 @@ Abertura do mês       → Gerar lancamentos do catálogo ativo
                         (competência: dia 27 do mês anterior — doc 10)
          ↓
 Importação de extrato → OFX / CSV / Excel → tabela transacao
-                        (incremental: reimportar não duplica)
+                        (substitui o período do arquivo)
          ↓
 Batimento (preview)   → Sugere lancamento ↔ transacao — NÃO grava
          ↓

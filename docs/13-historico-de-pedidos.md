@@ -148,6 +148,28 @@ Dois pedidos, três causas.
 `AMERICA10/08` — agora cada termo é testado sem acento e também contra uma
 versão só com letras e dígitos.
 
+**"A lista mostra um PIX de 12/08 que não existe"** (2026-08)
+Pedido repetido várias vezes e nunca atendido de verdade: *a cada importação,
+apague os lançamentos do período e reimporte do extrato*.
+
+A importação era **incremental** — deduplicava por `(data, descricao, valor)` e
+só sabia acrescentar. Nada removia nada. Um PIX agendado para 12/08 que foi
+cancelado continuava disponível para associar semanas depois de o extrato ter
+deixado de mencioná-lo. Medido: 93 transações no banco contra 91 no arquivo.
+
+→ Importar passou a **substituir o intervalo** que o arquivo cobre (recortado
+por banco, senão o extrato de outra conta apagaria o desta). Vínculos
+confirmados atravessam a troca por chave exata e, na falta dela, por
+`(data, valor)` sem ambiguidade — o que também aposenta
+`_reconciliar_agendadas()` e as duas heurísticas anteriores de agendado→pago:
+uma regra no lugar de três. Transação que sumiu do extrato devolve o lançamento
+para `nao_encontrado`.
+
+Do mesmo relato, **um caso que não era bug**: `INT PERS BLACK` de R$ 5.709,27
+está no extrato de verdade, com um `CREDITO CARTAO ITAU` de mesmo valor no
+mesmo dia — é cobrança estornada e refeita como boleto. Aparecer na lista está
+correto; o app não detecta estorno.
+
 ---
 
 ## Catálogo

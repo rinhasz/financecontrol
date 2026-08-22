@@ -234,67 +234,6 @@ def parse_csv_content(content: str):
     return txs
 
 
-def _reconciliar_agendadas(conn, ini: str, fim: str) -> int:
-    """Colapsa o "fantasma" agendado quando o débito caiu com outra descrição.
-
-    O Itaú **troca o texto** do lançamento quando ele sai de "lançamentos
-    futuros" para debitado de fato:
-
-        'PAG TIT 662992535000'  ->  'PAG BOLETO EDIFICIO LINCOLN GARDEN'
-        'Agendado'              ->  'FINANC IMOBILIARIO 038/397'
-        'PIX QRS SUL AMERICA'   ->  'PIX QRS SUL AMERICA10/08'
-
-    A dedupe da importação é `(data, descrição, valor)`, então as duas
-    versões coexistem: uma linha `agendada` órfã e a linha `efetivada` real.
-    O batimento podia casar a despesa com a órfã e mostrar "Agendado" num mês
-    em que o extrato já diz pago — foi exatamente o sintoma relatado.
-
-    Data e valor **não** mudam nessa transição, e são a chave usada aqui. Só
-    colapsa quando o par é inequívoco (exatamente uma agendada e uma efetivada
-    para aquele data+valor) e a data já passou — agendamento futuro não tem o
-    que reconciliar.
-
-    Idempotente: rodar de novo não encontra mais par nenhum.
-    """
-    hoje = date.today().isoformat()
-    rows = conn.execute(
-        "SELECT id, data, descricao, valor, situacao, despesa_id, classificacao "
-        "FROM transacao WHERE data BETWEEN ? AND ? AND tipo='debito'",
-        (ini, fim)
-    ).fetchall()
-
-    grupos = {}
-    for r in rows:
-        grupos.setdefault((r['data'], r['valor']), []).append(r)
-
-    colapsadas = 0
-    for (data_tx, _valor), grupo in grupos.items():
-        if data_tx > hoje:
-            continue
-        agendadas = [r for r in grupo if r['situacao'] == 'agendada']
-        efetivadas = [r for r in grupo if r['situacao'] == 'efetivada']
-        if len(agendadas) != 1 or len(efetivadas) != 1:
-            continue
-        fantasma, real = agendadas[0], efetivadas[0]
-
-        # Um casamento já confirmado apontava para a órfã; migra para a linha
-        # real antes de apagá-la, senão o lançamento perderia o vínculo.
-        if fantasma['despesa_id'] and not real['despesa_id']:
-            conn.execute(
-                'UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
-                (fantasma['despesa_id'], fantasma['classificacao'], real['id'])
-            )
-        conn.execute(
-            "UPDATE lancamento SET transacao_id=?, status='pago', valor_real=?, data_pagamento=? "
-            "WHERE transacao_id=?",
-            (real['id'], abs(real['valor']), real['data'], fantasma['id'])
-        )
-        conn.execute('DELETE FROM transacao WHERE id=?', (fantasma['id'],))
-        colapsadas += 1
-
-    return colapsadas
-
-
 @bp.route('/importacao', methods=['POST'])
 def importar():
     file = request.files.get('file')
@@ -336,72 +275,128 @@ def importar():
         # o resto veio da parte já debitada do extrato
         return t.get('situacao') or ('agendada' if t['data'] > today else 'efetivada')
 
-    # Importar o mesmo período mais de uma vez no mês é o fluxo normal (o
-    # usuário reimporta pra pegar lançamentos novos) — não pode duplicar o
-    # que já foi trazido antes. Mesma (data, descrição, valor) = mesma
-    # transação; aceita o risco raro de duas transações reais idênticas no
-    # mesmo dia serem tratadas como uma só, em troca de nunca duplicar.
-    existentes = {
-        (r['data'], r['descricao'], r['valor']): r
+    ini, fim = datas[0], datas[-1]
+
+    # SUBSTITUIÇÃO DO PERÍODO — o extrato é a verdade sobre o intervalo que ele
+    # cobre; o banco não pode guardar nada além dele.
+    #
+    # A dedupe incremental de antes só sabia acrescentar, nunca remover, e o
+    # lixo se acumulava para sempre: um PIX agendado para 12/08 que foi
+    # cancelado continuava aparecendo como lançamento disponível para associar,
+    # semanas depois de o extrato ter deixado de mencioná-lo. Também era ela
+    # que criava a versão órfã quando o banco mudava a descrição ao debitar.
+    #
+    # Apagar e reinserir o intervalo resolve as duas coisas de uma vez. O
+    # recorte é por banco: sem isso, importar um extrato de outra conta
+    # apagaria as transações desta no mesmo período.
+    antigas = conn.execute(
+        'SELECT id, data, descricao, valor, despesa_id, classificacao FROM transacao '
+        'WHERE data BETWEEN ? AND ? AND banco_origem = ?',
+        (ini, fim, banco)
+    ).fetchall()
+
+    ids_antigos = [t['id'] for t in antigas]
+    lanc_por_tx = {}
+    if ids_antigos:
+        ph = ','.join('?' * len(ids_antigos))
         for r in conn.execute(
-            'SELECT id, data, descricao, valor, situacao FROM transacao WHERE data BETWEEN ? AND ?',
-            (datas[0], datas[-1])
-        ).fetchall()
-    }
+                f'SELECT id, transacao_id FROM lancamento WHERE transacao_id IN ({ph})', ids_antigos):
+            lanc_por_tx.setdefault(r['transacao_id'], []).append(r['id'])
 
-    novas = []
-    efetivadas = []
-    for t in txs:
-        anterior = existentes.get((t['data'], t['descricao'], t['valor']))
-        if anterior is None:
-            novas.append(t)
-        elif anterior['situacao'] == 'agendada' and _situacao(t) == 'efetivada':
-            # É a mesma transação de antes, mas saiu de "lançamentos futuros"
-            # para debitada de fato. Tratar como duplicata a deixaria agendada
-            # pra sempre e o lançamento nunca viraria "Pago"; atualizar no
-            # lugar preserva o vínculo com a despesa que já foi confirmado.
-            efetivadas.append(anterior['id'])
-
-    duplicadas = len(txs) - len(novas) - len(efetivadas)
+    # Casamentos confirmados são trabalho manual do usuário e têm que atravessar
+    # a troca. Por chave exata primeiro; depois por (data, valor), que é o que
+    # sobrevive quando o banco reescreve a descrição ao debitar
+    # ('PAG TIT 662992535000' -> 'PAG BOLETO EDIFICIO LINCOLN GARDEN').
+    vinculo_exato = {}
+    vinculo_por_valor = {}
+    for t in antigas:
+        if not t['despesa_id']:
+            continue
+        vinculo_exato[(t['data'], t['descricao'], t['valor'])] = t
+        vinculo_por_valor.setdefault((t['data'], t['valor']), []).append(t)
 
     cur = conn.execute(
         'INSERT INTO importacao (banco, formato, arquivo, periodo_ini, periodo_fim) VALUES (?,?,?,?,?)',
-        (banco, formato, filename, datas[0], datas[-1])
+        (banco, formato, filename, ini, fim)
     )
     import_id = cur.lastrowid
 
-    if efetivadas:
-        conn.executemany(
-            "UPDATE transacao SET situacao='efetivada' WHERE id=?",
-            [(i,) for i in efetivadas]
-        )
+    if ids_antigos:
+        ph = ','.join('?' * len(ids_antigos))
+        conn.execute(f'UPDATE lancamento SET transacao_id=NULL WHERE transacao_id IN ({ph})', ids_antigos)
+        conn.execute(f'DELETE FROM transacao WHERE id IN ({ph})', ids_antigos)
 
-    batch = []
-    for t in novas:
+    novos = []
+    for t in txs:
         tipo = 'debito' if t['valor'] < 0 else 'credito'
-        batch.append((t['data'], t['descricao'], t['valor'], tipo, _situacao(t), banco, import_id))
-
-    if batch:
-        conn.executemany(
-            'INSERT INTO transacao (data, descricao, valor, tipo, situacao, banco_origem, import_id) VALUES (?,?,?,?,?,?,?)',
-            batch
+        c = conn.execute(
+            'INSERT INTO transacao (data, descricao, valor, tipo, situacao, banco_origem, import_id) '
+            'VALUES (?,?,?,?,?,?,?)',
+            (t['data'], t['descricao'], t['valor'], tipo, _situacao(t), banco, import_id)
         )
+        novos.append((c.lastrowid, t))
 
-    # A promoção acima só pega quem manteve a descrição. Quando o banco troca
-    # o texto ao debitar, a versão nova entrou como transação inédita e a
-    # agendada ficou órfã — é aqui que as duas se juntam.
-    colapsadas = _reconciliar_agendadas(conn, datas[0], datas[-1])
+    casados = {}
+    sem_par = []
+    for novo_id, t in novos:
+        antiga = vinculo_exato.pop((t['data'], t['descricao'], t['valor']), None)
+        if antiga is not None:
+            casados[antiga['id']] = (novo_id, t)
+        else:
+            sem_par.append((novo_id, t))
+
+    for novo_id, t in sem_par:
+        candidatas = [a for a in vinculo_por_valor.get((t['data'], t['valor']), [])
+                      if a['id'] not in casados]
+        # só quando não há ambiguidade: com duas candidatas não dá para saber
+        # qual é qual, e chutar arrastaria o vínculo para a despesa errada
+        if len(candidatas) == 1:
+            casados[candidatas[0]['id']] = (novo_id, t)
+
+    restaurados = 0
+    orfaos = 0
+    for antiga in antigas:
+        if not antiga['despesa_id']:
+            continue
+        lancs = lanc_por_tx.get(antiga['id'], [])
+        alvo = casados.get(antiga['id'])
+        if alvo is None:
+            # A transação sumiu do extrato — agendamento cancelado, estorno,
+            # correção do banco. O lançamento volta a ficar em aberto em vez de
+            # continuar apontando para algo que não existe mais.
+            orfaos += 1
+            for lid in lancs:
+                conn.execute(
+                    "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, "
+                    "valor_real=NULL, data_pagamento=NULL WHERE id=?", (lid,))
+            continue
+        novo_id, t = alvo
+        conn.execute('UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
+                     (antiga['despesa_id'], antiga['classificacao'], novo_id))
+        status = 'pago' if _situacao(t) == 'efetivada' else 'agendado'
+        for lid in lancs:
+            conn.execute(
+                'UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=? WHERE id=?',
+                (status, novo_id, abs(t['valor']), t['data'], lid))
+        restaurados += 1
+
+    from collections import Counter
+    antes = Counter((t['data'], t['descricao'], t['valor']) for t in antigas)
+    depois = Counter((t['data'], t['descricao'], t['valor']) for _, t in novos)
+    removidas = sum((antes - depois).values())
 
     conn.commit()
     conn.close()
 
-    msg = f'{len(novas)} transações novas importadas'
-    if efetivadas or colapsadas:
-        msg += f', {len(efetivadas) + colapsadas} que estavam agendadas foram debitadas'
-    if duplicadas:
-        msg += f' ({duplicadas} já tinham sido importadas antes e foram ignoradas)'
+    msg = f'{len(txs)} lançamentos do extrato ({ini} a {fim})'
+    if removidas:
+        msg += f' — {removidas} que não estão mais no extrato foram removidos'
+    if restaurados:
+        msg += f', {restaurados} associações preservadas'
+    if orfaos:
+        msg += f', {orfaos} lançamento(s) voltaram a ficar em aberto'
 
-    return jsonify({'ok': True, 'msg': msg, 'transacoes': novas, 'import_id': import_id})
+    return jsonify({'ok': True, 'msg': msg, 'transacoes': txs, 'import_id': import_id})
 
 
 def _garantir_lancamentos(conn, mes_ref: str) -> None:
@@ -434,15 +429,9 @@ def rodar_batimento():
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
 
-    # Duas manutenções antes de casar. Nenhuma decide casamento — são reparo de
-    # dado — mas as duas mudam o que a tela mostra, então rodam mesmo no preview:
-    #  1. remove órfãs 'agendada' cujo débito já caiu com outra descrição, senão
-    #     o casamento pode ser feito com a órfã e a despesa aparece "Agendado"
-    #     num mês em que o extrato já diz pago;
-    #  2. garante o lançamento de toda despesa ativa do mês, para a seção
-    #     "despesas que não encontrei" ficar completa mesmo se o usuário ainda
-    #     não abriu o Mês Atual (é o mesmo INSERT OR IGNORE de /api/lancamentos).
-    _reconciliar_agendadas(conn, ini, fim)
+    # Garante o lançamento de toda despesa ativa do mês, para a seção "despesas
+    # que não encontrei" ficar completa mesmo se o usuário ainda não abriu o Mês
+    # Atual (é o mesmo INSERT OR IGNORE de /api/lancamentos).
     _garantir_lancamentos(conn, mes_ref)
     conn.commit()
 

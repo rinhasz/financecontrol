@@ -37,7 +37,7 @@ batimentos e associa remetentes — não editar à mão.
 ## Estado atual
 
 **Implementado:** Função 1 completa (catálogo, competência, importação
-incremental, batimento com preview, Mês Atual, resgate) e busca de boletos/Pix
+que substitui o período, batimento com preview, Mês Atual, resgate) e busca de boletos/Pix
 por email.
 
 **Não implementado:** Funções 2 (despesas extras), 3 (análise do mês) e 4
