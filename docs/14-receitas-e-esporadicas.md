@@ -29,12 +29,22 @@ modelo em três eixos, pedidos juntos porque são o mesmo problema visto de
 
 Essa é a distinção operacional, não uma etiqueta:
 
-- **Fixa** → o mês é aberto com um lançamento previsto. Se o débito/crédito não
-  aparecer no extrato, o item entra na seção *"não encontrei"* cobrando
+- **Fixa** → o mês é aberto com um **lançamento** previsto. Se o débito/crédito
+  não aparecer no extrato, o item entra na seção *"não encontrei"* cobrando
   atenção.
-- **Esporádica** → **não gera lançamento nenhum**. Só passa a existir no mês em
-  que uma transação for associada a ela. Nunca aparece em *"não encontrei"*,
-  porque não ter acontecido é o estado normal.
+- **Esporádica** → **não gera lançamento nenhum, nunca**. O registro é a
+  própria transação, com `despesa_id`/`receita_id` preenchido. Nunca aparece em
+  *"não encontrei"*, porque não ter acontecido é o estado normal.
+
+> **Por que esporádica não usa lançamento.** `lancamento` tem
+> `UNIQUE(mes_ref, despesa_id)` — um por mês. Isso é correto para o que
+> acontece uma vez por mês, e **errado** para o que pode acontecer três vezes
+> (três consultas médicas, dois resgates com objetivos diferentes). Sem
+> previsão a fazer, o lançamento também não agregaria nada: a transação já tem
+> valor e data. Então o item esporádico dispensa a camada inteira.
+>
+> (A mesma limitação existe hoje para fixas — duas transações da mesma despesa
+> no mesmo mês não cabem. É pré-existente e fica fora deste escopo.)
 
 > **Efeito colateral desejado:** hoje toda despesa ativa gera lançamento todo
 > mês, então uma despesa ocasional polui a lista de "não encontrei"
@@ -75,17 +85,31 @@ Somar tudo como receita inflaria a renda de agosto em mais de 6×, e destruiria
 o sentido da calculadora de resgate (doc 04) — que existe justamente para dizer
 *quanto* resgatar.
 
-### Classificação de crédito
+### A classificação mora no catálogo de receitas
 
-Todo crédito recebe exatamente uma classificação:
+Todo item do catálogo de receitas tem um **tipo**, e é o tipo que decide se
+aquilo é renda. Assim **associar já classifica** — não existe um segundo
+mecanismo de "classificar crédito" paralelo ao batimento. O crédito segue o
+mesmo caminho de sempre: casa com um item do catálogo, e o item diz o que ele é.
 
-| Classificação | Entra no total de renda? | Observação |
+| `receita.tipo` | Conta como renda? | Exemplo no extrato |
 |---|:---:|---|
-| `receita` | **sim** | única que conta como renda |
-| `resgate_mensal` | não | dinheiro trazido para cobrir as contas do mês |
-| `resgate_esporadico` | não | resgate com objetivo próprio; exige rótulo |
-| `estorno` | não | anula um débito (ver §5) |
+| `salario` | **sim** | `FOLHA PAGAMENTO MENSAL` |
+| `juros` | **sim** | `COR JSCP ITUB4`, `REMUNER BASICA POUP AUT` |
+| `reembolso` | **sim** | `PIX TRANSF THALITA27/07` |
+| `outra` | **sim** | `TED 237.0001.BRADESCO S` |
+| `resgate_mensal` | não | `RESGATE CDB DI` para cobrir o mês |
+| `resgate_esporadico` | não | `RESGATE LCI DI` para comprar um carro |
+| `estorno` | não | `CREDITO CARTAO ITAU`, `DEV PIX ZIG` |
 | `transferencia` | não | entre contas próprias |
+
+`conta_como_renda` é **derivado do tipo**, não um campo — dois campos que
+precisam concordar acabam discordando. A regra é: tudo que não for
+`resgate_*`, `estorno` ou `transferencia`.
+
+Consequência prática: `resgate mensal` e `resgate esporádico` são **itens
+normais do catálogo** de receitas. O mensal é `fixa` (acontece quase todo mês);
+o esporádico é `esporadica`.
 
 ### Os dois resgates
 
@@ -140,10 +164,13 @@ Espelha `despesa` campo a campo.
 | padrao_variabilidade | TEXT | Mesmos valores de `despesa` |
 | valor_padrao | REAL | |
 | regras_match | JSON | Mesmo formato de `despesa` |
+| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` — ver §2 |
 | recorrencia | TEXT | `fixa` \| `esporadica` |
 | ativo | BOOLEAN | |
 
 ### `lancamento_receita` — nova
+
+Só existe para receitas **fixas** (§1).
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
@@ -174,12 +201,13 @@ Espelha `despesa` campo a campo.
 
 | Campo | Tipo | Por quê |
 |---|---|---|
-| receita_id | INTEGER FK → receita | Espelho de `despesa_id` |
-| objetivo | TEXT | Rótulo livre do `resgate_esporadico` ("compra do carro") |
+| receita_id | INTEGER FK → receita | Espelho de `despesa_id`. Para esporádicas, é o **único** registro do fato (§1) |
+| objetivo | TEXT | Rótulo livre por ocorrência: "compra do carro". Fica aqui, e não no catálogo, porque o objetivo muda a cada resgate |
 | estorna_transacao_id | INTEGER FK → transacao | Qual débito este crédito anula (§5) |
 
-`transacao.classificacao` passa a aceitar, além dos valores atuais:
-`resgate_mensal`, `resgate_esporadico`, `estorno`.
+`transacao.classificacao` **não muda**. A classificação de negócio agora vem de
+`receita.tipo` via `receita_id`; duplicá-la na transação criaria dois campos
+que precisam concordar.
 
 **`transacao_receita_regra`** — espelho exato de `transacao_despesa_regra`,
 mesma normalização `padrao_descricao()`, mesmo bônus/penalidade.
@@ -236,13 +264,13 @@ WHERE l.mes_ref = ? AND l.status = 'nao_encontrado'
   AND r.ativo = 1 AND r.recorrencia = 'fixa'
 
 -- transações candidatas
-WHERE data BETWEEN <competência> AND tipo = 'credito'
-  AND receita_id IS NULL
-  AND classificacao NOT IN ('resgate_mensal','resgate_esporadico','estorno','transferencia')
+WHERE data BETWEEN <competência> AND tipo = 'credito' AND receita_id IS NULL
 ```
 
-O filtro por `classificacao` é o que impede o motor de tentar casar o salário
-com um `RESGATE CDB DI` de valor parecido.
+Não há filtro por classificação: um `RESGATE CDB DI` é candidato legítimo,
+porque "resgate mensal" é um item do catálogo como qualquer outro. Quem impede
+o resgate de roubar o casamento do salário é o mesmo mecanismo que já protege
+as despesas — palavras-chave, valor, data e regra aprendida.
 
 ### Efeito de `recorrencia` no lado das despesas
 
@@ -263,10 +291,26 @@ A revisão ganha um seletor **Saídas | Entradas** no topo. Cada lado mantém as
 | 2 | despesas não encontradas → combo de débitos | receitas não encontradas → combo de créditos |
 | 3 | débitos sem despesa → combo de despesas | créditos sem receita → combo de receitas |
 
-Na seção 3 das entradas, cada crédito também pode ser **classificado** em vez
-de associado: `resgate mensal`, `resgate esporádico` (+ objetivo), `estorno`
-(+ qual débito anula) ou `transferência`. Classificar tira o crédito da lista
-sem inventar uma receita para ele.
+Na seção 3 das entradas, associar é o **único** gesto — não há um segundo botão
+de "classificar". O combo lista os itens do catálogo de receitas agrupados por
+tipo, e escolher `resgate mensal` já classifica o crédito como resgate:
+
+```
+  Salário
+    salário                      previsto 14.404,90
+  Juros
+    juros poupança
+  Resgate
+    resgate mensal
+    resgate esporádico           › pede objetivo ao confirmar
+  Estorno
+    estorno de cartão            › pede qual débito anula
+  + Nova receita
+```
+
+Escolher um item cujo tipo é `resgate_esporadico` abre um campo de **objetivo**;
+`estorno`, um seletor do débito anulado (§5). São os dois únicos tipos que
+pedem informação extra na hora de associar.
 
 Tudo continua **preview → confirmar**: nada grava antes do "Confirmar tudo".
 
@@ -296,21 +340,29 @@ arriscado — um reembolso legítimo de valor redondo se parece com estorno.
 Uma tela só, dois blocos, fechando em saldo.
 
 ```
-RECEITAS
-  Fixas          salário            previsto 14.404,90   recebido 14.404,90  ✓
-                 juros                       ~400,00     recebido    411,59  ✓
-  Esporádicas    PIX Luiz                                          5.000,00
-  ─────────────────────────────────────────────────────────────────────────
-  Total recebido                                                  19.816,49
+RECEITAS                                          previsto      realizado
+  Fixas        salário              [salário]     14.404,90     14.404,90 ✓
+               juros poupança       [juros]          ~400,00       411,59 ✓
+  Esporádicas  PIX Luiz             [outra]                      5.000,00
+               TED Bradesco         [outra]                        700,00
+  ───────────────────────────────────────────────────────────────────────
+  Renda do mês                                                  20.516,49
 
 DESPESAS
   (bloco atual, sem mudança)
-  ─────────────────────────────────────────────────────────────────────────
+  ───────────────────────────────────────────────────────────────────────
   Total pago / previsto
 
-SALDO DO MÊS       recebido − pago
-MOVIMENTAÇÃO       resgate mensal 8.000,00 · esporádico 12.000,00 (carro)
+SALDO DO MÊS     renda − pago
+
+MOVIMENTAÇÃO (não é renda)
+  Resgate mensal                                                 8.000,00
+  Resgate esporádico   compra do carro                          12.000,00
+  Estorno              anula INT PERS BLACK                      5.709,27
 ```
+
+O rótulo entre colchetes é o `tipo` do item — é ele que decide de qual lado da
+linha o valor entra. **Renda e movimentação nunca somam juntas.**
 
 Regras de exibição, herdadas do que já vale para despesas (doc 10):
 
@@ -318,15 +370,18 @@ Regras de exibição, herdadas do que já vale para despesas (doc 10):
   (esconder falsearia o total);
 - `/api/resumo` aplica **o mesmo filtro** da lista, senão o total não bate com
   as linhas exibidas;
-- esporádicas aparecem só nos meses em que aconteceram.
+- esporádicas aparecem só nos meses em que aconteceram — e como não têm
+  lançamento (§1), a lista do mês é a **união** de `lancamento_receita` (fixas)
+  com as `transacao` que têm `receita_id` de item esporádico.
 
 ### Calculadora de resgate
 
 Passa a ser um ciclo fechado:
 
 ```
-resgate_necessario = total_despesas + reserva_desejada − saldo_conta − receitas
-resgate_ja_feito   = Σ transações classificadas 'resgate_mensal' no mês
+renda_do_mes       = Σ receitas cujo tipo conta como renda   (§2)
+resgate_necessario = total_despesas + reserva_desejada − saldo_conta − renda_do_mes
+resgate_ja_feito   = Σ créditos associados a item de tipo 'resgate_mensal'
 falta_resgatar     = max(0, resgate_necessario − resgate_ja_feito)
 ```
 
@@ -363,7 +418,7 @@ promove para fixa depois, se for o caso.
 | `/api/lancamentos` | GET | **Estendido**: devolve `{despesas: [], receitas: []}` |
 | `/api/batimento` | POST | **Estendido**: aceita `natureza` (`despesa`\|`receita`\|`ambas`) |
 | `/api/batimento/confirmar` | POST | **Estendido**: pares carregam `natureza` |
-| `/api/transacoes/classificar` | POST | **Nova**: aplica `resgate_mensal` / `resgate_esporadico` (+objetivo) / `estorno` (+`estorna_transacao_id`) / `transferencia` |
+| `/api/transacoes/<id>/detalhe` | PATCH | **Nova**: grava `objetivo` (resgate esporádico) e `estorna_transacao_id` (estorno). Só isso — a classificação vem de `receita.tipo` |
 | `/api/resumo` | GET | **Estendido**: `receitas`, `saldo_mes`, `resgate_necessario`, `resgate_ja_feito`, `falta_resgatar` |
 
 O endpoint antigo `/api/receitas` (mes_ref/tipo/valor/origem) é **removido** —
@@ -378,11 +433,10 @@ Cada fase é utilizável sozinha e commitável separadamente.
 | Fase | Entrega | Por que nesta ordem |
 |---|---|---|
 | **1** | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
-| **2** | Catálogo de receitas (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar |
+| **2** | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
 | **3** | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
-| **4** | Classificação de crédito (resgates, transferência) | Depende da fase 3 para ter onde aparecer |
-| **5** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
-| **6** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
+| **4** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
+| **5** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
 
 ---
 
