@@ -1,9 +1,9 @@
 # Receitas, Esporádicas e Resgates — Especificação
 
-**Status:** **fases 1 a 3 implementadas** — recorrência fixa/esporádica,
-catálogo de receitas com `tipo`, e o batimento de créditos com motor único.
-Faltam o Mês Atual em dois blocos (fase 4) e o estorno (fase 5).
-Este documento é o contrato; ver §9 para o que já saiu.
+**Status:** **fases 1 a 4 implementadas** — recorrência fixa/esporádica,
+catálogo de receitas com `tipo`, batimento de créditos com motor único, e o Mês
+Atual com renda, movimentação e o ciclo do resgate fechado. Falta só o estorno
+(fase 5). Este documento é o contrato; ver §9 para o que já saiu.
 
 Até aqui o app só enxerga **saídas recorrentes**. Este documento estende o
 modelo em três eixos, pedidos juntos porque são o mesmo problema visto de
@@ -437,7 +437,7 @@ Cada fase é utilizável sozinha e commitável separadamente.
 | **1** ✅ | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
 | **2** ✅ | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
 | **3** ✅ | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
-| **4** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
+| **4** ✅ | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
 | **5** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
 
 ---
@@ -525,3 +525,23 @@ para evitar. O tipo é escolha explícita no Catálogo.
 
 **`avaliar_batimento.py` teve de ser atualizado** junto: a resposta agora é
 aninhada por natureza, e o gabarito de `docs/07` é só do lado da despesa.
+
+**Fase 4: "saldo do mês" é realizado contra realizado.** A spec dizia
+`recebido − pago`, e a primeira implementação somou `renda − pago` — misturando
+renda ainda **prevista** com gasto **já pago**, o que produz um saldo que não
+existe em lugar nenhum. Corrigido para `renda_recebida − pago`, e o card foi
+rotulado **"Recebido − pago"** para não haver dúvida sobre o que ele mede.
+"Vai fechar o mês?" é outra pergunta, e quem responde é a calculadora de
+resgate logo abaixo.
+
+**A decisão de qual bloco exibe cada linha está na tela; a soma vem do
+backend.** O frontend repete a lista de tipos que não são renda só para separar
+as linhas em dois blocos — os totais (`renda`, `movimentacao`, `faltaResgatar`)
+chegam prontos de `/api/resumo`. Se a regra fosse aplicada duas vezes para
+somar, os dois lugares poderiam discordar e a tela mostraria um total que não
+bate com as próprias linhas.
+
+**`/api/lancamentos` passou a devolver `{despesas, receitas}`** em vez de um
+array. Consumidor único (Mês Atual), então não houve compatibilidade a manter —
+mas `/api/resumo` **manteve** as chaves antigas `receitas` e `resgate` como
+apelidos de `renda` e `resgateNecessario`.

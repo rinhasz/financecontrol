@@ -414,3 +414,7 @@ total, e o mês fecharia com número errado.
 
 `/api/resumo` aplica **o mesmo filtro**; se somasse o que a lista não mostra, o
 total da tela não bateria com as linhas exibidas.
+
+`/api/lancamentos` devolve `{despesas: [], receitas: []}` — os dois lados de uma
+vez, cada um já unindo lançamentos (fixas) e transações (esporádicas). Ver
+doc 14 §6 para o layout da tela e a calculadora de resgate fechada.

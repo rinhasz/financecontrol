@@ -5,8 +5,8 @@ import { formatBRL, mesRefLabel, currentMesRef, prevMesRef, nextMesRef, cn } fro
 interface Lancamento {
   id: number
   mes_ref: string
-  despesa_id: number
-  despesa_nome: string
+  item_id: number
+  item_nome: string
   categoria_nome: string
   valor_esperado: number
   valor_real: number | null
@@ -20,9 +20,42 @@ interface Lancamento {
   descricao_transacao?: string
 }
 
+interface Receita {
+  id: number
+  item_id: number
+  item_nome: string
+  tipo: string
+  recorrencia: 'fixa' | 'esporadica'
+  valor_esperado: number
+  valor_real: number | null
+  status: 'recebido' | 'previsto' | 'nao_encontrado'
+  data_recebimento: string | null
+  descricao_transacao?: string
+  objetivo?: string | null
+}
+
 interface Resumo {
   pago: number; agendado: number; naoEncontrado: number
-  total: number; reserva: number; saldo: number; receitas: number; resgate: number
+  total: number; reserva: number; saldo: number
+  renda: number; rendaRecebida: number
+  movimentacao: Record<string, number>
+  saldoMes: number
+  resgateNecessario: number; resgateJaFeito: number; faltaResgatar: number
+}
+
+const TIPO_LABEL: Record<string, string> = {
+  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
+  resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
+  estorno: 'Estorno', transferencia: 'Transferência'
+}
+
+// Os mesmos tipos que o backend trata como "não é renda" (api/receitas.py).
+// Aqui só decide em qual bloco a linha aparece; o total vem pronto do resumo,
+// para a regra não existir em dois lugares que podem discordar.
+const TIPOS_MOVIMENTACAO = new Set(['resgate_mensal', 'resgate_esporadico', 'estorno', 'transferencia'])
+
+const STATUS_RECEITA_LABEL: Record<string, string> = {
+  recebido: 'Recebido', previsto: 'Previsto', nao_encontrado: 'Não recebido'
 }
 
 const STATUS_STYLE = {
@@ -40,6 +73,7 @@ const ROW_BG = {
 export function MesAtual() {
   const [mesRef, setMesRef] = useState(currentMesRef())
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
+  const [receitas, setReceitas] = useState<Receita[]>([])
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [loading, setLoading] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
@@ -58,7 +92,8 @@ export function MesAtual() {
         api.lancamentos.resumo(mesRef),
         api.config.get()
       ])
-      setLancamentos(data)
+      setLancamentos(data.despesas ?? [])
+      setReceitas(data.receitas ?? [])
       setResumo(res)
       setSaldoVal(String(res.saldo))
       setDiaSalarioVal(String(cfg.dia_recebimento_salario ?? '27'))
@@ -106,6 +141,11 @@ export function MesAtual() {
     setBoletoCopiado(l.id)
     setTimeout(() => setBoletoCopiado(null), 1500)
   }
+
+  // O tipo do item decide de qual lado da linha ele entra. A soma da renda vem
+  // pronta do resumo — aqui só se decide onde a linha aparece.
+  const renda = receitas.filter(r => !TIPOS_MOVIMENTACAO.has(r.tipo))
+  const movimentacao = receitas.filter(r => TIPOS_MOVIMENTACAO.has(r.tipo))
 
   const byCategory = lancamentos.reduce<Record<string, Lancamento[]>>((acc, l) => {
     const cat = l.categoria_nome || 'Outros'
@@ -158,11 +198,13 @@ export function MesAtual() {
 
       {/* Resumo cards */}
       {resumo && (
-        <div className="px-6 pb-4 grid grid-cols-4 gap-3 flex-none">
+        <div className="px-6 pb-4 grid grid-cols-6 gap-3 flex-none">
+          <Card label="Renda do mês"  value={resumo.renda}        color="emerald" />
           <Card label="Total do mês"  value={resumo.total}        color="zinc" />
           <Card label="Pago"          value={resumo.pago}         color="emerald" />
           <Card label="Agendado"      value={resumo.agendado}     color="blue" />
           <Card label="Em aberto"     value={resumo.naoEncontrado} color="amber" />
+          <Card label="Recebido − pago" value={resumo.saldoMes}   color={resumo.saldoMes >= 0 ? 'emerald' : 'amber'} />
         </div>
       )}
 
@@ -173,9 +215,9 @@ export function MesAtual() {
             <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3 font-medium">Calculadora de Resgate</p>
             <div className="grid grid-cols-5 gap-4 text-sm">
               {[
-                ['Total a vencer',    formatBRL(resumo.total)],
-                ['Reserva',           formatBRL(resumo.reserva)],
-                ['Receitas previstas',formatBRL(resumo.receitas)],
+                ['Total a vencer', formatBRL(resumo.total)],
+                ['Reserva',        formatBRL(resumo.reserva)],
+                ['Renda do mês',   formatBRL(resumo.renda)],
               ].map(([lbl, val]) => (
                 <div key={lbl}>
                   <p className="text-zinc-500 text-xs mb-0.5">{lbl}</p>
@@ -199,9 +241,11 @@ export function MesAtual() {
                 )}
               </div>
               <div>
-                <p className="text-zinc-500 text-xs mb-0.5">A resgatar</p>
-                <p className={cn('text-lg font-bold', resumo.resgate > 0 ? 'text-amber-400' : 'text-emerald-400')}>
-                  {formatBRL(resumo.resgate)}
+                <p className="text-zinc-500 text-xs mb-0.5">
+                  {resumo.resgateJaFeito > 0 ? 'Ainda falta resgatar' : 'A resgatar'}
+                </p>
+                <p className={cn('text-lg font-bold', resumo.faltaResgatar > 0 ? 'text-amber-400' : 'text-emerald-400')}>
+                  {formatBRL(resumo.faltaResgatar)}
                 </p>
               </div>
             </div>
@@ -215,6 +259,18 @@ export function MesAtual() {
           <div className="flex items-center justify-center h-40 text-zinc-500">Carregando...</div>
         ) : (
           <div className="space-y-3">
+            {/* Entradas vêm antes das saídas: é a ordem em que o mês acontece.
+                Renda e movimentação ficam separadas porque resgate e estorno
+                chegam na conta sem serem renda nova (doc 14). */}
+            {renda.length > 0 && (
+              <BlocoReceitas titulo="Receitas" itens={renda} total={resumo?.renda ?? 0} />
+            )}
+            {movimentacao.length > 0 && (
+              <BlocoReceitas titulo="Movimentação — não é renda" itens={movimentacao}
+                total={movimentacao.reduce((acc, r) => acc + (r.valor_real ?? r.valor_esperado), 0)}
+                esmaecido />
+            )}
+
             {Object.entries(byCategory).map(([cat, items]) => (
               <div key={cat}>
                 <div className="flex items-center gap-2 mb-1.5">
@@ -230,7 +286,7 @@ export function MesAtual() {
                       {items.map((l, i) => (
                         <tr key={l.id} className={cn('transition-colors', ROW_BG[l.status], i > 0 && 'border-t border-zinc-800/40')}>
                           <td className="px-4 py-2.5 text-zinc-300 font-medium">
-                            {l.despesa_nome}
+                            {l.item_nome}
                             {l.recorrencia === 'esporadica' && (
                               <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
                                 title={l.descricao_transacao ?? 'Despesa esporádica'}>
@@ -289,6 +345,59 @@ export function MesAtual() {
     </div>
   )
 }
+
+function BlocoReceitas({ titulo, itens, total, esmaecido }: {
+  titulo: string; itens: Receita[]; total: number; esmaecido?: boolean
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className={cn('text-xs font-medium uppercase tracking-wider',
+          esmaecido ? 'text-zinc-600' : 'text-emerald-500/80')}>{titulo}</span>
+        <div className="flex-1 h-px bg-zinc-800" />
+        <span className="text-xs text-zinc-600">{formatBRL(total)}</span>
+      </div>
+      <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+        <table className="w-full text-sm">
+          <tbody>
+            {itens.map((r, i) => (
+              <tr key={r.id} className={cn('transition-colors hover:bg-zinc-800/40',
+                i > 0 && 'border-t border-zinc-800/40', esmaecido && 'opacity-70')}>
+                <td className="px-4 py-2.5 text-zinc-300 font-medium">
+                  {r.item_nome}
+                  {r.recorrencia === 'esporadica' && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
+                      title={r.descricao_transacao ?? 'Receita esporádica'}>
+                      esporádica
+                    </span>
+                  )}
+                  {r.objetivo && <span className="ml-2 text-xs text-zinc-500">· {r.objetivo}</span>}
+                </td>
+                <td className="px-4 py-2.5 text-zinc-500 text-xs">{TIPO_LABEL[r.tipo] ?? r.tipo}</td>
+                <td className={cn('px-4 py-2.5 text-right font-medium tabular-nums',
+                  esmaecido ? 'text-zinc-400' : 'text-emerald-400')}>
+                  {formatBRL(r.valor_real ?? r.valor_esperado)}
+                </td>
+                <td className="px-4 py-2.5 text-zinc-500 text-xs w-24">
+                  {r.data_recebimento ? new Date(r.data_recebimento + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                </td>
+                <td className="px-4 py-2.5 w-28">
+                  <span className={cn('text-xs px-2 py-0.5 rounded border',
+                    r.status === 'recebido'
+                      ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800/50'
+                      : 'bg-zinc-800/30 text-zinc-500 border-zinc-700/30')}>
+                    {STATUS_RECEITA_LABEL[r.status] ?? r.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 
 function Card({ label, value, color }: { label: string; value: number; color: string }) {
   const colors: Record<string, string> = { zinc: 'text-zinc-200', emerald: 'text-emerald-400', blue: 'text-blue-400', amber: 'text-amber-400' }

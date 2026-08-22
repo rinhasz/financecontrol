@@ -74,8 +74,9 @@ def list_lancamentos():
     # escondê-la tiraria um pagamento real da lista e dos totais, fazendo o
     # mês fechar com número errado.
     rows = conn.execute("""
-        SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.padrao_variabilidade,
-               d.recorrencia, c.nome as categoria_nome, c.id as categoria_id
+        SELECT l.*, d.nome as item_nome, l.despesa_id as item_id, d.tipo_valor,
+               d.padrao_variabilidade, d.recorrencia,
+               c.nome as categoria_nome, c.id as categoria_id
         FROM lancamento l
         JOIN despesa d ON d.id = l.despesa_id
         LEFT JOIN categoria c ON c.id = d.categoria_id
@@ -88,13 +89,36 @@ def list_lancamentos():
         ORDER BY c.nome, d.nome
     """, (mes_ref,)).fetchall()
 
-    itens = [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref)
-    itens.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['despesa_nome'].lower()))
+    despesas = [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref, 'despesa')
+    despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
+
+    receitas = _receitas_do_mes(conn, mes_ref)
     conn.close()
-    return jsonify(itens)
+    return jsonify({'despesas': despesas, 'receitas': receitas})
 
 
-def _esporadicas_do_mes(conn, mes_ref: str):
+def _receitas_do_mes(conn, mes_ref: str) -> list:
+    """Receitas do mês: as fixas (com lançamento) mais as esporádicas (que só
+    existem como transação). Mesma união do lado da despesa."""
+    rows = conn.execute("""
+        SELECT lr.*, r.nome as item_nome, r.tipo, r.tipo_valor, r.padrao_variabilidade,
+               r.recorrencia, c.nome as categoria_nome, c.id as categoria_id
+        FROM lancamento_receita lr
+        JOIN receita r ON r.id = lr.receita_id
+        LEFT JOIN categoria c ON c.id = r.categoria_id
+        WHERE lr.mes_ref = ?
+          AND (r.ativo = 1 OR lr.status != 'nao_encontrado')
+          AND (r.recorrencia = 'fixa' OR lr.status != 'nao_encontrado')
+        ORDER BY r.nome
+    """, (mes_ref,)).fetchall()
+
+    itens = [{**dict(r), 'item_id': r['receita_id']} for r in rows]
+    itens += _esporadicas_do_mes(conn, mes_ref, 'receita')
+    itens.sort(key=lambda x: (x['tipo'], x['item_nome'].lower()))
+    return itens
+
+
+def _esporadicas_do_mes(conn, mes_ref: str, natureza: str = 'despesa'):
     """Despesas esporádicas que aconteceram no mês.
 
     Elas não têm lançamento (doc 14) — a transação associada é o registro. Cada
@@ -110,26 +134,31 @@ def _esporadicas_do_mes(conn, mes_ref: str):
     esse filtro ela apareceria duas vezes — pela via antiga e pela nova — e o
     mês fecharia com o valor dobrado.
     """
+    from .motor_batimento import cfg, status_de
+    c = cfg(natureza)
+
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
-    rows = conn.execute("""
-        SELECT t.id, t.data, t.valor, t.situacao, t.descricao,
-               d.id as despesa_id, d.nome as despesa_nome, d.tipo_valor,
+    rows = conn.execute(f"""
+        SELECT t.id, t.data, t.valor, t.situacao, t.descricao, t.objetivo,
+               d.id as item_id, d.nome as item_nome, d.tipo_valor,
                d.padrao_variabilidade, d.recorrencia,
+               {'d.tipo as tipo,' if natureza == 'receita' else ''}
                c.nome as categoria_nome, c.id as categoria_id
         FROM transacao t
-        JOIN despesa d ON d.id = t.despesa_id
+        JOIN {c['catalogo']} d ON d.id = t.{c['fk']}
         LEFT JOIN categoria c ON c.id = d.categoria_id
-        WHERE d.recorrencia = 'esporadica' AND t.tipo = 'debito'
+        WHERE d.recorrencia = 'esporadica' AND t.tipo = ?
           AND t.data BETWEEN ? AND ?
-          AND NOT EXISTS (SELECT 1 FROM lancamento l WHERE l.transacao_id = t.id)
-    """, (ini, fim)).fetchall()
+          AND NOT EXISTS (SELECT 1 FROM {c['lancamento']} l WHERE l.transacao_id = t.id)
+    """, (c['tipo_tx'], ini, fim)).fetchall()
 
     return [{
         'id': -r['id'],
         'mes_ref': mes_ref,
-        'despesa_id': r['despesa_id'],
-        'despesa_nome': r['despesa_nome'],
+        'item_id': r['item_id'],
+        'item_nome': r['item_nome'],
+        **({'tipo': r['tipo']} if natureza == 'receita' else {}),
         'categoria_nome': r['categoria_nome'],
         'categoria_id': r['categoria_id'],
         'tipo_valor': r['tipo_valor'],
@@ -137,10 +166,11 @@ def _esporadicas_do_mes(conn, mes_ref: str):
         'recorrencia': 'esporadica',
         'valor_esperado': abs(r['valor']),
         'valor_real': abs(r['valor']),
-        'status': 'pago' if r['situacao'] == 'efetivada' else 'agendado',
+        'status': status_de(natureza, r['situacao']),
         'transacao_id': r['id'],
-        'data_pagamento': r['data'],
+        c['data_mov']: r['data'],
         'descricao_transacao': r['descricao'],
+        'objetivo': r['objetivo'],
         'linha_digitavel': None,
         'tipo_codigo': None,
     } for r in rows]
@@ -183,7 +213,7 @@ def resumo():
 
     # Esporádicas não estão em `lancamento`, mas estão na lista da tela — se o
     # resumo as ignorasse, o total não bateria com as linhas exibidas
-    for e in _esporadicas_do_mes(conn, mes_ref):
+    for e in _esporadicas_do_mes(conn, mes_ref, 'despesa'):
         if e['status'] == 'pago':
             pago += e['valor_real']
         else:
@@ -191,25 +221,52 @@ def resumo():
 
     total = pago + agendado + nao
 
+    # --- lado da entrada ---------------------------------------------------
+    # Renda e movimentação vêm da MESMA lista que a tela mostra, e são somadas
+    # separadas: resgate e estorno chegam na conta como dinheiro entrando, mas
+    # não são renda nova. Somá-los faria a calculadora concluir que não é
+    # preciso resgatar nada — justamente o erro que o `tipo` existe para evitar.
+    from .receitas import conta_como_renda
+
+    renda = 0.0
+    renda_recebida = 0.0
+    movimentacao = {}
+    for r in _receitas_do_mes(conn, mes_ref):
+        valor = r['valor_real'] if r['valor_real'] is not None else r['valor_esperado']
+        if conta_como_renda(r['tipo']):
+            renda += valor
+            if r['status'] == 'recebido':
+                renda_recebida += valor
+        else:
+            movimentacao[r['tipo']] = movimentacao.get(r['tipo'], 0.0) + valor
+
     cfg = {r['chave']: float(r['valor']) for r in conn.execute('SELECT chave, valor FROM config').fetchall()}
     reserva = cfg.get('reserva_desejada', 5000)
     saldo = cfg.get('saldo_conta', 0)
-    # Renda do mês: só o que conta como renda (doc 14). Resgate e estorno
-    # entram na conta como dinheiro chegando, mas não são renda nova — somá-los
-    # faria a calculadora de resgate concluir que não é preciso resgatar nada.
-    # Fase 2: ainda não há lançamento de receita, então isto devolve 0 — mesmo
-    # resultado de antes, quando a tabela `receita` estava vazia.
-    receitas = conn.execute("""
-        SELECT COALESCE(SUM(COALESCE(lr.valor_real, lr.valor_esperado)), 0)
-        FROM lancamento_receita lr JOIN receita r ON r.id = lr.receita_id
-        WHERE lr.mes_ref = ? AND r.tipo NOT IN ('resgate_mensal','resgate_esporadico','estorno','transferencia')
-    """, (mes_ref,)).fetchone()[0] or 0
-    resgate = max(0, total + reserva - saldo - receitas)
+
+    # O ciclo do resgate, fechado: quanto precisa, quanto já foi feito, quanto
+    # falta. Só o resgate MENSAL abate — o esporádico tem objetivo próprio e
+    # não é resposta ao déficit do mês (doc 14).
+    resgate_necessario = max(0, total + reserva - saldo - renda)
+    resgate_ja_feito = movimentacao.get('resgate_mensal', 0.0)
+    falta_resgatar = max(0, resgate_necessario - resgate_ja_feito)
 
     conn.close()
-    return jsonify({'pago': pago, 'agendado': agendado, 'naoEncontrado': nao,
-                    'total': total, 'reserva': reserva, 'saldo': saldo,
-                    'receitas': receitas, 'resgate': resgate})
+    return jsonify({
+        'pago': pago, 'agendado': agendado, 'naoEncontrado': nao,
+        'total': total, 'reserva': reserva, 'saldo': saldo,
+        'renda': renda, 'rendaRecebida': renda_recebida,
+        'movimentacao': movimentacao,
+        # realizado contra realizado: somar renda ainda não recebida com gasto
+        # já pago daria um saldo que não existe em lugar nenhum. "Vai fechar o
+        # mês?" é a pergunta que a calculadora de resgate responde, logo abaixo.
+        'saldoMes': renda_recebida - pago,
+        'resgateNecessario': resgate_necessario,
+        'resgateJaFeito': resgate_ja_feito,
+        'faltaResgatar': falta_resgatar,
+        # nomes antigos mantidos para não quebrar nada que ainda os leia
+        'receitas': renda, 'resgate': resgate_necessario,
+    })
 
 
 @bp.route('/config', methods=['GET'])
