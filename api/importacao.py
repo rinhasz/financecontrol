@@ -408,7 +408,8 @@ def _garantir_lancamentos(conn, mes_ref: str) -> None:
     antes de abrir o Mês Atual veria uma lista incompleta.
     """
     from .lancamentos import _valor_previsto
-    for d in conn.execute('SELECT * FROM despesa WHERE ativo=1').fetchall():
+    # esporádica não tem previsão a fazer: só existe no mês em que acontecer
+    for d in conn.execute("SELECT * FROM despesa WHERE ativo=1 AND recorrencia='fixa'").fetchall():
         prev = _valor_previsto(conn, d['id'], mes_ref, d['padrao_variabilidade'], d['valor_padrao'])
         conn.execute(
             'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) '
@@ -437,11 +438,13 @@ def rodar_batimento():
 
     # d.ativo=1: despesa desativada não pode disputar transação com uma ativa —
     # é assim que uma despesa velha e genérica (ex: "cartao xp") acabava
-    # roubando o casamento de outra parecida que ainda está em uso
+    # roubando o casamento de outra parecida que ainda está em uso.
+    # recorrencia='fixa': esporádica nem lançamento tem (doc 14), mas o filtro
+    # fica explícito para o caso de sobrar lançamento de antes da migração.
     lancamentos = conn.execute("""
         SELECT l.*, d.nome as despesa_nome, d.tipo_valor, d.regras_match, d.dia_vencimento
         FROM lancamento l JOIN despesa d ON d.id = l.despesa_id
-        WHERE l.mes_ref=? AND l.status='nao_encontrado' AND d.ativo=1
+        WHERE l.mes_ref=? AND l.status='nao_encontrado' AND d.ativo=1 AND d.recorrencia='fixa'
     """, (mes_ref,)).fetchall()
 
     transacoes = conn.execute("""
@@ -708,7 +711,10 @@ def confirmar_batimento():
 def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, transacao):
     """Vincula uma transação a uma despesa: garante que o lançamento do mês
     existe, marca como pago/agendado conforme a situação da transação, e
-    reverte qualquer vínculo anterior errado que a transação já tivesse."""
+    reverte qualquer vínculo anterior errado que a transação já tivesse.
+
+    Despesa esporádica não passa por lançamento (doc 14): a própria transação,
+    com `despesa_id` preenchido, é o registro do fato."""
     despesa_errada = conn.execute(
         'SELECT id, despesa_id FROM lancamento WHERE transacao_id=? AND despesa_id != ?',
         (transacao_id, despesa_id)
@@ -724,20 +730,33 @@ def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, trans
             'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
             (padrao_descricao(transacao['descricao']), despesa_errada['despesa_id'])
         )
+    elif transacao['despesa_id'] and transacao['despesa_id'] != despesa_id:
+        # a transação estava com outro dono e esse dono não tinha lançamento
+        # (caso da esporádica) — o desaprender acima não pegaria
+        conn.execute(
+            'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
+            (padrao_descricao(transacao['descricao']), transacao['despesa_id'])
+        )
+
+    esporadica = conn.execute(
+        "SELECT recorrencia='esporadica' FROM despesa WHERE id=?", (despesa_id,)
+    ).fetchone()[0]
+
+    if not esporadica:
+        conn.execute(
+            'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
+            (mes_ref, despesa_id, abs(transacao['valor']))
+        )
+        status = 'pago' if transacao['situacao'] == 'efetivada' else 'agendado'
+        conn.execute(
+            """UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=?
+               WHERE despesa_id=? AND mes_ref=?""",
+            (status, transacao_id, abs(transacao['valor']), transacao['data'], despesa_id, mes_ref)
+        )
 
     conn.execute(
-        'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
-        (mes_ref, despesa_id, abs(transacao['valor']))
-    )
-    status = 'pago' if transacao['situacao'] == 'efetivada' else 'agendado'
-    conn.execute(
-        """UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=?
-           WHERE despesa_id=? AND mes_ref=?""",
-        (status, transacao_id, abs(transacao['valor']), transacao['data'], despesa_id, mes_ref)
-    )
-    conn.execute(
-        "UPDATE transacao SET despesa_id=?, classificacao='recorrente' WHERE id=?",
-        (despesa_id, transacao_id)
+        'UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
+        (despesa_id, 'extra' if esporadica else 'recorrente', transacao_id)
     )
     # Confirmar é o usuário dizendo "esse texto é essa despesa" — vale tanto
     # quando ele corrigiu quanto quando aceitou a sugestão. É o que faz o

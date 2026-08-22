@@ -127,7 +127,8 @@ na associação de emails (doc 08).
 
 ```sql
 -- lançamentos candidatos
-WHERE l.mes_ref = ? AND l.status = 'nao_encontrado' AND d.ativo = 1
+WHERE l.mes_ref = ? AND l.status = 'nao_encontrado'
+  AND d.ativo = 1 AND d.recorrencia = 'fixa'
 
 -- transações candidatas
 WHERE data BETWEEN <competência> AND tipo='debito' AND despesa_id IS NULL
@@ -135,6 +136,11 @@ WHERE data BETWEEN <competência> AND tipo='debito' AND despesa_id IS NULL
 
 `d.ativo = 1` importa: sem ele, uma despesa velha e genérica (ex.: "cartao xp",
 desativada) vencia a disputa por uma transação contra outra ainda em uso.
+
+`d.recorrencia = 'fixa'` porque esporádica nem lançamento tem (doc 14) — o
+filtro fica explícito para o caso de sobrar lançamento anterior à migração.
+Uma despesa esporádica **ainda recebe** transação pela seção 3; o vínculo é
+gravado na própria transação, sem criar lançamento.
 
 ### Scoring
 

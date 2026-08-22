@@ -157,3 +157,21 @@ vai ser usado para pagar uma conta.
 | Segredos | `.env` (gitignored): `EMAIL_CLIENT_ID`, `GEMINI_API_KEY`, `FORCE_IPV4` |
 | Token de email | `.msal_token_cache.json` (gitignored) |
 | Banco | `dev.sqlite` (gitignored) — fazer backup antes de teste destrutivo |
+
+---
+
+## `docs/07` é escrito mesmo em teste com banco de rascunho
+
+`_registrar_dicionario()` grava direto em `docs/07-dicionario-despesas.md`, um
+caminho fixo no repositório — **não** depende de `DB_PATH`. Então um teste que
+aponta `api.db.DB_PATH` para uma cópia do banco e confirma um batimento **suja
+o dicionário de verdade**, e como esse arquivo é o gabarito de
+`tools/avaliar_batimento.py`, a medição seguinte muda de resultado sozinha.
+
+Aconteceu: uma comparação "antes x depois" acusou um erro a mais que não
+existia — o gabarito tinha crescido no meio do experimento, com entradas que o
+próprio teste havia escrito.
+
+**Ao testar confirmação de batimento:** rode `git diff docs/07-...` no fim e
+remova o que o teste escreveu. E para comparar duas versões do código, garanta
+que o gabarito é o mesmo nas duas rodadas.

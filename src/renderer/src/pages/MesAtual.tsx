@@ -14,6 +14,10 @@ interface Lancamento {
   data_pagamento: string | null
   linha_digitavel: string | null
   tipo_codigo: 'boleto' | 'pix' | null
+  // esporádica não tem lançamento: a linha vem da transação (doc 14), o id é
+  // negativo e o valor não é editável — quem manda é o extrato
+  recorrencia: 'fixa' | 'esporadica'
+  descricao_transacao?: string
 }
 
 interface Resumo {
@@ -225,7 +229,15 @@ export function MesAtual() {
                     <tbody>
                       {items.map((l, i) => (
                         <tr key={l.id} className={cn('transition-colors', ROW_BG[l.status], i > 0 && 'border-t border-zinc-800/40')}>
-                          <td className="px-4 py-2.5 text-zinc-300 font-medium">{l.despesa_nome}</td>
+                          <td className="px-4 py-2.5 text-zinc-300 font-medium">
+                            {l.despesa_nome}
+                            {l.recorrencia === 'esporadica' && (
+                              <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
+                                title={l.descricao_transacao ?? 'Despesa esporádica'}>
+                                esporádica
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-2.5 text-right">
                             {editId === l.id ? (
                               <input autoFocus
@@ -234,6 +246,10 @@ export function MesAtual() {
                                 onBlur={() => saveValor(l)}
                                 onKeyDown={e => { if (e.key === 'Enter') saveValor(l); if (e.key === 'Escape') setEditId(null) }}
                               />
+                            ) : l.recorrencia === 'esporadica' ? (
+                              <span className="text-zinc-200 font-medium tabular-nums" title="Valor vem do extrato">
+                                {formatBRL(l.valor_real ?? l.valor_esperado)}
+                              </span>
                             ) : (
                               <button onClick={() => { setEditId(l.id); setEditVal(String(l.valor_real ?? l.valor_esperado)) }}
                                 className="text-zinc-200 hover:text-emerald-400 transition-colors font-medium tabular-nums">

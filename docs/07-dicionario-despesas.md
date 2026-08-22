@@ -42,6 +42,11 @@ conversa com o usuário.
 | `PAG TIT 348295769000` | cartao porto | — |
 | `PIX QRS SUL AMERICA` | convenio sogra | — |
 | `PAG TIT BANCO 237` | cartao azul | — |
+| `PAG BOLETO PORTO SEGURO   SEGURO SAUDE` | convenio pai e mae | — |
+| `PAG BOLETO ESTAPAR` | estacionamento allianz | — |
+| `PIX QRS MERCADO PAG01/08` | Cartao Mercado Pago | Teatro Maju |
+| `PAG BOLETO RED BALLOON S.A.` | red balloon malu | adiantamento deusa |
+| `PIX TRANSF DEUSA D12/08` | adiantamento deusa | — |
 
 ## Notas
 

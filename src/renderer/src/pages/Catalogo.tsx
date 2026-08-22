@@ -7,6 +7,7 @@ interface Despesa {
   id: number; nome: string; categoria_id: number | null; categoria_nome: string
   dia_vencimento: number | null; tipo_valor: string
   padrao_variabilidade: string; valor_padrao: number; regras_match: string; ativo: number
+  recorrencia: 'fixa' | 'esporadica'
 }
 
 interface Categoria { id: number; nome: string }
@@ -21,6 +22,7 @@ interface FormState {
   categoria_id: string
   tipo_valor: string
   padrao_variabilidade: string
+  recorrencia: string
   valor_padrao: string
   dia_vencimento: string
   palavras_chave: string
@@ -42,6 +44,7 @@ function despesaParaForm(d: Despesa): FormState {
     categoria_id: d.categoria_id != null ? String(d.categoria_id) : '',
     tipo_valor: d.tipo_valor,
     padrao_variabilidade: d.padrao_variabilidade,
+    recorrencia: d.recorrencia ?? 'fixa',
     valor_padrao: String(d.valor_padrao ?? ''),
     dia_vencimento: d.dia_vencimento != null ? String(d.dia_vencimento) : '',
     palavras_chave
@@ -87,7 +90,7 @@ export function Catalogo() {
   function abrirCriacao() {
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', valor_padrao: '', dia_vencimento: '', palavras_chave: '' })
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', valor_padrao: '', dia_vencimento: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {
@@ -99,6 +102,7 @@ export function Catalogo() {
       categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
       tipo_valor: form.tipo_valor,
       padrao_variabilidade: form.padrao_variabilidade,
+      recorrencia: form.recorrencia,
       valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
       dia_vencimento: form.dia_vencimento ? Number(form.dia_vencimento) : null,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
@@ -164,6 +168,14 @@ export function Catalogo() {
           <option value="fixo">Fixo</option>
         </select>
       </Field>
+      <Field label="Recorrência">
+        <select value={form.recorrencia} onChange={e => setForm(f => f && { ...f, recorrencia: e.target.value })}
+          title="Esporádica não gera previsão mensal — só aparece no mês em que acontecer"
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+          <option value="fixa">Todo mês</option>
+          <option value="esporadica">Esporádica</option>
+        </select>
+      </Field>
       <Field label="Valor previsto">
         <input value={form.valor_padrao} onChange={e => setForm(f => f && { ...f, valor_padrao: e.target.value })}
           className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-24 text-right" />
@@ -204,7 +216,15 @@ export function Catalogo() {
             {items.map((d, i) => (
               <Fragment key={d.id}>
                 <tr className={cn('transition-colors hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40', !d.ativo && 'opacity-40')}>
-                  <td className="px-4 py-2.5 text-zinc-300">{d.nome}</td>
+                  <td className="px-4 py-2.5 text-zinc-300">
+                    {d.nome}
+                    {d.recorrencia === 'esporadica' && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
+                        title="Não gera previsão mensal — só aparece no mês em que acontecer">
+                        esporádica
+                      </span>
+                    )}
+                  </td>
                   {mostrarCategoria && (
                     <td className="px-4 py-2.5 text-zinc-500 text-xs">{d.categoria_nome || 'Outros'}</td>
                   )}

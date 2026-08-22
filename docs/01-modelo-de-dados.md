@@ -34,7 +34,23 @@ Ao acrescentar coluna nova, siga esse mesmo padrão.
 | padrao_variabilidade | TEXT | `fixa` \| `variavel_sazonal` \| `variavel_nao_sazonal` \| `reajuste_anual` \| `anual` |
 | valor_padrao | REAL | Valor de referência |
 | regras_match | JSON | `{ palavras_chave: [], faixa_valor: [min, max], janela_dias: N, banco: "" }` |
+| recorrencia | TEXT | `fixa` \| `esporadica` — ver abaixo |
 | ativo | BOOLEAN | Despesas inativas não geram lançamentos |
+
+**`recorrencia`** responde "acontece todo mês?", que é diferente de
+`tipo_valor` ("o valor é sempre o mesmo?"). Conta de luz é `variavel` +
+`fixa`; consulta médica é `variavel` + `esporadica`.
+
+- `fixa` — abre lançamento previsto todo mês e cobra atenção se não aparecer
+  no extrato;
+- `esporadica` — **não gera lançamento**. A transação associada (com
+  `despesa_id` preenchido) é o registro do fato, o que permite N ocorrências
+  no mesmo mês — impossível via `lancamento`, que tem `UNIQUE(mes_ref,
+  despesa_id)`. Ver [14](14-receitas-e-esporadicas.md).
+
+Lançamentos antigos de uma despesa que virou esporádica **não são apagados**:
+são a série histórica que alimenta a previsão de valor. Eles apenas deixam de
+ser exibidos quando estão vazios.
 
 ---
 

@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS despesa (
   padrao_variabilidade TEXT NOT NULL DEFAULT 'variavel_nao_sazonal',
   valor_padrao         REAL,
   regras_match         TEXT NOT NULL DEFAULT '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}',
+  -- 'fixa' gera lançamento previsto todo mês e cobra atenção quando não
+  -- aparece no extrato; 'esporadica' não gera lançamento nenhum e só existe
+  -- no mês em que uma transação for associada a ela (doc 14)
+  recorrencia          TEXT NOT NULL DEFAULT 'fixa',
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -152,6 +156,13 @@ def init_db():
     # ambos ficam guardados em linha_digitavel, este campo só marca qual é
     if 'tipo_codigo' not in colunas:
         conn.execute('ALTER TABLE lancamento ADD COLUMN tipo_codigo TEXT')
+
+    # migração: recorrência (doc 14). O padrão 'fixa' preserva exatamente o
+    # comportamento de todas as despesas já cadastradas — só o que o usuário
+    # marcar como esporádica muda de vida.
+    colunas_despesa = [r[1] for r in conn.execute('PRAGMA table_info(despesa)').fetchall()]
+    if 'recorrencia' not in colunas_despesa:
+        conn.execute("ALTER TABLE despesa ADD COLUMN recorrencia TEXT NOT NULL DEFAULT 'fixa'")
 
     conn.commit()
     _seed_regras_transacao(conn)

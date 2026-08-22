@@ -1,7 +1,8 @@
 # Receitas, Esporádicas e Resgates — Especificação
 
-**Status:** especificado, **não implementado**. Este documento é o contrato a
-ser seguido; nada em `api/` ou `src/` reflete isto ainda.
+**Status:** **fase 1 implementada** (recorrência fixa/esporádica no lado das
+despesas). Fases 2 a 5 — todo o lado das receitas — seguem apenas
+especificadas. Este documento é o contrato; ver §9 para o que já saiu.
 
 Até aqui o app só enxerga **saídas recorrentes**. Este documento estende o
 modelo em três eixos, pedidos juntos porque são o mesmo problema visto de
@@ -432,7 +433,7 @@ Cada fase é utilizável sozinha e commitável separadamente.
 
 | Fase | Entrega | Por que nesta ordem |
 |---|---|---|
-| **1** | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
+| **1** ✅ | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
 | **2** | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
 | **3** | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
 | **4** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
@@ -465,3 +466,29 @@ Cada fase é utilizável sozinha e commitável separadamente.
    ~R$ 111 mil (o erro que este documento existe para evitar).
 6. `python tools/avaliar_batimento.py 2026-08` — o lado das despesas **não pode
    regredir** (hoje: 36 casados, 0 erro conhecido).
+
+---
+
+## 12. Desvios da especificação na fase 1
+
+Registrados aqui porque a spec vale como contrato — divergir sem dizer seria
+pior que divergir.
+
+**"+ Nova despesa" continua nascendo `fixa`**, e não `esporadica` como o §7
+previa. A spec argumentava "se fosse recorrente, já estaria no catálogo", o que
+não se sustenta enquanto o catálogo está sendo construído aos poucos: uma
+despesa recorrente criada a partir do batimento nasceria sem previsão nenhuma,
+e o usuário não teria como perceber. Fica `fixa`, e marcar esporádica é um
+gesto explícito no Catálogo.
+
+**Virar esporádica não apaga lançamento nenhum.** A primeira versão apagava os
+lançamentos vazios da despesa — e o teste mostrou que apagava os de **todos os
+meses**, não só o corrente, destruindo a série histórica que alimenta
+`_valor_previsto` (39 lançamentos viraram 0 num caso real). Corrigido: nada é
+apagado, e a consulta de `/api/lancamentos` apenas **esconde** o lançamento
+vazio de esporádica.
+
+**Dupla contagem, encontrada no teste.** Uma despesa que vira esporádica
+*depois* de já ter casado no mês apareceria duas vezes — pelo lançamento antigo
+e pela transação. `_esporadicas_do_mes()` ignora transação que já tenha
+lançamento apontando para ela.

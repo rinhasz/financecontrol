@@ -32,20 +32,26 @@ def upsert_catalogo():
     if data.get('id'):
         conn.execute("""
             UPDATE despesa SET nome=?, categoria_id=?, dia_vencimento=?, tipo_valor=?,
-            padrao_variabilidade=?, valor_padrao=?, regras_match=?, ativo=? WHERE id=?
+            padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, ativo=? WHERE id=?
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
-              data.get('valor_padrao'), data.get('regras_match'), data.get('ativo', 1), data['id']))
+              data.get('valor_padrao'), data.get('regras_match'),
+              data.get('recorrencia', 'fixa'), data.get('ativo', 1), data['id']))
         despesa_id = data['id']
     else:
         cur = conn.execute("""
-            INSERT INTO despesa (nome, categoria_id, dia_vencimento, tipo_valor, padrao_variabilidade, valor_padrao, regras_match)
-            VALUES (?,?,?,?,?,?,?)
+            INSERT INTO despesa (nome, categoria_id, dia_vencimento, tipo_valor, padrao_variabilidade, valor_padrao, recorrencia, regras_match)
+            VALUES (?,?,?,?,?,?,?,?)
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
-              data.get('valor_padrao'),
+              data.get('valor_padrao'), data.get('recorrencia', 'fixa'),
               data.get('regras_match', '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}')))
         despesa_id = cur.lastrowid
+
+    # Virar esporádica não apaga lançamento nenhum, de propósito: os
+    # lançamentos antigos são a série histórica que alimenta a previsão de
+    # valor (`_valor_previsto`), e vários deles são seed sem transação. Quem
+    # esconde a previsão vazia é o filtro da consulta em /api/lancamentos.
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'id': despesa_id})
