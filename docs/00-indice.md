@@ -30,20 +30,16 @@ batimento contra o extrato bancário.
 | 11 | [Catálogo](11-catalogo.md) | CRUD, importação de planilha, ordenação |
 | 12 | [Armadilhas e ambiente](12-armadilhas-e-ambiente.md) | IPv6, Windows, MSAL, robustez de tela |
 | 13 | [Histórico de pedidos](13-historico-de-pedidos.md) | O que foi pedido, o que foi feito e por quê |
-| 14 | [Receitas e esporádicas](14-receitas-e-esporadicas.md) | **Especificado, não implementado**: entradas, fixa vs esporádica, resgates |
+| 14 | [Receitas e esporádicas](14-receitas-e-esporadicas.md) | Entradas, fixa vs esporádica, resgates e estorno |
 
 Os docs 07 e 09 são **escritos pelo próprio app** conforme o usuário corrige
 batimentos e associa remetentes — não editar à mão.
 
 ## Estado atual
 
-**Implementado:** Função 1 completa (catálogo, competência, importação
-que substitui o período, batimento com preview, Mês Atual, resgate) e busca de boletos/Pix
-por email.
-
-**Especificado, aguardando implementação:** receitas, despesas/receitas
-esporádicas e classificação de resgates — ver doc 14. A tabela `receita` existe
-no schema no formato antigo e está vazia; o doc 14 a redefine.
+**Implementado:** Função 1 completa (catálogo, competência, importação que
+substitui o período, batimento com preview, Mês Atual, resgate), receitas com
+classificação por tipo (doc 14) e busca de boletos/Pix por email.
 
 **Não implementado:** Funções 2 (despesas extras), 3 (análise do mês) e 4
 (investimentos) — ver doc 06. A tabela `posicao_investimento` existe no schema

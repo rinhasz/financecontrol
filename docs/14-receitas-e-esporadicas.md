@@ -1,9 +1,9 @@
 # Receitas, Esporádicas e Resgates — Especificação
 
-**Status:** **fases 1 a 4 implementadas** — recorrência fixa/esporádica,
-catálogo de receitas com `tipo`, batimento de créditos com motor único, e o Mês
-Atual com renda, movimentação e o ciclo do resgate fechado. Falta só o estorno
-(fase 5). Este documento é o contrato; ver §9 para o que já saiu.
+**Status:** **implementado** (fases 1 a 5). Recorrência fixa/esporádica,
+catálogo de receitas com `tipo`, batimento de créditos com motor único, Mês
+Atual com renda e movimentação, ciclo do resgate fechado e estorno com sugestão
+automática. Onde o código divergir deste documento, ver §12.
 
 Até aqui o app só enxerga **saídas recorrentes**. Este documento estende o
 modelo em três eixos, pedidos juntos porque são o mesmo problema visto de
@@ -438,7 +438,7 @@ Cada fase é utilizável sozinha e commitável separadamente.
 | **2** ✅ | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
 | **3** ✅ | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
 | **4** ✅ | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
-| **5** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
+| **5** ✅ | Estorno com sugestão automática | Independente; último por ser o de menor uso |
 
 ---
 
@@ -545,3 +545,36 @@ bate com as próprias linhas.
 array. Consumidor único (Mês Atual), então não houve compatibilidade a manter —
 mas `/api/resumo` **manteve** as chaves antigas `receitas` e `resgate` como
 apelidos de `renda` e `resgateNecessario`.
+
+---
+
+## Fase 5 — o que a sugestão de estorno revelou
+
+A heurística (mesmo valor, ±3 dias, débito ainda sem despesa) achou **três**
+candidatos em agosto/2026, e só um é estorno de verdade:
+
+| Crédito | Débito apontado | Veredito |
+|---|---|---|
+| `CREDITO CARTAO ITAU` +5.709,27 | `INT PERS BLACK` −5.709,27 | **estorno** — cobrança refeita como boleto |
+| `PIX TRANSF INGRID` +260,00 | `PIX TRANSF Ingrid` −260,00 | provável devolução |
+| `PIX TRANSF MARCIA` +1.288,18 | `PAG BOLETO LELLO` −1.288,18 | **não é estorno** — é reembolso de alguém que pagou a parte dela |
+
+O terceiro caso é exatamente o falso positivo previsto na especificação: um
+reembolso legítimo é indistinguível de um estorno pelo par valor+data. Se a
+regra aplicasse sozinha, um débito real sumiria da conferência e a despesa
+correspondente ficaria órfã. **Por isso a sugestão aparece rotulada na linha e
+exige confirmação.**
+
+### Desvios da fase 5
+
+**Não existe `PATCH /api/transacoes/<id>/detalhe`.** O §8 previa esse endpoint
+para gravar `objetivo` e `estorna_transacao_id`. Eles são gravados dentro do
+`/api/batimento/confirmar`, junto do par, para "Confirmar tudo" continuar sendo
+a **única** escrita do fluxo — um segundo caminho de gravação quebraria o
+preview→confirmar que vale em toda a tela.
+
+**Cada lado do batimento devolve também `esporadicos`.** Item esporádico não
+tem lançamento, logo não aparece em `nao_encontrados` — e sem essa lista à
+parte, "estorno" e "resgate esporádico" seriam **inalcançáveis** na seção 3.
+Eles não são filtrados por "já associado" como os fixos, porque podem receber
+mais de uma transação no mesmo mês.

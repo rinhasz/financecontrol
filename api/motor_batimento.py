@@ -99,9 +99,17 @@ def carregar_lancamentos(conn, natureza: str, mes_ref: str) -> list:
 
 
 def carregar_transacoes(conn, natureza: str, ini: str, fim: str) -> list:
+    """Transações candidatas: do sinal certo, no período, ainda sem dono.
+
+    Fica de fora a transação **anulada por um estorno**: se um débito foi
+    estornado, ele não aconteceu, e oferecê-lo para casar com uma despesa faria
+    a despesa parecer paga por um dinheiro que voltou (doc 14 §5).
+    """
     c = cfg(natureza)
     return conn.execute(
-        f"SELECT * FROM transacao WHERE data BETWEEN ? AND ? AND tipo=? AND {c['fk']} IS NULL",
+        f"""SELECT * FROM transacao t
+            WHERE t.data BETWEEN ? AND ? AND t.tipo=? AND t.{c['fk']} IS NULL
+              AND NOT EXISTS (SELECT 1 FROM transacao e WHERE e.estorna_transacao_id = t.id)""",
         (ini, fim, c['tipo_tx'])
     ).fetchall()
 

@@ -483,13 +483,34 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
     for l in ja_gravados:
         detalhes.append(_detalhe_de_lancamento(l, natureza, ja_gravado=True))
 
+    tipos = {}
+    if natureza == 'receita':
+        # a tela precisa do tipo para saber quando pedir objetivo (resgate
+        # esporádico) ou qual débito anular (estorno)
+        tipos = {r['id']: r['tipo'] for r in conn.execute('SELECT id, tipo FROM receita')}
+
     nao_encontrados = [
         {'natureza': natureza, 'lancamento_id': l['id'], 'item_id': l['item_id'],
-         'item_nome': l['item_nome'], 'valor_esperado': l['valor_esperado']}
+         'item_nome': l['item_nome'], 'valor_esperado': l['valor_esperado'],
+         **({'tipo': tipos.get(l['item_id'])} if natureza == 'receita' else {})}
         for l in lancamentos if l['id'] not in lanc_sugerido
     ]
     sobrando = [{**dict(t), 'natureza': natureza, 'valor': abs(t['valor'])}
                 for t in transacoes if t['id'] not in tx_sugerida]
+
+    if natureza == 'receita':
+        _sugerir_estornos(conn, sobrando, ini, fim)
+
+    # Itens esporádicos não têm lançamento (doc 14), então não aparecem em
+    # `nao_encontrados` — e sem isto a tela não teria como oferecê-los na seção
+    # 3, deixando "estorno" e "resgate esporádico" inalcançáveis. Vão à parte
+    # justamente porque não são uma cobrança em aberto: não têm previsão.
+    esporadicos = [
+        {'natureza': natureza, 'item_id': r['id'], 'item_nome': r['nome'],
+         **({'tipo': r['tipo']} if natureza == 'receita' else {})}
+        for r in conn.execute(
+            f"SELECT * FROM {c['catalogo']} WHERE ativo=1 AND recorrencia='esporadica' ORDER BY nome")
+    ]
 
     return {
         # total é derivado das próprias listas devolvidas — casadas + em aberto.
@@ -498,8 +519,51 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
         'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,
+        'esporadicos': esporadicos,
         'transacoes_sobrando': sobrando,
     }
+
+
+def _sugerir_estornos(conn, creditos: list, ini: str, fim: str) -> None:
+    """Marca cada crédito que **parece** estornar um débito.
+
+    Um estorno chega com valor idêntico ao da cobrança e poucos dias depois.
+    Caso real de 03/08: `INT PERS BLACK` -5.709,27, `CREDITO CARTAO ITAU`
+    +5.709,27 e `PAG BOLETO ITAU UNIBANCO` -5.709,27 — cobrança estornada e
+    refeita como boleto, com o primeiro débito aparecendo como despesa
+    disponível para associar, o que já causou confusão real.
+
+    **Sugestão, nunca decisão.** Um reembolso legítimo de valor redondo se
+    parece com estorno, e marcar sozinho apagaria um débito real da conferência.
+    Quem confirma é o usuário.
+    """
+    from datetime import date as _date
+
+    debitos = conn.execute("""
+        SELECT t.id, t.data, t.descricao, t.valor FROM transacao t
+        WHERE t.data BETWEEN ? AND ? AND t.tipo='debito' AND t.despesa_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM transacao e WHERE e.estorna_transacao_id = t.id)
+    """, (ini, fim)).fetchall()
+
+    def dias(a, b):
+        return abs((_date.fromisoformat(a) - _date.fromisoformat(b)).days)
+
+    usados = set()
+    for cr in creditos:
+        alvo = None
+        for db in debitos:
+            if db['id'] in usados or abs(abs(db['valor']) - cr['valor']) > 0.005:
+                continue
+            if dias(db['data'], cr['data']) > 3:
+                continue
+            if alvo is None or dias(db['data'], cr['data']) < dias(alvo['data'], cr['data']):
+                alvo = db
+        if alvo is not None:
+            usados.add(alvo['id'])
+            cr['estorno_sugerido'] = {
+                'transacao_id': alvo['id'], 'descricao': alvo['descricao'],
+                'data': alvo['data'], 'valor': abs(alvo['valor']),
+            }
 
 
 def _detalhe_de_lancamento(l, natureza: str, status_anterior=None, ja_gravado=False) -> dict:
@@ -552,6 +616,17 @@ def confirmar_batimento():
 
         _persistir_par(conn, mes_ref, item_id, transacao_id, transacao, natureza)
         confirmados += 1
+
+        # Detalhes que existem por ocorrência, não no catálogo: o objetivo muda
+        # a cada resgate esporádico e o débito anulado muda a cada estorno.
+        # Gravados aqui, junto do par, para "Confirmar tudo" continuar sendo a
+        # única escrita do fluxo.
+        if par.get('objetivo') is not None:
+            conn.execute('UPDATE transacao SET objetivo=? WHERE id=?',
+                         (par['objetivo'] or None, transacao_id))
+        if par.get('estorna_transacao_id'):
+            conn.execute('UPDATE transacao SET estorna_transacao_id=? WHERE id=?',
+                         (par['estorna_transacao_id'], transacao_id))
 
         if item_id_sugerido and item_id_sugerido != item_id:
             # o usuário rejeitou esta sugestão: desaprende, senão a regra errada

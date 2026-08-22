@@ -27,6 +27,18 @@ interface DetalheMatch {
   // casamento já persistido numa confirmação anterior. Aparece aqui para poder
   // ser corrigido — só é regravado se a despesa for trocada.
   ja_gravado?: boolean
+  // detalhes por ocorrência (doc 14 §5): objetivo do resgate esporádico e qual
+  // débito este crédito anula
+  objetivo?: string | null
+  estorna_transacao_id?: number | null
+}
+
+/** Item do catálogo que não gera previsão mensal — não está em
+ *  `nao_encontrados` porque não tem lançamento, mas precisa ser oferecido. */
+interface Esporadico {
+  item_id: number
+  item_nome: string
+  tipo?: string
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -65,6 +77,7 @@ interface NaoEncontrado {
   item_id: number
   item_nome: string
   valor_esperado: number
+  tipo?: string
 }
 
 interface LadoBatimento {
@@ -72,6 +85,7 @@ interface LadoBatimento {
   total: number
   detalhes: DetalheMatch[]
   nao_encontrados: NaoEncontrado[]
+  esporadicos: Esporadico[]
   transacoes_sobrando: TransacaoSobrando[]
 }
 
@@ -81,6 +95,9 @@ interface TransacaoSobrando {
   descricao: string
   valor: number
   situacao: 'efetivada' | 'agendada'
+  // débito que este crédito parece anular — sugestão do backend, nunca aplicada
+  // sozinha (doc 14 §5)
+  estorno_sugerido?: { transacao_id: number; descricao: string; data: string; valor: number }
 }
 
 interface Despesa { id: number; nome: string }
@@ -124,6 +141,9 @@ export function Importacao({ active }: { active: boolean }) {
   // seção 2 — o inverso da 3: parte da despesa e escolhe a transação
   const [buscandoTx, setBuscandoTx] = useState<number | null>(null)
   const [txSelecionada, setTxSelecionada] = useState('')
+  // detalhes que só existem por ocorrência (doc 14 §5)
+  const [objetivoVal, setObjetivoVal] = useState('')
+  const [estornaVal, setEstornaVal] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [confirmado, setConfirmado] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -232,7 +252,8 @@ export function Importacao({ active }: { active: boolean }) {
   /** Casa transação + despesa e move o par das seções 2 e 3 para a 1.
    *  As duas direções de associação terminam aqui — só muda por qual ponta o
    *  usuário começou. Só mexe no estado local; nada é gravado até "Confirmar tudo". */
-  function associarPar(t: TransacaoSobrando, despesaId: number, despesaNome: string) {
+  function associarPar(t: TransacaoSobrando, despesaId: number, despesaNome: string,
+                       extras: { objetivo?: string; estorna_transacao_id?: number } = {}) {
     setLado(r => {
       const status = t.situacao === 'efetivada'
         ? (natureza === 'receita' ? 'recebido' as const : 'pago' as const)
@@ -246,7 +267,8 @@ export function Importacao({ active }: { active: boolean }) {
           lancamento_id: emAberto?.lancamento_id ?? 0, item_id: despesaId,
           item_id_sugerido: null, item_nome: despesaNome,
           valor_esperado: emAberto?.valor_esperado ?? Math.abs(t.valor),
-          transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status
+          transacao_id: t.id, descricao_transacao: t.descricao, valor: Math.abs(t.valor), data: t.data, status,
+          ...extras
         }]
       }
     })
@@ -271,10 +293,22 @@ export function Importacao({ active }: { active: boolean }) {
     return res.id as number
   }
 
-  function abrirAssociacao(transacaoId: number) {
-    setAssociando(associando === transacaoId ? null : transacaoId)
+  function abrirAssociacao(tx: TransacaoSobrando) {
+    setAssociando(associando === tx.id ? null : tx.id)
     setSelecionadaAssoc('')
     setNovaDespesaNomeAssoc('')
+    setObjetivoVal('')
+    // já vem preenchido com a sugestão: o gesto do usuário é confirmar ou
+    // trocar, não procurar do zero
+    setEstornaVal(tx.estorno_sugerido ? String(tx.estorno_sugerido.transacao_id) : '')
+  }
+
+  /** Tipo do item escolhido na seção 3 — decide se pede objetivo ou estorno. */
+  function tipoDoItem(id: string): string | undefined {
+    if (!id || id === 'nova') return undefined
+    const n = Number(id)
+    return lado?.nao_encontrados.find(x => x.item_id === n)?.tipo
+      ?? lado?.esporadicos.find(x => x.item_id === n)?.tipo
   }
 
   async function aplicarAssociacao(t: TransacaoSobrando) {
@@ -289,9 +323,14 @@ export function Importacao({ active }: { active: boolean }) {
       if (!selecionadaAssoc) return
       despesaId = Number(selecionadaAssoc)
       despesaNome = lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome
+        ?? lado?.esporadicos.find(x => x.item_id === despesaId)?.item_nome
         ?? despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
-    associarPar(t, despesaId, despesaNome)
+    const tipo = tipoDoItem(selecionadaAssoc)
+    associarPar(t, despesaId, despesaNome, {
+      ...(tipo === 'resgate_esporadico' && objetivoVal.trim() ? { objetivo: objetivoVal.trim() } : {}),
+      ...(tipo === 'estorno' && estornaVal ? { estorna_transacao_id: Number(estornaVal) } : {})
+    })
     setAssociando(null)
   }
 
@@ -325,7 +364,8 @@ export function Importacao({ active }: { active: boolean }) {
       const pares = (['despesa', 'receita'] as Natureza[]).flatMap(n =>
         pendentesDe(resultado?.[n]).map(d => ({
           natureza: n, transacao_id: d.transacao_id,
-          item_id: d.item_id, item_id_sugerido: d.item_id_sugerido
+          item_id: d.item_id, item_id_sugerido: d.item_id_sugerido,
+          objetivo: d.objetivo, estorna_transacao_id: d.estorna_transacao_id
         })))
       const res = await api.batimento.confirmar(mesRef, pares)
       setConfirmado(res.confirmados ?? pares.length)
@@ -356,12 +396,24 @@ export function Importacao({ active }: { active: boolean }) {
       id: t.id,
       nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
     }))
-  const opcoesDespesa = (lado?.nao_encontrados ?? [])
-    .filter(n => !despesasAssociadas.has(n.item_id))
-    .map(n => ({
-      id: n.item_id,
-      nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome
-    }))
+  // Débitos que um estorno pode anular: os que sobraram do lado da despesa.
+  // Vêm do outro lado do batimento, não do lado corrente.
+  const opcoesDebito = (resultado?.despesa.transacoes_sobrando ?? []).map(t => ({
+    id: t.id,
+    nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+  }))
+
+  const opcoesDespesa = [
+    ...(lado?.nao_encontrados ?? [])
+      .filter(n => !despesasAssociadas.has(n.item_id))
+      .map(n => ({
+        id: n.item_id,
+        nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome
+      })),
+    // esporádicos podem receber mais de uma transação no mesmo mês, então não
+    // são filtrados por "já associado" como os fixos
+    ...(lado?.esporadicos ?? []).map(e => ({ id: e.item_id, nome: `${e.item_nome}  ·  esporádica` }))
+  ]
 
   return (
     <div className="flex flex-col h-full pt-3">
@@ -674,11 +726,19 @@ export function Importacao({ active }: { active: boolean }) {
                             <td className="px-4 py-2 text-zinc-500 text-xs tabular-nums">
                               {new Date(tx.data + 'T00:00:00').toLocaleDateString('pt-BR')}
                             </td>
-                            <td className="px-4 py-2 text-zinc-300">{tx.descricao}</td>
+                            <td className="px-4 py-2 text-zinc-300">
+                              {tx.descricao}
+                              {tx.estorno_sugerido && (
+                                <span className="ml-2 text-[11px] text-amber-500/80"
+                                  title={`Mesmo valor de "${tx.estorno_sugerido.descricao}" em ${new Date(tx.estorno_sugerido.data + 'T00:00:00').toLocaleDateString('pt-BR')} — pode ser estorno`}>
+                                  parece estornar "{tx.estorno_sugerido.descricao}"
+                                </span>
+                              )}
+                            </td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(tx.valor))}</td>
                             <td className="px-4 py-2 text-right">
                               {confirmado === null && (
-                                <button onClick={() => abrirAssociacao(tx.id)}
+                                <button onClick={() => abrirAssociacao(tx)}
                                   className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
                                   {t.associarItem}
                                 </button>
@@ -699,8 +759,20 @@ export function Importacao({ active }: { active: boolean }) {
                                       placeholder={`Nome da nova ${t.item}`} autoFocus
                                       className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
                                   )}
+                                  {tipoDoItem(selecionadaAssoc) === 'resgate_esporadico' && (
+                                    <input value={objetivoVal} onChange={e => setObjetivoVal(e.target.value)}
+                                      placeholder="Para quê? ex: compra do carro" autoFocus
+                                      className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-56" />
+                                  )}
+                                  {tipoDoItem(selecionadaAssoc) === 'estorno' && (
+                                    <DespesaPicker despesas={opcoesDebito} value={estornaVal} onChange={setEstornaVal}
+                                      placeholder="Qual débito este crédito anula?"
+                                      vazio="Nenhum débito sem despesa neste mês"
+                                      className="w-80" />
+                                  )}
                                   <button onClick={() => aplicarAssociacao(tx)}
-                                    disabled={!selecionadaAssoc || (selecionadaAssoc === 'nova' && !novaDespesaNomeAssoc.trim())}
+                                    disabled={!selecionadaAssoc || (selecionadaAssoc === 'nova' && !novaDespesaNomeAssoc.trim())
+                                      || (tipoDoItem(selecionadaAssoc) === 'estorno' && !estornaVal)}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
                                   </button>
