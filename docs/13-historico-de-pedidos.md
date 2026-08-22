@@ -135,6 +135,19 @@ não mente quando essas listas crescem.
 Corrigido o caso, o batimento seguinte já casou `Teatro Maju` com a Rede
 Batista sozinho.
 
+**"Preciso reimportar só para reassociar, e a busca é ruim"** (2026-08)
+Dois pedidos, três causas.
+
+→ Reassociar não precisa de arquivo (as transações já estão no banco): botões
+"Rebater sem importar" no passo 1 e "Rebater de novo" depois de confirmar.
+
+→ "A busca não acha" eram **duas** coisas. A lista era **cortada** pelo
+`overflow-hidden` das tabelas — passou a ser renderizada em portal com
+`position: fixed`, maior, e abrindo para cima perto do rodapé. E o filtro era
+`includes` literal, que não acha "educação" em `EDUCACAO` nem "america" em
+`AMERICA10/08` — agora cada termo é testado sem acento e também contra uma
+versão só com letras e dígitos.
+
 ---
 
 ## Catálogo

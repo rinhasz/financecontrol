@@ -365,6 +365,19 @@ export function Importacao({ active }: { active: boolean }) {
               className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
               {loading ? 'Processando...' : 'Importar'}
             </button>
+
+            {/* Reassociar não precisa de arquivo: as transações do mês já estão
+                no banco desde a última importação. Exigir o extrato de novo só
+                para corrigir um vínculo era trabalho à toa. */}
+            <div className="pt-4 border-t border-zinc-800/60">
+              <p className="text-sm text-zinc-500 mb-2">
+                Já importou o extrato e só quer revisar as associações?
+              </p>
+              <button onClick={rodarBatimento} disabled={loading}
+                className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-100 transition-colors">
+                {loading ? 'Batendo...' : `Rebater ${mesRef} sem importar`}
+              </button>
+            </div>
           </div>
         )}
 
@@ -631,12 +644,19 @@ export function Importacao({ active }: { active: boolean }) {
             ) : (
               <>
                 <p className="text-sm text-zinc-500">
-                  Vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar os lançamentos em aberto.
+                  Corrigir um vínculo costuma liberar transação para outra despesa — vale rodar de novo.
+                  Depois, vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar o que ficou em aberto.
                 </p>
-                <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null); setConfirmado(null) }}
-                  className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
-                  Nova importação
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={rodarBatimento} disabled={loading}
+                    className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                    {loading ? 'Batendo...' : 'Rebater de novo'}
+                  </button>
+                  <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null); setConfirmado(null) }}
+                    className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
+                    Nova importação
+                  </button>
+                </div>
               </>
             )}
           </div>

@@ -298,6 +298,40 @@ Ainda na revisão:
 > transações, não despesas (daí a prop `vazio`, para o estado vazio não dizer
 > "nenhuma despesa encontrada" quando a lista é de débitos).
 
+### Rebater sem reimportar
+
+As transações do mês já estão no banco desde a última importação — refazer
+associação não precisa de arquivo. Dois atalhos evitam o ciclo inútil de
+reenviar o extrato só para corrigir um vínculo:
+
+- **"Rebater `AAAA-MM` sem importar"** no passo 1, que pula direto para a
+  revisão;
+- **"Rebater de novo"** depois de confirmar. Vale a pena: corrigir um vínculo
+  costuma liberar uma transação que o batimento então casa sozinho (foi o que
+  aconteceu com `Teatro Maju` assim que o Mercado Pago saiu do lugar dele).
+
+### A lista de busca (`DespesaPicker`)
+
+Dois problemas separados apareciam como "a busca é ruim":
+
+**A lista era cortada.** O seletor vive dentro de tabelas com
+`overflow-hidden`, então a caixa ancorada no fluxo normal era clipada na borda
+da tabela — sobrava uma faixa impossível de rolar. Agora ela é renderizada em
+**portal** com `position: fixed`, medida a partir do `getBoundingClientRect()`
+do input (remedido no `scroll` com `capture: true`, porque quem rola é o
+container interno, não a janela). Abre para cima quando a linha está perto do
+rodapé, e tem largura mínima de 460px — rótulo de transação é
+`data · descrição · valor` e não cabia em 288px.
+
+**A busca era literal.** `includes` cru não acha "educação" em `EDUCACAO`, nem
+"america" em `AMERICA10/08`. Cada termo agora é testado contra duas versões do
+rótulo: sem acento e com pontuação virando espaço, **e** uma versão só com
+letras e dígitos. É o que faz `038397` achar `FINANC IMOBILIARIO 038/397` e
+`15508` achar `R$ 155,08`.
+
+Teclado: setas navegam, Enter escolhe o destacado (ou "+ Nova despesa" no fim),
+Esc fecha.
+
 Correções alimentam `docs/07-dicionario-despesas.md` via `_registrar_dicionario()`,
 para o histórico de "esse texto do extrato é essa despesa" ficar legível.
 
