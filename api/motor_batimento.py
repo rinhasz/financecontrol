@@ -101,15 +101,17 @@ def carregar_lancamentos(conn, natureza: str, mes_ref: str) -> list:
 def carregar_transacoes(conn, natureza: str, ini: str, fim: str) -> list:
     """Transações candidatas: do sinal certo, no período, ainda sem dono.
 
-    Fica de fora a transação **anulada por um estorno**: se um débito foi
-    estornado, ele não aconteceu, e oferecê-lo para casar com uma despesa faria
-    a despesa parecer paga por um dinheiro que voltou (doc 14 §5).
+    Débito estornado **continua candidato**. Numa versão anterior ele era
+    excluído, na ideia de que "estornado = não aconteceu" — mas o gasto e a
+    devolução são dois fatos reais, e o que se quer é que se anulem no
+    fechamento, não que um deles suma do extrato. Classificar o débito é
+    inclusive o que permite descobrir a qual despesa o estorno se refere
+    (doc 14 §5).
     """
     c = cfg(natureza)
     return conn.execute(
-        f"""SELECT * FROM transacao t
-            WHERE t.data BETWEEN ? AND ? AND t.tipo=? AND t.{c['fk']} IS NULL
-              AND NOT EXISTS (SELECT 1 FROM transacao e WHERE e.estorna_transacao_id = t.id)""",
+        f"SELECT * FROM transacao t "
+        f"WHERE t.data BETWEEN ? AND ? AND t.tipo=? AND t.{c['fk']} IS NULL",
         (ini, fim, c['tipo_tx'])
     ).fetchall()
 

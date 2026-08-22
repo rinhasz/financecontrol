@@ -54,7 +54,8 @@ export const api = {
   lancamentos: {
     list: (mes: string) => get(`/api/lancamentos?mes=${mes}`),
     update: (id: number, fields: Record<string, unknown>) => patch(`/api/lancamentos/${id}`, fields),
-    resumo: (mes: string) => get(`/api/resumo?mes=${mes}`)
+    resumo: (mes: string) => get(`/api/resumo?mes=${mes}`),
+    consolidado: (mes: string) => get(`/api/consolidado?mes=${mes}`)
   },
   config: {
     get: () => get('/api/config'),

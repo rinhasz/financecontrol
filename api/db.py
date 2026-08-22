@@ -272,6 +272,13 @@ def init_db():
         conn.execute('ALTER TABLE transacao ADD COLUMN objetivo TEXT')
     if 'estorna_transacao_id' not in colunas_transacao:
         conn.execute('ALTER TABLE transacao ADD COLUMN estorna_transacao_id INTEGER REFERENCES transacao(id)')
+    if 'estorna_despesa_id' not in colunas_transacao:
+        # O vínculo que interessa a longo prazo é estorno -> DESPESA, não
+        # estorno -> linha do extrato. Quem estorna anula um gasto, e é contra o
+        # gasto que o valor se compensa. A linha do extrato é só o caminho mais
+        # curto quando ela ainda não foi classificada; assim que for, este campo
+        # é preenchido por propagação e passa a ser a fonte de verdade.
+        conn.execute('ALTER TABLE transacao ADD COLUMN estorna_despesa_id INTEGER REFERENCES despesa(id)')
 
     conn.commit()
     _seed_regras_transacao(conn)

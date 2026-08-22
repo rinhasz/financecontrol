@@ -558,7 +558,7 @@ def _sugerir_estornos(conn, creditos: list, ini: str, fim: str) -> None:
 
     debitos = conn.execute("""
         SELECT t.id, t.data, t.descricao, t.valor FROM transacao t
-        WHERE t.data BETWEEN ? AND ? AND t.tipo='debito' AND t.despesa_id IS NULL
+        WHERE t.data BETWEEN ? AND ? AND t.tipo='debito'
           AND NOT EXISTS (SELECT 1 FROM transacao e WHERE e.estorna_transacao_id = t.id)
     """, (ini, fim)).fetchall()
 
@@ -635,11 +635,12 @@ def confirmar_batimento():
         # crédito vira uma entrada solta e o débito estornado continua contando
         # como despesa paga. A regra é validada aqui, e não só na tela, porque
         # é a gravação que precisa ser confiável.
-        if natureza == 'receita' and item['tipo'] == 'estorno' and not par.get('estorna_transacao_id'):
+        if (natureza == 'receita' and item['tipo'] == 'estorno'
+                and not par.get('estorna_transacao_id') and not par.get('estorna_despesa_id')):
             conn.close()
             return jsonify({
                 'ok': False,
-                'msg': f'"{item["nome"]}" é do tipo estorno: informe qual débito ele anula.',
+                'msg': f'"{item["nome"]}" é do tipo estorno: informe qual despesa ou lançamento ele anula.',
                 'transacao_id': transacao_id,
             }), 400
 
@@ -653,19 +654,18 @@ def confirmar_batimento():
         if par.get('objetivo') is not None:
             conn.execute('UPDATE transacao SET objetivo=? WHERE id=?',
                          (par['objetivo'] or None, transacao_id))
-        if par.get('estorna_transacao_id'):
-            anulada = par['estorna_transacao_id']
-            conn.execute('UPDATE transacao SET estorna_transacao_id=? WHERE id=?',
-                         (anulada, transacao_id))
-            # Débito estornado não aconteceu: se alguma despesa estava marcada
-            # como paga por ele, volta para "em aberto" — senão o mês fecharia
-            # com um pagamento que o banco devolveu. O vínculo da transação
-            # também cai, para ela não disputar casamento.
+        alvo_tx = par.get('estorna_transacao_id')
+        alvo_desp = par.get('estorna_despesa_id')
+        if alvo_tx or alvo_desp:
+            # Apontar para a linha do extrato já revela a despesa, quando ela
+            # tiver sido classificada. É esse vínculo — estorno -> despesa —
+            # que fica; o da linha é só o caminho.
+            if alvo_tx and not alvo_desp:
+                dono = conn.execute('SELECT despesa_id FROM transacao WHERE id=?', (alvo_tx,)).fetchone()
+                alvo_desp = dono['despesa_id'] if dono else None
             conn.execute(
-                "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, "
-                'valor_real=NULL, data_pagamento=NULL WHERE transacao_id=?', (anulada,))
-            conn.execute("UPDATE transacao SET despesa_id=NULL, classificacao='extra' WHERE id=?",
-                         (anulada,))
+                'UPDATE transacao SET estorna_transacao_id=?, estorna_despesa_id=? WHERE id=?',
+                (alvo_tx, alvo_desp, transacao_id))
 
         if item_id_sugerido and item_id_sugerido != item_id:
             # o usuário rejeitou esta sugestão: desaprende, senão a regra errada
@@ -761,6 +761,14 @@ def _persistir_par(conn, mes_ref: str, item_id: int, transacao_id: int, transaca
         f'UPDATE transacao SET {fk}=?, classificacao=? WHERE id=?',
         (item_id, classificacao, transacao_id)
     )
+    # Se algum estorno apontava para esta linha do extrato sem saber a despesa,
+    # agora sabe. É a propagação que garante o vínculo estorno -> despesa
+    # independentemente da ordem em que o usuário fez as duas associações.
+    if natureza == 'despesa':
+        conn.execute(
+            'UPDATE transacao SET estorna_despesa_id=? WHERE estorna_transacao_id=? AND estorna_despesa_id IS NULL',
+            (item_id, transacao_id))
+
     # Confirmar é o usuário dizendo "esse texto é esse item" — vale tanto quando
     # ele corrigiu quanto quando aceitou a sugestão. É o que faz o batimento do
     # mês que vem já nascer certo.

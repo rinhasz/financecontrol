@@ -59,6 +59,24 @@ const STATUS_RECEITA_LABEL: Record<string, string> = {
   recebido: 'Recebido', previsto: 'Previsto', nao_encontrado: 'Não recebido'
 }
 
+type Visao = 'analitica' | 'consolidada'
+
+/** Linha da visão consolidada: uma por item, com as ocorrências somadas e o
+ *  estorno já abatido. */
+interface DespesaConsolidada {
+  item_id: number; item_nome: string; categoria_nome: string | null
+  bruto: number; estornado: number; liquido: number; ocorrencias: number
+}
+interface ReceitaConsolidada {
+  item_id: number; item_nome: string; tipo: string
+  total: number; ocorrencias: number; renda: boolean
+}
+interface Consolidado {
+  despesas: DespesaConsolidada[]
+  receitas: ReceitaConsolidada[]
+  totais: { despesas: number; estornado: number; renda: number; movimentacao: number }
+}
+
 const STATUS_STYLE = {
   pago:           'bg-emerald-950/50 text-emerald-400 border-emerald-800/50',
   agendado:       'bg-blue-950/50 text-blue-400 border-blue-800/50',
@@ -75,6 +93,8 @@ export function MesAtual() {
   const [mesRef, setMesRef] = useState(currentMesRef())
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [receitas, setReceitas] = useState<Receita[]>([])
+  const [visao, setVisao] = useState<Visao>('analitica')
+  const [consolidado, setConsolidado] = useState<Consolidado | null>(null)
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [loading, setLoading] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
@@ -88,14 +108,16 @@ export function MesAtual() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [data, res, cfg] = await Promise.all([
+      const [data, res, cfg, cons] = await Promise.all([
         api.lancamentos.list(mesRef),
         api.lancamentos.resumo(mesRef),
-        api.config.get()
+        api.config.get(),
+        api.lancamentos.consolidado(mesRef)
       ])
       setLancamentos(data.despesas ?? [])
       setReceitas(data.receitas ?? [])
       setResumo(res)
+      setConsolidado(cons)
       setSaldoVal(String(res.saldo))
       setDiaSalarioVal(String(cfg.dia_recebimento_salario ?? '27'))
     } finally {
@@ -171,6 +193,19 @@ export function MesAtual() {
           </button>
         </div>
         <div className="flex items-center gap-4">
+          {/* duas perguntas diferentes: a analítica mostra o mês como aconteceu,
+              linha a linha, para conferir contra o extrato; a consolidada
+              responde quanto cada item custou de fato, somando repetições e
+              abatendo estorno. */}
+          <div className="flex rounded-md border border-zinc-700 overflow-hidden">
+            {(['analitica', 'consolidada'] as Visao[]).map(v => (
+              <button key={v} onClick={() => setVisao(v)}
+                className={cn('px-3 py-1.5 text-sm transition-colors',
+                  visao === v ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200')}>
+                {v === 'analitica' ? 'Analítica' : 'Consolidada'}
+              </button>
+            ))}
+          </div>
           {resumo && (
             <span className="text-xs text-zinc-500 tabular-nums"
               title="A competência vai do dia do salário até a véspera do próximo">
@@ -267,6 +302,8 @@ export function MesAtual() {
       <div className="flex-1 overflow-auto px-6 pb-6">
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500">Carregando...</div>
+        ) : visao === 'consolidada' ? (
+          <BlocoConsolidado dados={consolidado} />
         ) : (
           <div className="space-y-3">
             {/* Entradas vêm antes das saídas: é a ordem em que o mês acontece.
@@ -355,6 +392,107 @@ export function MesAtual() {
     </div>
   )
 }
+
+function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
+  if (!dados) return <div className="text-zinc-500 text-sm">Sem dados.</div>
+  const { despesas, receitas, totais } = dados
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-4 gap-3">
+        <Card label="Renda"        value={totais.renda}        color="emerald" />
+        <Card label="Despesas"     value={totais.despesas}     color="zinc" />
+        <Card label="Estornado"    value={totais.estornado}    color="amber" />
+        <Card label="Movimentação" value={totais.movimentacao} color="blue" />
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Despesas do mês</span>
+          <div className="flex-1 h-px bg-zinc-800" />
+          <span className="text-xs text-zinc-600">{formatBRL(totais.despesas)}</span>
+        </div>
+        <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 bg-zinc-900/40">
+                <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Categoria</th>
+                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Bruto</th>
+                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Estornado</th>
+                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Líquido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {despesas.map((d, i) => (
+                <tr key={d.item_id} className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                  <td className="px-4 py-2.5 text-zinc-300 font-medium">
+                    {d.item_nome}
+                    {d.ocorrencias > 1 && (
+                      <span className="ml-2 text-[10px] text-sky-500/70" title="Ocorrências somadas neste mês">
+                        {d.ocorrencias}x
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-zinc-500 text-xs">{d.categoria_nome || 'Outros'}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-zinc-500">{formatBRL(d.bruto)}</td>
+                  <td className={cn('px-4 py-2.5 text-right tabular-nums',
+                    d.estornado > 0 ? 'text-amber-400' : 'text-zinc-700')}>
+                    {d.estornado > 0 ? `− ${formatBRL(d.estornado)}` : '—'}
+                  </td>
+                  {/* líquido negativo é dinheiro que voltou a mais do que saiu —
+                      acontece quando o estorno é de um gasto de outro mês */}
+                  <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium',
+                    d.liquido < 0 ? 'text-emerald-400' : 'text-zinc-200')}
+                    title={d.liquido < 0 ? 'Voltou mais do que saiu neste mês' : undefined}>
+                    {formatBRL(d.liquido)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {totais.estornado > 0 && (
+          <p className="text-xs text-zinc-500 mt-1.5">
+            Despesa integralmente estornada não aparece: custou zero no mês.
+          </p>
+        )}
+      </div>
+
+      {receitas.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-emerald-500/80 uppercase tracking-wider">Entradas</span>
+            <div className="flex-1 h-px bg-zinc-800" />
+          </div>
+          <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+            <table className="w-full text-sm">
+              <tbody>
+                {receitas.map((r, i) => (
+                  <tr key={r.item_id} className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40',
+                    !r.renda && 'opacity-70')}>
+                    <td className="px-4 py-2.5 text-zinc-300 font-medium">
+                      {r.item_nome}
+                      {r.ocorrencias > 1 && <span className="ml-2 text-[10px] text-sky-500/70">{r.ocorrencias}x</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-zinc-500 text-xs">
+                      {TIPO_LABEL[r.tipo] ?? r.tipo}{!r.renda && ' · não é renda'}
+                    </td>
+                    <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium',
+                      r.renda ? 'text-emerald-400' : 'text-zinc-400')}>
+                      {formatBRL(r.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function BlocoReceitas({ titulo, itens, total, esmaecido }: {
   titulo: string; itens: Receita[]; total: number; esmaecido?: boolean

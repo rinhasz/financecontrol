@@ -176,6 +176,119 @@ def _esporadicas_do_mes(conn, mes_ref: str, natureza: str = 'despesa'):
     } for r in rows]
 
 
+@bp.route('/consolidado')
+def consolidado():
+    """Visão consolidada do mês: uma linha por item, com estorno já abatido.
+
+    A visão analítica (/api/lancamentos) mostra o mês como ele aconteceu — cada
+    cobrança numa linha, e um estorno aparecendo tanto no grupo de despesas
+    (o gasto) quanto no de receitas (a devolução). É o que se quer para
+    conferir contra o extrato.
+
+    Esta aqui responde outra pergunta: **quanto essa despesa custou de fato no
+    mês**. Então agrupa as ocorrências repetidas e subtrai o que voltou. Uma
+    despesa integralmente estornada custou zero e **não aparece** — mostrá-la
+    zerada seria ruído. Estorno parcial deixa só o líquido.
+    """
+    mes_ref = request.args.get('mes', '')
+    conn = get_db()
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '26'))
+    ini, fim = periodo_competencia(mes_ref, dia_corte)
+
+    # --- saídas: soma das ocorrências de cada despesa ---
+    grupos = {}
+    for l in _todas_despesas_do_mes(conn, mes_ref):
+        g = grupos.setdefault(l['item_id'], {
+            'item_id': l['item_id'], 'item_nome': l['item_nome'],
+            'categoria_nome': l['categoria_nome'], 'bruto': 0.0,
+            'ocorrencias': 0, 'estornado': 0.0,
+        })
+        g['bruto'] += l['valor_real'] if l['status'] == 'pago' else l['valor_esperado']
+        g['ocorrencias'] += 1
+
+    # --- estornos com despesa conhecida abatem daquela despesa ---
+    estornos = conn.execute("""
+        SELECT t.estorna_despesa_id as despesa_id, t.valor, t.descricao, d.nome as despesa_nome
+        FROM transacao t
+        LEFT JOIN despesa d ON d.id = t.estorna_despesa_id
+        JOIN receita r ON r.id = t.receita_id
+        WHERE r.tipo = 'estorno' AND t.data BETWEEN ? AND ?
+          AND t.estorna_despesa_id IS NOT NULL
+    """, (ini, fim)).fetchall()
+
+    for e in estornos:
+        g = grupos.get(e['despesa_id'])
+        if g is None:
+            # a despesa não teve gasto neste mês, mas a devolução chegou aqui:
+            # vira crédito, e some do bloco de saídas
+            g = grupos.setdefault(e['despesa_id'], {
+                'item_id': e['despesa_id'], 'item_nome': e['despesa_nome'] or '?',
+                'categoria_nome': None, 'bruto': 0.0, 'ocorrencias': 0, 'estornado': 0.0,
+            })
+        g['estornado'] += abs(e['valor'])
+
+    despesas = []
+    total_estornado = 0.0
+    for g in grupos.values():
+        liquido = round(g['bruto'] - g['estornado'], 2)
+        # contabiliza antes de filtrar: o abatimento total é o que mais importa
+        # mostrar, e some justamente nos casos em que a linha é removida
+        total_estornado += g['estornado']
+        if abs(liquido) < 0.01 and g['estornado'] > 0:
+            continue  # anulou por completo — não aparece
+        despesas.append({**g, 'liquido': liquido})
+    despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
+
+    # --- entradas: agrupa por item; estorno já abatido acima não entra aqui ---
+    abatidos = {e['despesa_id'] for e in estornos}
+    from .receitas import conta_como_renda
+
+    grupos_r = {}
+    for r in _receitas_do_mes(conn, mes_ref):
+        # estorno que já compensou uma despesa não pode ser contado de novo
+        if r['tipo'] == 'estorno' and abatidos:
+            tx = r.get('transacao_id')
+            if tx and conn.execute(
+                    'SELECT estorna_despesa_id FROM transacao WHERE id=?', (tx,)).fetchone()['estorna_despesa_id']:
+                continue
+        g = grupos_r.setdefault(r['item_id'], {
+            'item_id': r['item_id'], 'item_nome': r['item_nome'], 'tipo': r['tipo'],
+            'total': 0.0, 'ocorrencias': 0, 'renda': conta_como_renda(r['tipo']),
+        })
+        g['total'] += r['valor_real'] if r['valor_real'] is not None else r['valor_esperado']
+        g['ocorrencias'] += 1
+
+    receitas = sorted(grupos_r.values(), key=lambda x: (x['tipo'], x['item_nome'].lower()))
+    conn.close()
+
+    return jsonify({
+        'periodo': {'ini': ini, 'fim': fim},
+        'despesas': despesas,
+        'receitas': receitas,
+        'totais': {
+            'despesas': round(sum(d['liquido'] for d in despesas), 2),
+            'estornado': round(total_estornado, 2),
+            'renda': round(sum(r['total'] for r in receitas if r['renda']), 2),
+            'movimentacao': round(sum(r['total'] for r in receitas if not r['renda']), 2),
+        },
+    })
+
+
+def _todas_despesas_do_mes(conn, mes_ref: str) -> list:
+    """A mesma lista que /api/lancamentos devolve no lado das saídas."""
+    rows = conn.execute("""
+        SELECT l.*, d.nome as item_nome, l.despesa_id as item_id,
+               c.nome as categoria_nome
+        FROM lancamento l
+        JOIN despesa d ON d.id = l.despesa_id
+        LEFT JOIN categoria c ON c.id = d.categoria_id
+        WHERE l.mes_ref = ?
+          AND (d.ativo = 1 OR l.status != 'nao_encontrado')
+          AND (d.recorrencia = 'fixa' OR l.status != 'nao_encontrado')
+    """, (mes_ref,)).fetchall()
+    return [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref, 'despesa')
+
+
 @bp.route('/lancamentos/<int:lid>', methods=['PATCH'])
 def update_lancamento(lid):
     data = request.json or {}

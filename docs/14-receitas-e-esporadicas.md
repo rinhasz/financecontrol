@@ -690,3 +690,60 @@ continua existindo para quando a heurística não sugere nada.
 Enquanto não existir nenhuma receita com Tipo = Estorno, a linha diz o que
 falta em vez de simplesmente não oferecer a ação:
 *"parece estornar X — falta uma receita com Tipo = Estorno"*.
+
+---
+
+## O vínculo do estorno é com a DESPESA
+
+Quem estorna anula um **gasto**, e é contra o gasto que o valor se compensa. Só
+que, na hora de classificar o crédito, o usuário pode ainda não ter classificado
+o débito — então há dois caminhos para o mesmo vínculo:
+
+| Escolha | Grava | Quando |
+|---|---|---|
+| **Despesa** | `transacao.estorna_despesa_id` | já se sabe qual despesa foi estornada |
+| **Lançamento** | `transacao.estorna_transacao_id` | a linha do extrato ainda não foi classificada |
+
+**Pela linha, a despesa é descoberta por propagação.** Se o débito já tem dono,
+`estorna_despesa_id` é preenchido na hora. Se não tem, é preenchido depois, no
+momento em que a linha for classificada (`_persistir_par`). O resultado é o
+mesmo **em qualquer ordem** que o usuário faça as duas associações — e o vínculo
+com a despesa fica gravado para sempre, que é o que a consolidação consome.
+
+A tela oferece as duas opções lado a lado, na própria classificação da entrada.
+Havendo sugestão automática, ela é de uma *linha* — então "Lançamento" já vem
+escolhido e preenchido.
+
+### Reversão: débito estornado continua sendo despesa
+
+Uma versão anterior **desfazia** o vínculo do débito ao confirmar o estorno, na
+ideia de que "estornado = não aconteceu". Está desfeito. O gasto e a devolução
+são **dois fatos reais**, e o que se quer é que se anulem no fechamento — não
+que um deles suma do extrato. Classificar o débito é inclusive o que revela a
+despesa a que o estorno se refere.
+
+Pelo mesmo motivo, débito estornado voltou a ser candidato do batimento.
+
+---
+
+## Duas visões do mês
+
+| | Analítica | Consolidada |
+|---|---|---|
+| Pergunta | como o mês aconteceu | quanto cada item custou |
+| Ocorrências repetidas | uma linha cada | somadas, com marca `3x` |
+| Estorno | aparece nos **dois** blocos: o gasto nas saídas, a devolução nas entradas | abatido da despesa que anula |
+| Serve para | conferir contra o extrato | fechar o mês |
+
+Na consolidada, despesa **integralmente** estornada não aparece: custou zero, e
+mostrá-la zerada seria ruído. Estorno parcial deixa só o líquido. Estorno cuja
+despesa não teve gasto neste mês produz líquido **negativo** — voltou mais do
+que saiu, o que é verdade e é exibido em verde.
+
+Estorno já abatido de uma despesa **não** aparece de novo no bloco de entradas
+da consolidada; contá-lo duas vezes inflaria a renda. Estorno ainda sem despesa
+conhecida continua ali, como movimentação, até a propagação acontecer.
+
+`GET /api/consolidado?mes=` faz o agrupamento no backend, para o total e as
+linhas nunca poderem discordar. A invariante verificada é a de sempre: **a soma
+das linhas exibidas é igual ao total exibido**.

@@ -31,6 +31,7 @@ interface DetalheMatch {
   // débito este crédito anula
   objetivo?: string | null
   estorna_transacao_id?: number | null
+  estorna_despesa_id?: number | null
   // vínculo que mora só na transação (item esporádico, ou 2ª ocorrência de um
   // "mais de um por mês"). Não tem lançamento, então não volta para a seção 2.
   sem_lancamento?: boolean
@@ -154,6 +155,10 @@ export function Importacao({ active }: { active: boolean }) {
   // seção 1: par de estorno que ainda não diz qual débito anula
   const [definindoEstorno, setDefinindoEstorno] = useState<number | null>(null)
   const [estornaSec1, setEstornaSec1] = useState('')
+  // o alvo do estorno pode ser a despesa (quando já se sabe qual é) ou a linha
+  // do extrato (quando ela ainda não foi classificada). O vínculo que fica é
+  // sempre com a despesa — pela linha, ele é preenchido por propagação.
+  const [alvoEstorno, setAlvoEstorno] = useState<'despesa' | 'lancamento'>('despesa')
   const [confirmando, setConfirmando] = useState(false)
   const [erroConfirmar, setErroConfirmar] = useState('')
   const [confirmado, setConfirmado] = useState<number | null>(null)
@@ -269,7 +274,8 @@ export function Importacao({ active }: { active: boolean }) {
    *  As duas direções de associação terminam aqui — só muda por qual ponta o
    *  usuário começou. Só mexe no estado local; nada é gravado até "Confirmar tudo". */
   function associarPar(t: TransacaoSobrando, despesaId: number, despesaNome: string,
-                       extras: { objetivo?: string; estorna_transacao_id?: number } = {}) {
+                       extras: { objetivo?: string; estorna_transacao_id?: number
+                                 estorna_despesa_id?: number } = {}) {
     setLado(r => {
       const status = t.situacao === 'efetivada'
         ? (natureza === 'receita' ? 'recebido' as const : 'pago' as const)
@@ -314,9 +320,16 @@ export function Importacao({ active }: { active: boolean }) {
     setSelecionadaAssoc('')
     setNovaDespesaNomeAssoc('')
     setObjetivoVal('')
-    // já vem preenchido com a sugestão: o gesto do usuário é confirmar ou
-    // trocar, não procurar do zero
-    setEstornaVal(tx.estorno_sugerido ? String(tx.estorno_sugerido.transacao_id) : '')
+    // Quando há sugestão, ela é de uma LINHA do extrato — então o caminho
+    // pré-selecionado é o do lançamento, já preenchido. Sem sugestão, o
+    // provável é o usuário já saber a despesa.
+    if (tx.estorno_sugerido) {
+      setAlvoEstorno('lancamento')
+      setEstornaVal(String(tx.estorno_sugerido.transacao_id))
+    } else {
+      setAlvoEstorno('despesa')
+      setEstornaVal('')
+    }
   }
 
   /** Tipo do item escolhido na seção 3 — decide se pede objetivo ou estorno. */
@@ -343,22 +356,29 @@ export function Importacao({ active }: { active: boolean }) {
     const tipo = tipoDoItem(selecionadaAssoc)
     associarPar(t, despesaId, despesaNome, {
       ...(tipo === 'resgate_esporadico' && objetivoVal.trim() ? { objetivo: objetivoVal.trim() } : {}),
-      ...(tipo === 'estorno' && estornaVal ? { estorna_transacao_id: Number(estornaVal) } : {})
+      ...(tipo === 'estorno' && estornaVal
+        ? (alvoEstorno === 'despesa'
+            ? { estorna_despesa_id: Number(estornaVal) }
+            : { estorna_transacao_id: Number(estornaVal) })
+        : {})
     })
     setAssociando(null)
   }
 
   function abrirDefinicaoEstorno(d: DetalheMatch) {
     setDefinindoEstorno(definindoEstorno === d.transacao_id ? null : d.transacao_id)
-    setEstornaSec1(d.estorna_transacao_id ? String(d.estorna_transacao_id) : '')
+    setAlvoEstorno(d.estorna_transacao_id ? 'lancamento' : 'despesa')
+    setEstornaSec1(String(d.estorna_transacao_id ?? d.estorna_despesa_id ?? ''))
   }
 
   function aplicarDefinicaoEstorno(d: DetalheMatch) {
     if (!estornaSec1) return
+    const alvo = alvoEstorno === 'despesa'
+      ? { estorna_despesa_id: Number(estornaSec1), estorna_transacao_id: null }
+      : { estorna_transacao_id: Number(estornaSec1), estorna_despesa_id: null }
     setLado(r => ({
       ...r,
-      detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id
-        ? { ...x, estorna_transacao_id: Number(estornaSec1) } : x)
+      detalhes: r.detalhes.map(x => x.transacao_id === d.transacao_id ? { ...x, ...alvo } : x)
     }))
     setDefinindoEstorno(null)
   }
@@ -386,7 +406,8 @@ export function Importacao({ active }: { active: boolean }) {
 
   const estornosIncompletos = (['despesa', 'receita'] as Natureza[]).flatMap(n =>
     n === 'receita'
-      ? pendentesDe(resultado?.receita).filter(d => ehEstorno(d.item_id) && !d.estorna_transacao_id)
+      ? pendentesDe(resultado?.receita).filter(
+          d => ehEstorno(d.item_id) && !d.estorna_transacao_id && !d.estorna_despesa_id)
       : [])
 
   function pendentesDe(l: LadoBatimento | null | undefined) {
@@ -405,7 +426,9 @@ export function Importacao({ active }: { active: boolean }) {
         pendentesDe(resultado?.[n]).map(d => ({
           natureza: n, transacao_id: d.transacao_id,
           item_id: d.item_id, item_id_sugerido: d.item_id_sugerido,
-          objetivo: d.objetivo, estorna_transacao_id: d.estorna_transacao_id
+          objetivo: d.objetivo,
+          estorna_transacao_id: d.estorna_transacao_id,
+          estorna_despesa_id: d.estorna_despesa_id
         })))
       const res = await api.batimento.confirmar(mesRef, pares)
       setConfirmado(res.confirmados ?? pares.length)
@@ -446,6 +469,13 @@ export function Importacao({ active }: { active: boolean }) {
   // vínculo dela é desfeito na confirmação, porque o pagamento não aconteceu.
   const dataCurta = (d: string) =>
     new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+
+  // Alvo do estorno pela DESPESA: o catálogo de saídas inteiro. Não se limita
+  // ao que apareceu no extrato deste mês — a cobrança estornada pode ter sido
+  // de um mês anterior.
+  const opcoesDespesaEstorno = catalogos.despesa
+    .filter(d => d.ativo !== 0)
+    .map(d => ({ id: d.id, nome: d.nome }))
 
   const opcoesDebito = [
     ...(resultado?.despesa.transacoes_sobrando ?? []).map(t => ({
@@ -695,10 +725,10 @@ export function Importacao({ active }: { active: boolean }) {
                               {confirmado === null && ehEstorno(d.item_id) && (
                                 <button onClick={() => abrirDefinicaoEstorno(d)}
                                   className={cn('text-xs mr-3 transition-colors',
-                                    d.estorna_transacao_id
+                                    (d.estorna_transacao_id || d.estorna_despesa_id)
                                       ? 'text-zinc-500 hover:text-emerald-400'
                                       : 'text-amber-400 font-medium hover:text-amber-300')}>
-                                  {d.estorna_transacao_id ? 'trocar estornado' : 'definir o que estorna'}
+                                  {(d.estorna_transacao_id || d.estorna_despesa_id) ? 'trocar estornado' : 'definir o que estorna'}
                                 </button>
                               )}
                               {confirmado === null && (
@@ -713,11 +743,28 @@ export function Importacao({ active }: { active: boolean }) {
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={5} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-xs text-zinc-500">Este crédito anula qual débito?</span>
-                                  <DespesaPicker despesas={opcoesDebito} value={estornaSec1} onChange={setEstornaSec1}
-                                    placeholder="Digite pra buscar o débito estornado..."
-                                    vazio="Nenhum débito no período"
+                                  <span className="text-xs text-zinc-500">O que este crédito estorna?</span>
+                                  {/* dois caminhos para o mesmo vínculo: pela despesa,
+                                      quando já se sabe qual é, ou pela linha do extrato,
+                                      quando ela ainda não foi classificada. O que fica
+                                      gravado é sempre o vínculo com a despesa. */}
+                                  <div className="flex rounded border border-zinc-700 overflow-hidden text-xs">
+                                    {(['despesa', 'lancamento'] as const).map(a => (
+                                      <button key={a} onClick={() => { setAlvoEstorno(a); setEstornaSec1('') }}
+                                        className={cn('px-2 py-1 transition-colors',
+                                          alvoEstorno === a ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200')}>
+                                        {a === 'despesa' ? 'Despesa' : 'Lançamento'}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <DespesaPicker
+                                    despesas={alvoEstorno === 'despesa' ? opcoesDespesaEstorno : opcoesDebito}
+                                    value={estornaSec1} onChange={setEstornaSec1}
+                                    placeholder={alvoEstorno === 'despesa'
+                                      ? 'Qual despesa foi estornada?' : 'Qual lançamento do extrato foi estornado?'}
+                                    vazio={alvoEstorno === 'despesa' ? 'Nenhuma despesa ativa' : 'Nenhum débito no período'}
                                     className="w-80" />
+
                                   <button onClick={() => aplicarDefinicaoEstorno(d)} disabled={!estornaSec1}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
@@ -890,14 +937,34 @@ export function Importacao({ active }: { active: boolean }) {
                                       className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-56" />
                                   )}
                                   {tipoDoItem(selecionadaAssoc) === 'estorno' && (
-                                    <DespesaPicker despesas={opcoesDebito} value={estornaVal} onChange={setEstornaVal}
-                                      placeholder="Qual débito este crédito anula?"
-                                      vazio="Nenhum débito sem despesa neste mês"
-                                      className="w-80" />
+                                    <>
+                                  {/* dois caminhos para o mesmo vínculo: pela despesa,
+                                      quando já se sabe qual é, ou pela linha do extrato,
+                                      quando ela ainda não foi classificada. O que fica
+                                      gravado é sempre o vínculo com a despesa. */}
+                                  <div className="flex rounded border border-zinc-700 overflow-hidden text-xs">
+                                    {(['despesa', 'lancamento'] as const).map(a => (
+                                      <button key={a} onClick={() => { setAlvoEstorno(a); setEstornaVal('') }}
+                                        className={cn('px-2 py-1 transition-colors',
+                                          alvoEstorno === a ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200')}>
+                                        {a === 'despesa' ? 'Despesa' : 'Lançamento'}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <DespesaPicker
+                                    despesas={alvoEstorno === 'despesa' ? opcoesDespesaEstorno : opcoesDebito}
+                                    value={estornaVal} onChange={setEstornaVal}
+                                    placeholder={alvoEstorno === 'despesa'
+                                      ? 'Qual despesa foi estornada?' : 'Qual lançamento do extrato foi estornado?'}
+                                    vazio={alvoEstorno === 'despesa' ? 'Nenhuma despesa ativa' : 'Nenhum débito no período'}
+                                    className="w-80" />
+                                    </>
                                   )}
                                   <button onClick={() => aplicarAssociacao(tx)}
                                     disabled={!selecionadaAssoc || (selecionadaAssoc === 'nova' && !novaDespesaNomeAssoc.trim())
                                       || (tipoDoItem(selecionadaAssoc) === 'estorno' && !estornaVal)}
+                                    title={tipoDoItem(selecionadaAssoc) === 'estorno' && !estornaVal
+                                      ? 'Escolha a despesa ou o lançamento estornado' : undefined}
                                     className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                                     Confirmar
                                   </button>
