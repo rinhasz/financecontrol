@@ -165,7 +165,22 @@ confirmados atravessam a troca por chave exata e, na falta dela, por
 uma regra no lugar de três. Transação que sumiu do extrato devolve o lançamento
 para `nao_encontrado`.
 
-Do mesmo relato, **um caso que não era bug**: `INT PERS BLACK` de R$ 5.709,27
+**"Agora inclua as RECEITAS em tudo"** (2026-08) — *especificado, não feito*
+Pedido explícito de especificar em `.md` **antes** de implementar, para poder
+reconstruir depois em outra linguagem/plataforma. Ver
+[14-receitas-e-esporadicas.md](14-receitas-e-esporadicas.md).
+
+Da conversa saíram três decisões que mudaram o desenho:
+- **fixa vs esporádica** é um eixo novo, atravessando despesas *e* receitas —
+  esporádica não gera previsão mensal, então some da lista de "não encontrei";
+- **resgate não é receita**, e se divide em mensal (cobrir o mês) e esporádico
+  (objetivo próprio, como comprar um carro);
+- receitas moram no **Mês Atual**, em bloco separado, fechando em saldo.
+
+O levantamento dos 21 créditos de agosto foi o que justificou a distinção:
+~R$ 91 mil dos R$ 111 mil que entraram eram resgate, não renda.
+
+Do relato anterior, **um caso que não era bug**: `INT PERS BLACK` de R$ 5.709,27
 está no extrato de verdade, com um `CREDITO CARTAO ITAU` de mesmo valor no
 mesmo dia — é cobrança estornada e refeita como boleto. Aparecer na lista está
 correto; o app não detecta estorno.
