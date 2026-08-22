@@ -93,6 +93,31 @@ Bugs encontrados durante a medição, que só apareceram por medir:
 Ferramenta que ficou: `tools/avaliar_batimento.py`, para medir em vez de julgar
 por impressão.
 
+**"Muita coisa que o extrato mostra como paga aparece como agendada"** (2026-08)
+Continuação do bug `e5bd15a`, que só resolvia metade. O Itaú **troca a
+descrição** quando o agendado é debitado (`PAG TIT 662992535000` vira
+`PAG BOLETO EDIFICIO LINCOLN GARDEN`), então a dedupe por
+`(data, descrição, valor)` não reconhecia a transação: a versão debitada
+entrava como nova e a `agendada` ficava órfã no banco. O batimento casava a
+despesa com a órfã e mostrava "Agendado".
+
+→ `_reconciliar_agendadas()` casa órfã e real por `(data, valor)` — os dois
+campos que **não** mudam nessa transição — e apaga a órfã, migrando antes
+qualquer vínculo já confirmado. Só age em par inequívoco e em data passada.
+Roda na importação e também no batimento, para curar o que já estava no banco
+sem exigir reimportação. Eram 6 fantasmas em agosto.
+
+**"Divida a revisão em 3 partes, e cada uma com o combo invertido"** (2026-08)
+A tela mostrava casadas e transações sobrando, mas **nunca listava as despesas
+que ficaram sem casar** — só dava para trabalhar a partir do extrato. E o combo
+das transações oferecia o catálogo inteiro, inclusive despesas já casadas com
+outra transação.
+
+→ Três seções numeradas: casadas, despesas ativas não encontradas, transações
+sem despesa. As duas últimas são espelho (mesma associação por pontas opostas),
+alimentam a mesma função e comem da mesma lista, encolhendo juntas. O combo da
+seção 3 passou a listar só as despesas da seção 2.
+
 ---
 
 ## Catálogo

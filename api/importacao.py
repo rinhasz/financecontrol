@@ -234,6 +234,67 @@ def parse_csv_content(content: str):
     return txs
 
 
+def _reconciliar_agendadas(conn, ini: str, fim: str) -> int:
+    """Colapsa o "fantasma" agendado quando o débito caiu com outra descrição.
+
+    O Itaú **troca o texto** do lançamento quando ele sai de "lançamentos
+    futuros" para debitado de fato:
+
+        'PAG TIT 662992535000'  ->  'PAG BOLETO EDIFICIO LINCOLN GARDEN'
+        'Agendado'              ->  'FINANC IMOBILIARIO 038/397'
+        'PIX QRS SUL AMERICA'   ->  'PIX QRS SUL AMERICA10/08'
+
+    A dedupe da importação é `(data, descrição, valor)`, então as duas
+    versões coexistem: uma linha `agendada` órfã e a linha `efetivada` real.
+    O batimento podia casar a despesa com a órfã e mostrar "Agendado" num mês
+    em que o extrato já diz pago — foi exatamente o sintoma relatado.
+
+    Data e valor **não** mudam nessa transição, e são a chave usada aqui. Só
+    colapsa quando o par é inequívoco (exatamente uma agendada e uma efetivada
+    para aquele data+valor) e a data já passou — agendamento futuro não tem o
+    que reconciliar.
+
+    Idempotente: rodar de novo não encontra mais par nenhum.
+    """
+    hoje = date.today().isoformat()
+    rows = conn.execute(
+        "SELECT id, data, descricao, valor, situacao, despesa_id, classificacao "
+        "FROM transacao WHERE data BETWEEN ? AND ? AND tipo='debito'",
+        (ini, fim)
+    ).fetchall()
+
+    grupos = {}
+    for r in rows:
+        grupos.setdefault((r['data'], r['valor']), []).append(r)
+
+    colapsadas = 0
+    for (data_tx, _valor), grupo in grupos.items():
+        if data_tx > hoje:
+            continue
+        agendadas = [r for r in grupo if r['situacao'] == 'agendada']
+        efetivadas = [r for r in grupo if r['situacao'] == 'efetivada']
+        if len(agendadas) != 1 or len(efetivadas) != 1:
+            continue
+        fantasma, real = agendadas[0], efetivadas[0]
+
+        # Um casamento já confirmado apontava para a órfã; migra para a linha
+        # real antes de apagá-la, senão o lançamento perderia o vínculo.
+        if fantasma['despesa_id'] and not real['despesa_id']:
+            conn.execute(
+                'UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
+                (fantasma['despesa_id'], fantasma['classificacao'], real['id'])
+            )
+        conn.execute(
+            "UPDATE lancamento SET transacao_id=?, status='pago', valor_real=?, data_pagamento=? "
+            "WHERE transacao_id=?",
+            (real['id'], abs(real['valor']), real['data'], fantasma['id'])
+        )
+        conn.execute('DELETE FROM transacao WHERE id=?', (fantasma['id'],))
+        colapsadas += 1
+
+    return colapsadas
+
+
 @bp.route('/importacao', methods=['POST'])
 def importar():
     file = request.files.get('file')
@@ -325,16 +386,40 @@ def importar():
             'INSERT INTO transacao (data, descricao, valor, tipo, situacao, banco_origem, import_id) VALUES (?,?,?,?,?,?,?)',
             batch
         )
+
+    # A promoção acima só pega quem manteve a descrição. Quando o banco troca
+    # o texto ao debitar, a versão nova entrou como transação inédita e a
+    # agendada ficou órfã — é aqui que as duas se juntam.
+    colapsadas = _reconciliar_agendadas(conn, datas[0], datas[-1])
+
     conn.commit()
     conn.close()
 
     msg = f'{len(novas)} transações novas importadas'
-    if efetivadas:
-        msg += f', {len(efetivadas)} que estavam agendadas foram debitadas'
+    if efetivadas or colapsadas:
+        msg += f', {len(efetivadas) + colapsadas} que estavam agendadas foram debitadas'
     if duplicadas:
         msg += f' ({duplicadas} já tinham sido importadas antes e foram ignoradas)'
 
     return jsonify({'ok': True, 'msg': msg, 'transacoes': novas, 'import_id': import_id})
+
+
+def _garantir_lancamentos(conn, mes_ref: str) -> None:
+    """Abre o mês: cria o lançamento de cada despesa ativa que ainda não tem.
+
+    Mesma operação que /api/lancamentos faz ao listar o Mês Atual. Precisa
+    acontecer aqui também porque a seção "despesas ativas que não encontrei"
+    do batimento sai dos lançamentos do mês — sem isso, quem importa o extrato
+    antes de abrir o Mês Atual veria uma lista incompleta.
+    """
+    from .lancamentos import _valor_previsto
+    for d in conn.execute('SELECT * FROM despesa WHERE ativo=1').fetchall():
+        prev = _valor_previsto(conn, d['id'], mes_ref, d['padrao_variabilidade'], d['valor_padrao'])
+        conn.execute(
+            'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) '
+            'VALUES (?,?,?,\'nao_encontrado\')',
+            (mes_ref, d['id'], prev)
+        )
 
 
 @bp.route('/batimento', methods=['POST'])
@@ -348,6 +433,18 @@ def rodar_batimento():
     conn = get_db()
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
+
+    # Duas manutenções antes de casar. Nenhuma decide casamento — são reparo de
+    # dado — mas as duas mudam o que a tela mostra, então rodam mesmo no preview:
+    #  1. remove órfãs 'agendada' cujo débito já caiu com outra descrição, senão
+    #     o casamento pode ser feito com a órfã e a despesa aparece "Agendado"
+    #     num mês em que o extrato já diz pago;
+    #  2. garante o lançamento de toda despesa ativa do mês, para a seção
+    #     "despesas que não encontrei" ficar completa mesmo se o usuário ainda
+    #     não abriu o Mês Atual (é o mesmo INSERT OR IGNORE de /api/lancamentos).
+    _reconciliar_agendadas(conn, ini, fim)
+    _garantir_lancamentos(conn, mes_ref)
+    conn.commit()
 
     # d.ativo=1: despesa desativada não pode disputar transação com uma ativa —
     # é assim que uma despesa velha e genérica (ex: "cartao xp") acabava

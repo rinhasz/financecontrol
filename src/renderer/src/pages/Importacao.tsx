@@ -45,6 +45,21 @@ interface Despesa { id: number; nome: string }
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
+/** Cabeçalho das três partes da revisão. A ordem é fixa e numerada de
+ *  propósito: casadas, depois o que faltou de cada lado. */
+function Secao({ n, titulo, qtd, ajuda }: { n: number; titulo: string; qtd: number; ajuda: string }) {
+  return (
+    <div className="mb-2">
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs font-semibold text-zinc-600 tabular-nums">{n}.</span>
+        <h2 className="text-sm font-semibold text-zinc-200">{titulo}</h2>
+        <span className="text-xs text-zinc-500 tabular-nums">({qtd})</span>
+      </div>
+      <p className="text-xs text-zinc-500 ml-5">{ajuda}</p>
+    </div>
+  )
+}
+
 export function Importacao({ active }: { active: boolean }) {
   const [step, setStep] = useState<Step>('selecionar')
   const [banco, setBanco] = useState('Itaú')
@@ -65,6 +80,9 @@ export function Importacao({ active }: { active: boolean }) {
   const [associando, setAssociando] = useState<number | null>(null)
   const [selecionadaAssoc, setSelecionadaAssoc] = useState('')
   const [novaDespesaNomeAssoc, setNovaDespesaNomeAssoc] = useState('')
+  // seção 2 — o inverso da 3: parte da despesa e escolhe a transação
+  const [buscandoTx, setBuscandoTx] = useState<number | null>(null)
+  const [txSelecionada, setTxSelecionada] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [confirmado, setConfirmado] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -122,17 +140,8 @@ export function Importacao({ active }: { active: boolean }) {
     if (selecionada === 'nova') {
       const nome = novaDespesaNome.trim()
       if (!nome) return
-      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
-      const res = await api.catalogo.upsert({
-        nome,
-        tipo_valor: 'variavel',
-        padrao_variabilidade: 'variavel_nao_sazonal',
-        valor_padrao: d.valor,
-        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
-      })
-      despesaId = res.id
+      despesaId = await criarDespesa(nome, d.valor)
       despesaNome = nome
-      setDespesas(ds => [...ds, { id: despesaId, nome: despesaNome }])
     } else {
       if (!selecionada) return
       despesaId = Number(selecionada)
@@ -147,36 +156,10 @@ export function Importacao({ active }: { active: boolean }) {
     setCorrigindo(null)
   }
 
-  function abrirAssociacao(transacaoId: number) {
-    setAssociando(associando === transacaoId ? null : transacaoId)
-    setSelecionadaAssoc('')
-    setNovaDespesaNomeAssoc('')
-  }
-
-  async function aplicarAssociacao(t: TransacaoSobrando) {
-    let despesaId: number
-    let despesaNome: string
-    if (selecionadaAssoc === 'nova') {
-      const nome = novaDespesaNomeAssoc.trim()
-      if (!nome) return
-      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
-      const res = await api.catalogo.upsert({
-        nome,
-        tipo_valor: 'variavel',
-        padrao_variabilidade: 'variavel_nao_sazonal',
-        valor_padrao: Math.abs(t.valor),
-        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
-      })
-      despesaId = res.id
-      despesaNome = nome
-      setDespesas(ds => [...ds, { id: despesaId, nome: despesaNome }])
-    } else {
-      if (!selecionadaAssoc) return
-      despesaId = Number(selecionadaAssoc)
-      despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
-    }
-
-    // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
+  /** Casa transação + despesa e move o par das seções 2 e 3 para a 1.
+   *  As duas direções de associação terminam aqui — só muda por qual ponta o
+   *  usuário começou. Só mexe no estado local; nada é gravado até "Confirmar tudo". */
+  function associarPar(t: TransacaoSobrando, despesaId: number, despesaNome: string) {
     setResultado(r => {
       if (!r) return r
       const status: 'pago' | 'agendado' = t.situacao === 'efetivada' ? 'pago' : 'agendado'
@@ -190,7 +173,55 @@ export function Importacao({ active }: { active: boolean }) {
         }]
       }
     })
+  }
+
+  async function criarDespesa(nome: string, valor: number) {
+    const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+    const res = await api.catalogo.upsert({
+      nome,
+      tipo_valor: 'variavel',
+      padrao_variabilidade: 'variavel_nao_sazonal',
+      valor_padrao: valor,
+      regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
+    })
+    setDespesas(ds => [...ds, { id: res.id, nome }])
+    return res.id as number
+  }
+
+  function abrirAssociacao(transacaoId: number) {
+    setAssociando(associando === transacaoId ? null : transacaoId)
+    setSelecionadaAssoc('')
+    setNovaDespesaNomeAssoc('')
+  }
+
+  async function aplicarAssociacao(t: TransacaoSobrando) {
+    let despesaId: number
+    let despesaNome: string
+    if (selecionadaAssoc === 'nova') {
+      const nome = novaDespesaNomeAssoc.trim()
+      if (!nome) return
+      despesaId = await criarDespesa(nome, Math.abs(t.valor))
+      despesaNome = nome
+    } else {
+      if (!selecionadaAssoc) return
+      despesaId = Number(selecionadaAssoc)
+      despesaNome = resultado?.nao_encontrados.find(x => x.despesa_id === despesaId)?.despesa_nome
+        ?? despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
+    }
+    associarPar(t, despesaId, despesaNome)
     setAssociando(null)
+  }
+
+  function abrirBuscaTx(despesaId: number) {
+    setBuscandoTx(buscandoTx === despesaId ? null : despesaId)
+    setTxSelecionada('')
+  }
+
+  function aplicarBuscaTx(n: NaoEncontrado) {
+    const t = resultado?.transacoes_sobrando.find(x => String(x.id) === txSelecionada)
+    if (!t) return
+    associarPar(t, n.despesa_id, n.despesa_nome)
+    setBuscandoTx(null)
   }
 
   async function confirmarTudo() {
@@ -208,6 +239,18 @@ export function Importacao({ active }: { active: boolean }) {
 
   const STEPS: [Step, string][] = [['selecionar', '1. Selecionar'], ['revisar', '2. Revisar'], ['concluido', '3. Concluído']]
   const stepIdx = STEPS.findIndex(([s]) => s === step)
+
+  // As duas seções de associação são espelho uma da outra e comem da mesma
+  // lista: o que sobrou de um lado é a opção do outro. Ambas encolhem sozinhas
+  // conforme os pares vão sendo montados.
+  const opcoesTransacao = (resultado?.transacoes_sobrando ?? []).map(t => ({
+    id: t.id,
+    nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+  }))
+  const opcoesDespesa = (resultado?.nao_encontrados ?? []).map(n => ({
+    id: n.despesa_id,
+    nome: n.valor_esperado > 0 ? `${n.despesa_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.despesa_nome
+  }))
 
   return (
     <div className="flex flex-col h-full pt-3">
@@ -318,7 +361,7 @@ export function Importacao({ active }: { active: boolean }) {
 
         {/* Step 3 — concluído */}
         {step === 'concluido' && resultado && (
-          <div className="space-y-4 max-w-3xl">
+          <div className="space-y-6 max-w-4xl">
             {confirmado !== null ? (
               <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-8 text-center">
                 <div className="text-5xl font-bold text-emerald-400 mb-2">{confirmado}</div>
@@ -331,9 +374,11 @@ export function Importacao({ active }: { active: boolean }) {
               </div>
             )}
 
+            {/* ---- 1. casadas ---- */}
             {resultado.detalhes.length > 0 && (
               <div>
-                <p className="text-sm text-zinc-400 mb-2">Confira os casamentos — se alguma despesa estiver errada, corrija abaixo:</p>
+                <Secao n={1} titulo="Despesas casadas" qtd={resultado.detalhes.length}
+                  ajuda="Se alguma despesa estiver errada, corrija na linha." />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
@@ -402,11 +447,68 @@ export function Importacao({ active }: { active: boolean }) {
               </div>
             )}
 
+            {/* ---- 2. despesas ativas que não foram encontradas no extrato ----
+                 O combo aqui lista as TRANSAÇÕES sobrando: parte-se da despesa
+                 e procura-se o débito. É o inverso exato da seção 3. */}
+            {resultado.nao_encontrados.length > 0 && (
+              <div>
+                <Secao n={2} titulo="Despesas ativas que não encontrei no extrato" qtd={resultado.nao_encontrados.length}
+                  ajuda="Se o débito existe e eu não achei, escolha a transação correspondente." />
+                <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-900/40">
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                        <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsto</th>
+                        <th className="px-4 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultado.nao_encontrados.map((n, i) => (
+                        <Fragment key={n.despesa_id}>
+                          <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                            <td className="px-4 py-2 text-zinc-200 font-medium">{n.despesa_nome}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-zinc-500">{formatBRL(n.valor_esperado)}</td>
+                            <td className="px-4 py-2 text-right">
+                              {confirmado === null && (
+                                <button onClick={() => abrirBuscaTx(n.despesa_id)}
+                                  className="text-xs text-zinc-500 hover:text-emerald-400 transition-colors whitespace-nowrap">
+                                  Associar transação
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {buscandoTx === n.despesa_id && (
+                            <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
+                              <td colSpan={3} className="px-4 py-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <DespesaPicker despesas={opcoesTransacao} value={txSelecionada} onChange={setTxSelecionada}
+                                    placeholder="Digite pra buscar no extrato..." vazio="Nenhuma transação sobrando"
+                                    className="w-96" />
+                                  <button onClick={() => aplicarBuscaTx(n)} disabled={!txSelecionada}
+                                    className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                                    Confirmar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ---- 3. transações do extrato sem despesa ----
+                 O combo lista só as despesas da seção 2 (ativas e ainda não
+                 associadas neste mês) — oferecer o catálogo inteiro deixava
+                 escolher uma despesa que já casou com outra transação. */}
             {resultado.transacoes_sobrando.length > 0 && (
               <div>
-                <p className="text-sm text-zinc-400 mb-2">
-                  Transações do extrato sem despesa correspondente — associe a uma despesa existente ou crie uma nova:
-                </p>
+                <Secao n={3} titulo="Transações do extrato sem despesa" qtd={resultado.transacoes_sobrando.length}
+                  ajuda="Associe a uma despesa ativa ainda em aberto, ou crie uma despesa nova." />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
@@ -439,10 +541,11 @@ export function Importacao({ active }: { active: boolean }) {
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={4} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <DespesaPicker despesas={despesas} value={selecionadaAssoc} onChange={setSelecionadaAssoc}
+                                  <DespesaPicker despesas={opcoesDespesa} value={selecionadaAssoc} onChange={setSelecionadaAssoc}
                                     placeholder="Digite pra buscar a despesa..." allowNova
+                                    vazio="Nenhuma despesa em aberto neste mês"
                                     onSelectNova={q => { setSelecionadaAssoc('nova'); setNovaDespesaNomeAssoc(q) }}
-                                    className="w-56" />
+                                    className="w-72" />
                                   {selecionadaAssoc === 'nova' && (
                                     <input value={novaDespesaNomeAssoc} onChange={e => setNovaDespesaNomeAssoc(e.target.value)}
                                       placeholder="Nome da nova despesa" autoFocus

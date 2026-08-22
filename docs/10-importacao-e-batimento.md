@@ -68,6 +68,42 @@ lançamento nunca virava "Pago", por mais vezes que o usuário reimportasse.
 `efetivada`, ela é **atualizada no lugar** em vez de ignorada. Atualizar (e não
 inserir outra) preserva o `despesa_id` de um casamento já confirmado.
 
+### Quando o banco troca a descrição ao debitar (segundo bug, mesma família)
+
+A regra acima só resolve quando o texto continua idêntico — e o Itaú **muda o
+texto** na maioria dos casos:
+
+| Em "lançamentos futuros" | Depois de debitado |
+|---|---|
+| `Agendado` | `FINANC IMOBILIARIO 038/397` |
+| `PAG TIT 662992535000` | `PAG BOLETO EDIFICIO LINCOLN GARDEN` |
+| `PAG TIT BANCO 237` | `PAG BOLETO ESTAPAR` |
+| `DA  CLARO BL/IT 77712744` | `DA  CLARO S.A. 77712744` |
+| `PIX QRS SUL AMERICA` | `PIX QRS SUL AMERICA10/08` |
+
+Com a descrição diferente, a dedupe não reconhece a transação e as **duas
+versões coexistem**: uma linha `agendada` órfã e a linha `efetivada` real. O
+batimento então podia casar a despesa com a órfã e mostrar **"Agendado" num mês
+em que o extrato já dizia pago** — o sintoma relatado pelo usuário.
+
+**`_reconciliar_agendadas(conn, ini, fim)`** colapsa o par. Data e valor **não**
+mudam nessa transição, então são a chave. Salvaguardas:
+
+- só colapsa quando o par é inequívoco: exatamente **uma** agendada e **uma**
+  efetivada para aquele `(data, valor)`;
+- só para data **já passada** — agendamento futuro não tem o que reconciliar
+  (é o que mantém, corretamente, um `DA VIVO-SP` marcado para daqui a 4 dias);
+- um vínculo já confirmado apontando para a órfã é **migrado** para a linha real
+  antes de apagá-la, senão o lançamento perderia a transação.
+
+É idempotente. Roda na importação (sobre o intervalo do arquivo) **e** no início
+do batimento (sobre a competência) — este segundo ponto é o que cura os
+fantasmas que já estavam no banco, sem exigir reimportação.
+
+Medido em agosto/2026: 9 transações passadas marcadas `agendada`, das quais 6
+eram fantasmas; depois da correção, nenhum lançamento casado voltou como
+"Agendado".
+
 ---
 
 ## Batimento — preview, nunca gravação direta
@@ -189,12 +225,38 @@ riscado ao lado do novo.
 
 Três passos: **Selecionar** → **Revisar** → **Concluído**.
 
-Na revisão o usuário pode:
+### As três seções da revisão (ordem fixa)
+
+| # | Seção | O que a linha mostra | O que o combo oferece |
+|---|-------|----------------------|-----------------------|
+| 1 | Despesas casadas | despesa + transação + status | — (só "Não é essa despesa") |
+| 2 | Despesas ativas que não encontrei | despesa + previsto | as **transações** sobrando |
+| 3 | Transações sem despesa | data + descrição + valor | as **despesas** ainda em aberto (+ nova) |
+
+As seções 2 e 3 são espelho uma da outra: a mesma associação, atacada por
+pontas opostas. Quem sabe qual despesa está faltando começa pela 2; quem olha
+um débito estranho no extrato começa pela 3.
+
+Ambas alimentam a mesma função (`associarPar`) e comem da mesma lista — o par
+montado some das duas e aparece na seção 1, então as listas encolhem juntas e
+nunca oferecem algo já usado.
+
+O combo da seção 3 lista **só as despesas da seção 2** (ativas e ainda não
+associadas no mês), não o catálogo inteiro: oferecer tudo deixava escolher uma
+despesa que já tinha casado com outra transação.
+
+Para a seção 2 ficar completa mesmo antes de o usuário abrir o Mês Atual, o
+batimento chama `_garantir_lancamentos()` — o mesmo `INSERT OR IGNORE` de
+`/api/lancamentos`, só que mais cedo.
+
+Ainda na revisão:
 - **"Não é essa despesa"** — troca a despesa sugerida (via `DespesaPicker`,
   com opção de criar despesa nova ali mesmo);
-- associar **transações sobrando** (débitos sem despesa correspondente) a uma
-  despesa existente ou nova;
 - **"Confirmar tudo"** — só aqui grava.
+
+> `DespesaPicker` é usado nas duas direções: na seção 2 as opções são
+> transações, não despesas (daí a prop `vazio`, para o estado vazio não dizer
+> "nenhuma despesa encontrada" quando a lista é de débitos).
 
 Correções alimentam `docs/07-dicionario-despesas.md` via `_registrar_dicionario()`,
 para o histórico de "esse texto do extrato é essa despesa" ficar legível.

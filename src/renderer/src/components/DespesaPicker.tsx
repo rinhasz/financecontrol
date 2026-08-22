@@ -10,10 +10,14 @@ interface Props {
   placeholder?: string
   allowNova?: boolean
   onSelectNova?: (query: string) => void
+  // Texto do estado vazio. A lista nem sempre é de despesas: na tela de
+  // importação o mesmo seletor lista transações do extrato (o inverso da
+  // associação), e "Nenhuma despesa encontrada" ali estaria errado.
+  vazio?: string
   className?: string
 }
 
-export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar despesa...', allowNova, onSelectNova, className }: Props) {
+export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar despesa...', allowNova, onSelectNova, vazio = 'Nenhuma despesa encontrada', className }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -52,9 +56,9 @@ export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar
         className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-full"
       />
       {open && (
-        <div className="absolute z-10 mt-1 w-64 max-h-56 overflow-auto rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
+        <div className="absolute z-10 mt-1 w-72 max-h-56 overflow-auto rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
           {filtradas.length === 0 && (
-            <div className="px-3 py-2 text-xs text-zinc-600">Nenhuma despesa encontrada</div>
+            <div className="px-3 py-2 text-xs text-zinc-600">{vazio}</div>
           )}
           {filtradas.map(d => (
             <button key={d.id} type="button" onClick={() => selecionar(d.id)}
