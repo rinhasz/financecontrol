@@ -15,6 +15,8 @@ interface Props {
   // importação o mesmo seletor lista transações do extrato (o inverso da
   // associação), e "Nenhuma despesa encontrada" ali estaria errado.
   vazio?: string
+  // Rótulo do "+ Nova ...". Fixo em "despesa" ele mentia na aba de receitas.
+  novaLabel?: string
   className?: string
 }
 
@@ -37,7 +39,7 @@ function alvos(s: string) {
 const MIN_LARGURA = 460
 const MAX_ALTURA = 420
 
-export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar despesa...', allowNova, onSelectNova, vazio = 'Nenhuma despesa encontrada', className }: Props) {
+export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar despesa...', allowNova, onSelectNova, vazio = 'Nenhuma despesa encontrada', novaLabel = '+ Nova despesa', className }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
@@ -155,7 +157,7 @@ export function DespesaPicker({ despesas, value, onChange, placeholder = 'Buscar
             onClick={escolherNova} onMouseEnter={() => setCursor(filtradas.length)}
             className={cn('block w-full text-left px-3 py-1.5 text-sm text-zinc-400 border-t border-zinc-800 transition-colors',
               cursor === filtradas.length && 'bg-zinc-800')}>
-            + Nova despesa{query ? `: "${query}"` : ''}
+            {novaLabel}{query ? `: "${query}"` : ''}
           </button>
         )}
       </div>,

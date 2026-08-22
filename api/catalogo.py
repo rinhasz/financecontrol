@@ -3,7 +3,9 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from .db import get_db, parse_number
+import sqlite3
+
+from .db import db, get_db, parse_number
 from .importacao import normalize_text, _sheet_rows_xls, _sheet_rows_xlsx
 
 bp = Blueprint('catalogo', __name__)
@@ -28,7 +30,23 @@ def list_catalogo():
 @bp.route('/catalogo', methods=['POST'])
 def upsert_catalogo():
     data = request.json or {}
-    conn = get_db()
+    nome = (data.get('nome') or '').strip()
+    if not nome:
+        return jsonify({'ok': False, 'msg': 'Nome é obrigatório'}), 400
+    try:
+        return _gravar_despesa(data, nome)
+    except sqlite3.IntegrityError:
+        # nome é UNIQUE: erro esperado, não falha de sistema. Sem este tratamento
+        # a conexão vazava e o app inteiro travava (ver doc 12).
+        return jsonify({'ok': False, 'msg': f'Já existe uma despesa chamada "{nome}"'}), 409
+
+
+def _gravar_despesa(data, nome):
+    with db() as conn:
+        return _gravar(conn, data)
+
+
+def _gravar(conn, data):
     if data.get('id'):
         conn.execute("""
             UPDATE despesa SET nome=?, categoria_id=?, dia_vencimento=?, tipo_valor=?,
@@ -52,8 +70,6 @@ def upsert_catalogo():
     # lançamentos antigos são a série histórica que alimenta a previsão de
     # valor (`_valor_previsto`), e vários deles são seed sem transação. Quem
     # esconde a previsão vazia é o filtro da consulta em /api/lancamentos.
-    conn.commit()
-    conn.close()
     return jsonify({'ok': True, 'id': despesa_id})
 
 

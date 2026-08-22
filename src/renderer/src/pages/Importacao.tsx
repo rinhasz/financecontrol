@@ -131,7 +131,10 @@ export function Importacao({ active }: { active: boolean }) {
   // O batimento devolve os dois lados de uma vez; a tela mostra um por vez.
   const [resultado, setResultado] = useState<Record<Natureza, LadoBatimento> | null>(null)
   const [natureza, setNatureza] = useState<Natureza>('despesa')
-  const [despesas, setDespesas] = useState<Despesa[]>([])
+  // Os dois catálogos, não um. A correção da seção 1 escolhe entre itens do
+  // MESMO lado — oferecer despesas para corrigir um crédito produziria um
+  // vínculo sem sentido, e era o que acontecia.
+  const [catalogos, setCatalogos] = useState<Record<Natureza, Despesa[]>>({ despesa: [], receita: [] })
   const [corrigindo, setCorrigindo] = useState<number | null>(null)
   const [selecionada, setSelecionada] = useState('')
   const [novaDespesaNome, setNovaDespesaNome] = useState('')
@@ -152,12 +155,21 @@ export function Importacao({ active }: { active: boolean }) {
 
   // a tela fica sempre montada (ver App.tsx) — sem isso, uma despesa criada
   // no Catálogo enquanto essa aba já estava aberta nunca apareceria aqui
+  async function carregarCatalogos() {
+    const [d, r] = await Promise.all([api.catalogo.list(), api.receitas.list()])
+    setCatalogos({
+      despesa: d,
+      receita: (r as { id: number; nome: string }[]).map(x => ({ id: x.id, nome: x.nome }))
+    })
+  }
+
   useEffect(() => {
-    if (active) api.catalogo.list().then(setDespesas)
+    if (active) carregarCatalogos()
   }, [active])
 
   const lado = resultado?.[natureza] ?? null
   const t = TEXTO[natureza]
+  const catalogo = catalogos[natureza]
 
   /** Atualiza apenas o lado que está sendo revisado. */
   function setLado(fn: (l: LadoBatimento) => LadoBatimento) {
@@ -193,9 +205,8 @@ export function Importacao({ active }: { active: boolean }) {
   async function rodarBatimento() {
     setLoading(true)
     try {
-      const [res, cat] = await Promise.all([api.batimento.rodar(mesRef), api.catalogo.list()])
+      const [res] = await Promise.all([api.batimento.rodar(mesRef), carregarCatalogos()])
       setResultado(res)
-      setDespesas(cat)
       setConfirmado(null)
       setStep('concluido')
     } finally {
@@ -220,7 +231,7 @@ export function Importacao({ active }: { active: boolean }) {
     } else {
       if (!selecionada) return
       despesaId = Number(selecionada)
-      despesaNome = despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
+      despesaNome = catalogo.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
 
     // Só atualiza o estado local — nada é gravado até "Confirmar tudo"
@@ -289,7 +300,7 @@ export function Importacao({ active }: { active: boolean }) {
     const res = natureza === 'receita'
       ? await api.receitas.upsert({ ...comum, tipo: 'outra' })
       : await api.catalogo.upsert(comum)
-    setDespesas(ds => [...ds, { id: res.id, nome }])
+    setCatalogos(c => ({ ...c, [natureza]: [...c[natureza], { id: res.id, nome }] }))
     return res.id as number
   }
 
@@ -324,7 +335,7 @@ export function Importacao({ active }: { active: boolean }) {
       despesaId = Number(selecionadaAssoc)
       despesaNome = lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome
         ?? lado?.esporadicos.find(x => x.item_id === despesaId)?.item_nome
-        ?? despesas.find(ds => ds.id === despesaId)?.nome ?? '?'
+        ?? catalogo.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
     const tipo = tipoDoItem(selecionadaAssoc)
     associarPar(t, despesaId, despesaNome, {
@@ -502,7 +513,15 @@ export function Importacao({ active }: { active: boolean }) {
         {step === 'revisar' && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm text-zinc-400">{msg}</p>
+              <div>
+                <p className="text-sm text-zinc-400">{msg}</p>
+                {/* saídas e entradas contadas à parte: o extrato traz as duas, e
+                    o batimento vai casar cada lado com seu catálogo */}
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {transacoes.filter(x => x.valor < 0).length} saídas ·{' '}
+                  {transacoes.filter(x => x.valor > 0).length} entradas
+                </p>
+              </div>
               <button onClick={rodarBatimento} disabled={loading}
                 className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                 {loading ? 'Batendo...' : 'Rodar Batimento Automático'}
@@ -621,10 +640,12 @@ export function Importacao({ active }: { active: boolean }) {
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
                               <td colSpan={5} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <DespesaPicker despesas={despesas} value={selecionada} onChange={setSelecionada}
+                                  <DespesaPicker despesas={catalogo} value={selecionada} onChange={setSelecionada}
                                     placeholder={`Digite pra buscar a ${t.item} certa...`} allowNova
+                                    novaLabel={`+ ${t.novoItem}`}
+                                    vazio={`Nenhuma ${t.item} encontrada`}
                                     onSelectNova={q => { setSelecionada('nova'); setNovaDespesaNome(q) }}
-                                    className="w-56" />
+                                    className="w-72" />
                                   {selecionada === 'nova' && (
                                     <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
                                       placeholder={`Nome da nova ${t.item}`} autoFocus
@@ -751,6 +772,7 @@ export function Importacao({ active }: { active: boolean }) {
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <DespesaPicker despesas={opcoesDespesa} value={selecionadaAssoc} onChange={setSelecionadaAssoc}
                                     placeholder={`Digite pra buscar a ${t.item}...`} allowNova
+                                    novaLabel={`+ ${t.novoItem}`}
                                     vazio={`Nenhuma ${t.item} em aberto neste mês`}
                                     onSelectNova={q => { setSelecionadaAssoc('nova'); setNovaDespesaNomeAssoc(q) }}
                                     className="w-72" />

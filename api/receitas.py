@@ -8,7 +8,9 @@ resgate (doc 04).
 """
 from flask import Blueprint, jsonify, request
 
-from .db import get_db
+import sqlite3
+
+from .db import db, get_db
 
 bp = Blueprint('receitas', __name__)
 
@@ -62,23 +64,25 @@ def upsert_catalogo():
               data.get('valor_padrao'), data.get('regras_match') or REGRAS_PADRAO,
               data.get('recorrencia', 'fixa'))
 
-    conn = get_db()
-    if data.get('id'):
-        conn.execute("""
-            UPDATE receita SET nome=?, categoria_id=?, dia_recebimento=?, tipo=?, tipo_valor=?,
-            padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, ativo=? WHERE id=?
-        """, (*campos, data.get('ativo', 1), data['id']))
-        receita_id = data['id']
-    else:
-        cur = conn.execute("""
-            INSERT INTO receita (nome, categoria_id, dia_recebimento, tipo, tipo_valor,
-                                 padrao_variabilidade, valor_padrao, regras_match, recorrencia)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        """, campos)
-        receita_id = cur.lastrowid
+    try:
+        with db() as conn:
+            if data.get('id'):
+                conn.execute("""
+                    UPDATE receita SET nome=?, categoria_id=?, dia_recebimento=?, tipo=?, tipo_valor=?,
+                    padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, ativo=? WHERE id=?
+                """, (*campos, data.get('ativo', 1), data['id']))
+                receita_id = data['id']
+            else:
+                cur = conn.execute("""
+                    INSERT INTO receita (nome, categoria_id, dia_recebimento, tipo, tipo_valor,
+                                         padrao_variabilidade, valor_padrao, regras_match, recorrencia)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """, campos)
+                receita_id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        # nome é UNIQUE: erro esperado, não falha de sistema
+        return jsonify({'ok': False, 'msg': f'Já existe uma receita chamada "{nome}"'}), 409
 
-    conn.commit()
-    conn.close()
     return jsonify({'ok': True, 'id': receita_id})
 
 

@@ -2,6 +2,7 @@ import sqlite3
 import os
 import csv
 import re
+from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, 'dev.sqlite')
@@ -171,6 +172,25 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     return conn
+
+
+@contextmanager
+def db():
+    """Conexão que fecha mesmo se der exceção no meio.
+
+    Sem isto, qualquer erro entre `get_db()` e `close()` deixa a conexão aberta
+    segurando o lock de escrita — e **todas** as chamadas seguintes falham com
+    "database is locked" até o app ser reiniciado. Aconteceu de verdade: tentar
+    criar uma receita com nome que já existia derrubava o app inteiro.
+
+    Faz commit ao sair normalmente; exceção propaga sem gravar nada.
+    """
+    conn = get_db()
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _migrar_receita_para_catalogo(conn) -> None:

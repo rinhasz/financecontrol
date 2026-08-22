@@ -578,3 +578,19 @@ tem lançamento, logo não aparece em `nao_encontrados` — e sem essa lista à
 parte, "estorno" e "resgate esporádico" seriam **inalcançáveis** na seção 3.
 Eles não são filtrados por "já associado" como os fixos, porque podem receber
 mais de uma transação no mesmo mês.
+
+---
+
+## Correções depois do uso real
+
+**A correção da seção 1 oferecia o catálogo errado.** Na aba Entradas, o
+"Não é essa receita" listava **despesas** — a tela carregava só
+`api.catalogo.list()`. Corrigir um crédito ali produziria um vínculo sem
+sentido. Agora os dois catálogos são carregados e a tela usa o do lado corrente.
+
+**O rótulo "+ Nova despesa" era fixo** no `DespesaPicker`, então aparecia
+também na aba de receitas. Virou a prop `novaLabel`.
+
+**O passo "Revisar" não mostrava que o extrato traz entradas.** Ganhou a
+contagem "N saídas · N entradas", para ficar claro antes do batimento que os
+dois lados vieram no mesmo arquivo.

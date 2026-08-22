@@ -175,3 +175,24 @@ próprio teste havia escrito.
 **Ao testar confirmação de batimento:** rode `git diff docs/07-...` no fim e
 remova o que o teste escreveu. E para comparar duas versões do código, garanta
 que o gabarito é o mesmo nas duas rodadas.
+
+---
+
+## Exceção entre `get_db()` e `close()` trava o app inteiro
+
+O padrão `conn = get_db()` … `conn.commit()` / `conn.close()` **não tem
+try/finally**. Qualquer exceção no meio deixa a conexão aberta segurando o lock
+de escrita do SQLite, e a partir dali **todas** as chamadas falham com
+`database is locked` — até fechar e reabrir o app.
+
+Aconteceu de verdade: criar uma receita com um nome que já existia levantava
+`sqlite3.IntegrityError` (a coluna `nome` é UNIQUE), a conexão vazava, e o app
+ficava inutilizável. Um erro de digitação derrubava tudo.
+
+**Ao escrever no banco numa rota, use o context manager `db()`** (`api/db.py`),
+que faz commit ao sair normalmente e fecha em qualquer caso. E trate
+`IntegrityError` como resposta 409 legítima: nome repetido é erro do usuário,
+não falha de sistema.
+
+As rotas de escrita de catálogo (despesa e receita) já foram convertidas; as
+demais ainda usam o padrão antigo.

@@ -88,6 +88,7 @@ export function Catalogo() {
   const [form, setForm] = useState<FormState | null>(null)
   const [criando, setCriando] = useState(false)
   const [importando, setImportando] = useState(false)
+  const [erro, setErro] = useState('')
 
   const ehReceita = natureza === 'receita'
 
@@ -114,12 +115,14 @@ export function Catalogo() {
   }
 
   function abrirEdicao(d: Item) {
+    setErro('')
     setCriando(false)
     setEditando(editando === d.id ? null : d.id)
     setForm(itemParaForm(d))
   }
 
   function abrirCriacao() {
+    setErro('')
     setEditando(null)
     setCriando(c => !c)
     setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
@@ -139,9 +142,19 @@ export function Catalogo() {
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
     }
     const dia = form.dia ? Number(form.dia) : null
-    await (ehReceita
-      ? api.receitas.upsert({ ...comum, tipo: form.tipo, dia_recebimento: dia })
-      : api.catalogo.upsert({ ...comum, dia_vencimento: dia }))
+    setErro('')
+    try {
+      await (ehReceita
+        ? api.receitas.upsert({ ...comum, tipo: form.tipo, dia_recebimento: dia })
+        : api.catalogo.upsert({ ...comum, dia_vencimento: dia }))
+    } catch (e) {
+      // nome repetido é o caso comum — mostrar na tela em vez de sumir com o
+      // formulário e o texto que o usuário digitou
+      let msg = String(e)
+      try { msg = JSON.parse(msg.replace(/^Error:\s*/, '')).msg ?? msg } catch { /* não era JSON */ }
+      setErro(msg)
+      return
+    }
     setEditando(null)
     setCriando(false)
     setForm(null)
@@ -237,6 +250,7 @@ export function Catalogo() {
         className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 transition-colors">
         Salvar
       </button>
+      {erro && <p className="text-xs text-red-400 w-full">{erro}</p>}
     </div>
   )
 
