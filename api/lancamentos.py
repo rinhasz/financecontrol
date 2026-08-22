@@ -251,8 +251,13 @@ def resumo():
     resgate_ja_feito = movimentacao.get('resgate_mensal', 0.0)
     falta_resgatar = max(0, resgate_necessario - resgate_ja_feito)
 
+    # a competência não é o mês do calendário; mostrar o intervalo evita o
+    # usuário ter que deduzir a regra de antecipação de fim de semana/feriado
+    ini, fim = periodo_competencia(mes_ref, int(get_config_value(conn, 'dia_recebimento_salario', '26')))
+
     conn.close()
     return jsonify({
+        'periodo': {'ini': ini, 'fim': fim},
         'pago': pago, 'agendado': agendado, 'naoEncontrado': nao,
         'total': total, 'reserva': reserva, 'saldo': saldo,
         'renda': renda, 'rendaRecebida': renda_recebida,

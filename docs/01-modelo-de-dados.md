@@ -243,7 +243,7 @@ A fonte de verdade é a tabela.
 |-------|--------|-----|
 | `reserva_desejada` | `5000` | Colchão na calculadora de resgate (doc 04) |
 | `saldo_conta` | `0` | Saldo atual informado pelo usuário |
-| `dia_recebimento_salario` | `27` | Define o mês de competência (doc 10) — despesas de um mês começam a ser pagas quando o salário cai, no dia 27 do mês anterior |
+| `dia_recebimento_salario` | `26` | Define o mês de competência (doc 10). O mês vai do dia 26 do mês anterior ao 25 — **antecipando** quando o 26 cai em fim de semana ou feriado, porque é aí que o banco credita |
 
 ---
 

@@ -10,15 +10,36 @@ dois divergirem, este aqui é o que vale.
 
 ## Mês de competência (não é mês do calendário)
 
-As despesas de um mês começam a ser pagas quando o salário cai — dia 27 do mês
-anterior, configurável em `config.dia_recebimento_salario` e editável na tela
-Mês Atual. Então `mes_ref='2026-08'` com corte 27 cobre o extrato de
-**2026-07-27 a 2026-08-26**.
+As despesas de um mês começam a ser pagas quando o salário cai — **dia 26 do mês
+anterior**, configurável em `config.dia_recebimento_salario` e editável na tela
+Mês Atual. Então `mes_ref='2026-08'` normalmente cobre **2026-07-26 a
+2026-08-25**.
+
+### Antecipação por fim de semana e feriado
+
+Salário que cairia em sábado, domingo ou feriado é creditado **antes**, no
+último dia útil — e é a data do crédito que abre a competência. Em 2026, o 26 de
+julho é um domingo, então `mes_ref='2026-08'` na verdade começa em
+**2026-07-24** (sexta).
+
+O fim **não** é um dia fixo: é sempre a véspera do próximo crédito. Se o 26 do
+mês seguinte for antecipado, esta competência acaba antes. É o que faz os meses
+se encaixarem sem buraco nem sobreposição — propriedade verificada mês a mês.
+
+`feriados_bancarios(ano)` cobre os oito feriados nacionais fixos mais os móveis
+em que o banco não opera (Carnaval segunda e terça, Sexta-feira Santa, Corpus
+Christi), calculados a partir da Páscoa (`_pascoa`, algoritmo gregoriano
+anônimo). **Feriado municipal não entra**: varia por cidade e o app não sabe
+onde o usuário está. Se o salário cair num feriado só da cidade, o ajuste erra
+por um dia — o dia continua editável na tela.
 
 Implementado em `periodo_competencia(mes_ref, dia_corte)` (`api/db.py`), usado
 por todo o batimento. Cuidados que a função já trata: mês anterior com menos
 dias que o corte (`min(dia_corte, último dia do mês)`) e `dia_corte=1`, que
 ingenuamente produziria uma data com dia 0.
+
+A tela Mês Atual **mostra o intervalo calculado** ao lado do dia do salário: a
+regra de antecipação é invisível demais para ficar só no código.
 
 ---
 

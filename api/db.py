@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS config (
 
 INSERT OR IGNORE INTO config VALUES ('reserva_desejada', '5000');
 INSERT OR IGNORE INTO config VALUES ('saldo_conta', '0');
-INSERT OR IGNORE INTO config VALUES ('dia_recebimento_salario', '27');
+INSERT OR IGNORE INTO config VALUES ('dia_recebimento_salario', '26');
 """
 
 PADRAO_MAP = {
@@ -365,12 +365,74 @@ def get_config_value(conn, chave: str, default: str) -> str:
     return row['valor'] if row else default
 
 
+def _pascoa(ano: int):
+    """Domingo de Páscoa (algoritmo gregoriano anônimo). Base dos feriados
+    móveis: Carnaval, Sexta-feira Santa e Corpus Christi."""
+    from datetime import date
+    a = ano % 19
+    b, c = divmod(ano, 100)
+    d, e = divmod(b, 4)
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    mes = (h + l - 7 * m + 90) // 25
+    dia = (h + l - 7 * m + 33 * mes + 19) % 32
+    return date(ano, mes, dia)
+
+
+def feriados_bancarios(ano: int) -> set:
+    """Dias em que banco não credita: feriados nacionais + os móveis em que o
+    sistema bancário não opera (Carnaval e Corpus Christi são ponto facultativo,
+    mas o banco fecha, que é o que importa aqui).
+
+    Feriado municipal não entra — varia por cidade e o app não sabe onde o
+    usuário está. Se o salário cair num feriado só da cidade, o ajuste erra por
+    um dia; o `dia_recebimento_salario` continua editável na tela.
+    """
+    from datetime import date, timedelta
+    pascoa = _pascoa(ano)
+    return {
+        date(ano, 1, 1),    # Confraternização Universal
+        date(ano, 4, 21),   # Tiradentes
+        date(ano, 5, 1),    # Dia do Trabalho
+        date(ano, 9, 7),    # Independência
+        date(ano, 10, 12),  # Nossa Senhora Aparecida
+        date(ano, 11, 2),   # Finados
+        date(ano, 11, 15),  # Proclamação da República
+        date(ano, 12, 25),  # Natal
+        pascoa - timedelta(days=48),  # Carnaval (segunda)
+        pascoa - timedelta(days=47),  # Carnaval (terça)
+        pascoa - timedelta(days=2),   # Sexta-feira Santa
+        pascoa + timedelta(days=60),  # Corpus Christi
+    }
+
+
+def dia_util_anterior(d):
+    """Recua até o primeiro dia útil <= d.
+
+    Salário que cairia em sábado, domingo ou feriado é creditado **antes**, no
+    último dia útil — e é a data do crédito que abre a competência.
+    """
+    from datetime import timedelta
+    feriados = feriados_bancarios(d.year) | feriados_bancarios(d.year - 1)
+    while d.weekday() >= 5 or d in feriados:
+        d -= timedelta(days=1)
+    return d
+
+
 def periodo_competencia(mes_ref: str, dia_corte: int):
     """Converte um mes_ref (competência) no intervalo real de datas do extrato.
 
-    As despesas de um mês começam a ser pagas a partir do dia em que o
-    salário cai (ex: dia 27 do mês anterior), não no dia 1 do próprio mês.
-    Então mes_ref='2026-08' com dia_corte=27 cobre 2026-07-27 a 2026-08-26.
+    As despesas de um mês começam a ser pagas quando o salário cai — dia 26 do
+    mês anterior, ou **antes** se o 26 for fim de semana ou feriado, porque o
+    banco antecipa o crédito. Então `mes_ref='2026-08'` com `dia_corte=26`
+    normalmente cobre 2026-07-26 a 2026-08-25.
+
+    O fim é sempre a **véspera do próximo crédito**, não um dia fixo: se o 26 do
+    mês seguinte for antecipado para o 24, esta competência acaba no 23. É o que
+    faz os meses se encaixarem sem buraco nem sobreposição.
     """
     import calendar
     from datetime import date, timedelta
@@ -381,13 +443,13 @@ def periodo_competencia(mes_ref: str, dia_corte: int):
     else:
         ano_ant, mes_ant = ano, mes - 1
 
-    dia_ini = min(dia_corte, calendar.monthrange(ano_ant, mes_ant)[1])
-    ini = date(ano_ant, mes_ant, dia_ini)
+    # min(): mês com menos dias que o corte (fevereiro com dia_corte=30)
+    ini = dia_util_anterior(
+        date(ano_ant, mes_ant, min(dia_corte, calendar.monthrange(ano_ant, mes_ant)[1])))
 
-    # fim = véspera do próximo corte (o corte de dia_corte dentro do próprio
-    # mes_ref) — evita construir uma data com dia 0 quando dia_corte=1
-    dia_corte_no_mes = min(dia_corte, calendar.monthrange(ano, mes)[1])
-    fim = date(ano, mes, dia_corte_no_mes) - timedelta(days=1)
+    proximo = dia_util_anterior(
+        date(ano, mes, min(dia_corte, calendar.monthrange(ano, mes)[1])))
+    fim = proximo - timedelta(days=1)
 
     return ini.isoformat(), fim.isoformat()
 

@@ -35,6 +35,7 @@ interface Receita {
 }
 
 interface Resumo {
+  periodo: { ini: string; fim: string }
   pago: number; agendado: number; naoEncontrado: number
   total: number; reserva: number; saldo: number
   renda: number; rendaRecebida: number
@@ -170,7 +171,16 @@ export function MesAtual() {
           </button>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 text-sm text-zinc-500">
+          {resumo && (
+            <span className="text-xs text-zinc-500 tabular-nums"
+              title="A competência vai do dia do salário até a véspera do próximo">
+              {new Date(resumo.periodo.ini + 'T00:00:00').toLocaleDateString('pt-BR')}
+              {' a '}
+              {new Date(resumo.periodo.fim + 'T00:00:00').toLocaleDateString('pt-BR')}
+            </span>
+          )}
+          <div className="flex items-center gap-1.5 text-sm text-zinc-500"
+            title="Se o dia cair em fim de semana ou feriado, o mês começa antes — no último dia útil, que é quando o banco credita">
             <span>Recebo o salário no dia</span>
             {diaSalarioEdit ? (
               <input autoFocus type="number" min={1} max={31}
