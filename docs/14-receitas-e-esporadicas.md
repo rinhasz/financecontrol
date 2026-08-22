@@ -626,3 +626,15 @@ lançamento. Sem aparecer entre as casadas, um vínculo errado desses ficaria
 intocável, exatamente o problema já corrigido para os casamentos gravados. Vêm
 marcados `sem_lancamento`, para a tela **não** devolvê-los à seção 2 quando o
 usuário troca o item: não há previsão para onde voltar.
+
+**O combo da seção 3 sai do catálogo, não das listas do batimento.** O batimento
+é uma foto do instante em que rodou: um item criado depois dele não estaria em
+`nao_encontrados` (item fixo só entra ali quando ganha lançamento) e ficaria
+invisível até rodar de novo. Como a tela recarrega o catálogo ao voltar a ficar
+visível, criar no Catálogo e vir associar aqui funciona na hora. As listas do
+batimento seguem servindo para o **valor previsto**, que só existe quando há
+lançamento no mês. Isso tornou `sempre_disponiveis` redundante — foi removido.
+
+**O selo de status da seção 1 tinha texto fixo** (`Pago`/`Agendado`), então um
+salário já creditado aparecia como "Agendado" na aba de entradas. O vocabulário
+correto dos dois lados já existia em `STATUS_LABEL` e não estava sendo usado ali.

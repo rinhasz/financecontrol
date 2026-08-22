@@ -36,17 +36,6 @@ interface DetalheMatch {
   sem_lancamento?: boolean
 }
 
-/** Item que a seção 3 oferece sempre: esporádico (não tem lançamento, logo não
- *  está em `nao_encontrados`) ou marcado "mais de um por mês" (continua
- *  disponível mesmo depois de já ter casado). */
-interface SempreDisponivel {
-  item_id: number
-  item_nome: string
-  varios_por_mes?: boolean
-  recorrencia?: 'fixa' | 'esporadica'
-  tipo?: string
-}
-
 const STATUS_LABEL: Record<string, string> = {
   pago: 'Pago', agendado: 'Agendado', nao_encontrado: 'Em aberto',
   recebido: 'Recebido', previsto: 'Previsto'
@@ -83,9 +72,6 @@ interface NaoEncontrado {
   item_id: number
   item_nome: string
   valor_esperado: number
-  // atributo do catálogo: pode acontecer mais de uma vez no mesmo mês. É o que
-  // decide se o item continua na lista depois de já ter recebido uma transação.
-  varios_por_mes?: boolean
   tipo?: string
 }
 
@@ -94,7 +80,6 @@ interface LadoBatimento {
   total: number
   detalhes: DetalheMatch[]
   nao_encontrados: NaoEncontrado[]
-  sempre_disponiveis: SempreDisponivel[]
   transacoes_sobrando: TransacaoSobrando[]
 }
 
@@ -109,7 +94,14 @@ interface TransacaoSobrando {
   estorno_sugerido?: { transacao_id: number; descricao: string; data: string; valor: number }
 }
 
-interface Despesa { id: number; nome: string }
+interface Despesa {
+  id: number
+  nome: string
+  ativo?: number
+  varios_por_mes?: number
+  recorrencia?: 'fixa' | 'esporadica'
+  tipo?: string
+}
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
@@ -166,10 +158,7 @@ export function Importacao({ active }: { active: boolean }) {
   // no Catálogo enquanto essa aba já estava aberta nunca apareceria aqui
   async function carregarCatalogos() {
     const [d, r] = await Promise.all([api.catalogo.list(), api.receitas.list()])
-    setCatalogos({
-      despesa: d,
-      receita: (r as { id: number; nome: string }[]).map(x => ({ id: x.id, nome: x.nome }))
-    })
+    setCatalogos({ despesa: d, receita: r })
   }
 
   useEffect(() => {
@@ -327,8 +316,7 @@ export function Importacao({ active }: { active: boolean }) {
   function tipoDoItem(id: string): string | undefined {
     if (!id || id === 'nova') return undefined
     const n = Number(id)
-    return lado?.nao_encontrados.find(x => x.item_id === n)?.tipo
-      ?? lado?.sempre_disponiveis.find(x => x.item_id === n)?.tipo
+    return catalogo.find(x => x.id === n)?.tipo
   }
 
   async function aplicarAssociacao(t: TransacaoSobrando) {
@@ -342,9 +330,8 @@ export function Importacao({ active }: { active: boolean }) {
     } else {
       if (!selecionadaAssoc) return
       despesaId = Number(selecionadaAssoc)
-      despesaNome = lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome
-        ?? lado?.sempre_disponiveis.find(x => x.item_id === despesaId)?.item_nome
-        ?? catalogo.find(ds => ds.id === despesaId)?.nome ?? '?'
+      despesaNome = catalogo.find(ds => ds.id === despesaId)?.nome
+        ?? lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome ?? '?'
     }
     const tipo = tipoDoItem(selecionadaAssoc)
     associarPar(t, despesaId, despesaNome, {
@@ -427,27 +414,27 @@ export function Importacao({ active }: { active: boolean }) {
   // pode acontecer mais de uma vez no mês. Antes isso era deduzido da
   // recorrência, o que impedia uma despesa fixa de receber duas cobranças no
   // mesmo mês (a escola cobrando mensalidade e material, por exemplo).
-  const disponivel = (item: { item_id: number; varios_por_mes?: boolean }) =>
-    item.varios_por_mes || !despesasAssociadas.has(item.item_id)
+  //
+  // A lista sai do CATÁLOGO, não das listas do batimento. O batimento é uma
+  // foto do momento em que rodou: um item criado depois dele não estaria em
+  // `nao_encontrados` (item fixo só entra ali quando ganha lançamento) e ficaria
+  // invisível até rodar de novo. Como o catálogo é recarregado ao voltar para
+  // esta aba, criar no Catálogo e vir associar aqui funciona na hora.
+  //
+  // `nao_encontrados` continua servindo para uma coisa: o valor previsto, que
+  // só existe quando há lançamento no mês.
+  const previstoPorItem = new Map((lado?.nao_encontrados ?? []).map(n => [n.item_id, n.valor_esperado]))
 
-  const opcoesDespesa = (() => {
-    const vistos = new Set<number>()
-    const out: { id: number; nome: string }[] = []
-    for (const n of lado?.nao_encontrados ?? []) {
-      if (!disponivel(n) || vistos.has(n.item_id)) continue
-      vistos.add(n.item_id)
-      out.push({ id: n.item_id, nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome })
-    }
-    // um item fixo marcado "mais de um por mês" aparece nas duas listas — a
-    // primeira ocorrência já entrou acima, com o previsto
-    for (const e of lado?.sempre_disponiveis ?? []) {
-      if (vistos.has(e.item_id)) continue
-      vistos.add(e.item_id)
-      const marca = e.recorrencia === 'esporadica' ? 'esporádica' : 'mais de um por mês'
-      out.push({ id: e.item_id, nome: `${e.item_nome}  ·  ${marca}` })
-    }
-    return out
-  })()
+  const opcoesDespesa = catalogo
+    .filter(d => d.ativo !== 0)
+    .filter(d => !!d.varios_por_mes || !despesasAssociadas.has(d.id))
+    .map(d => {
+      const previsto = previstoPorItem.get(d.id)
+      const marca = previsto && previsto > 0 ? formatBRL(previsto)
+        : d.recorrencia === 'esporadica' ? 'esporádica'
+        : d.varios_por_mes ? 'mais de um por mês' : null
+      return { id: d.id, nome: marca ? `${d.nome}  ·  ${marca}` : d.nome }
+    })
 
   return (
     <div className="flex flex-col h-full pt-3">
@@ -645,9 +632,15 @@ export function Importacao({ active }: { active: boolean }) {
                                   {STATUS_LABEL[d.status_anterior] ?? d.status_anterior}
                                 </span>
                               )}
+                              {/* o selo tinha o texto fixo em Pago/Agendado, então um
+                                  salário já creditado aparecia como "Agendado" na aba
+                                  de entradas. STATUS_LABEL já tem o vocabulário certo
+                                  dos dois lados. */}
                               <span className={cn('text-xs px-2 py-0.5 rounded',
-                                d.status === 'pago' ? 'text-emerald-400 bg-emerald-950/40' : 'text-blue-400 bg-blue-950/40')}>
-                                {d.status === 'pago' ? 'Pago' : 'Agendado'}
+                                STATUS_CONFIRMADO.has(d.status)
+                                  ? 'text-emerald-400 bg-emerald-950/40'
+                                  : 'text-blue-400 bg-blue-950/40')}>
+                                {STATUS_LABEL[d.status] ?? d.status}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">

@@ -530,22 +530,6 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
     # `nao_encontrados` — e sem isto a tela não teria como oferecê-los na seção
     # 3, deixando "estorno" e "resgate esporádico" inalcançáveis. Vão à parte
     # justamente porque não são uma cobrança em aberto: não têm previsão.
-    # Itens que a seção 3 oferece **sempre**, independente de já terem casado:
-    #  - esporádicos, que não têm lançamento e portanto não estão em
-    #    `nao_encontrados`;
-    #  - os marcados "mais de um por mês", que continuam disponíveis depois do
-    #    primeiro casamento (a escola cobra mensalidade e material no mesmo mês).
-    # Sem esta lista, o item saía do combo assim que recebia uma transação.
-    sempre_disponiveis = [
-        {'natureza': natureza, 'item_id': r['id'], 'item_nome': r['nome'],
-         'varios_por_mes': bool(r['varios_por_mes']),
-         'recorrencia': r['recorrencia'],
-         **({'tipo': r['tipo']} if natureza == 'receita' else {})}
-        for r in conn.execute(
-            f"SELECT * FROM {c['catalogo']} "
-            "WHERE ativo=1 AND (recorrencia='esporadica' OR varios_por_mes=1) ORDER BY nome")
-    ]
-
     return {
         # total é derivado das próprias listas devolvidas — casadas + em aberto.
         # Contar só os lançamentos deixava o placar mentir conforme entravam
@@ -553,7 +537,6 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
         'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,
-        'sempre_disponiveis': sempre_disponiveis,
         'transacoes_sobrando': sobrando,
     }
 
