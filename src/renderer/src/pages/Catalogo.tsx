@@ -223,7 +223,7 @@ export function Catalogo() {
       {ehReceita && (
         <Field label="Tipo">
           <select value={form.tipo} onChange={e => setForm(f => f && { ...f, tipo: e.target.value })}
-            title="Resgate, estorno e transferência não contam como renda do mês"
+            title="Decide se o valor conta como renda do mês. Resgate, estorno e transferência não contam — é dinheiro que entra na conta sem ser renda nova. Escolha Estorno para poder marcar, na tela de importação, qual débito aquele crédito anula."
             className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
             {Object.entries(TIPO_RECEITA_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>

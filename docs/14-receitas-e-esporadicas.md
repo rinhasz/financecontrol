@@ -670,3 +670,23 @@ pode ser casada com a cobrança de verdade (no caso real, o boleto refeito).
 
 Por isso o seletor oferece **todos** os débitos do período, não só os sem
 despesa: uma cobrança já casada também pode ser estornada.
+
+### Como se cadastra um estorno (o fluxo não era descobrível)
+
+O caminho existia mas ninguém adivinhava: era preciso saber que o registro
+passa por uma *receita* — contraintuitivo, já que estorno não é renda — e
+depois escolher o item no combo e procurar o débito anulado. Quatro passos, dois
+deles invisíveis.
+
+**Uma vez, no Catálogo → Receitas:** criar um item com **Tipo = Estorno**
+(recorrência esporádica). É o mesmo item para todos os estornos; não se cria um
+por ocorrência.
+
+**A cada estorno, na Importação → Entradas → seção 3:** o crédito suspeito
+mostra um botão **`é estorno de "X"?`** que faz tudo num clique — associa ao
+item de estorno e já grava o débito anulado. O caminho manual pelo combo
+continua existindo para quando a heurística não sugere nada.
+
+Enquanto não existir nenhuma receita com Tipo = Estorno, a linha diz o que
+falta em vez de simplesmente não oferecer a ação:
+*"parece estornar X — falta uma receita com Tipo = Estorno"*.

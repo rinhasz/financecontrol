@@ -46,7 +46,7 @@ const STATUS_CONFIRMADO = new Set(['pago', 'recebido'])
 /** Rótulos que mudam conforme o lado. Manter num lugar só evita a tela dizer
  *  "despesa" no bloco de entradas. */
 const TEXTO: Record<Natureza, {
-  item: string; itens: string; sec1: string; sec2: string; sec3: string
+  item: string; itens: string; sec1: string; sec2: string; sec3: string; ajuda3: string
   associarTx: string; associarItem: string; novoItem: string; trocar: string
 }> = {
   despesa: {
@@ -54,6 +54,7 @@ const TEXTO: Record<Natureza, {
     sec1: 'Despesas casadas',
     sec2: 'Despesas ativas que não encontrei no extrato',
     sec3: 'Débitos do extrato sem despesa',
+    ajuda3: 'Associe a uma despesa ativa ainda em aberto, ou crie uma despesa nova.',
     associarTx: 'Associar débito', associarItem: 'Associar despesa',
     novoItem: 'Nova despesa', trocar: 'Não é essa despesa'
   },
@@ -62,6 +63,8 @@ const TEXTO: Record<Natureza, {
     sec1: 'Receitas casadas',
     sec2: 'Receitas ativas que não encontrei no extrato',
     sec3: 'Créditos do extrato sem receita',
+    ajuda3: 'Nem todo crédito é renda: escolha uma receita do tipo Resgate, Estorno ou Transferência '
+      + 'para o valor entrar na conta sem contar como renda do mês.',
     associarTx: 'Associar crédito', associarItem: 'Associar receita',
     novoItem: 'Nova receita', trocar: 'Não é essa receita'
   }
@@ -379,6 +382,7 @@ export function Importacao({ active }: { active: boolean }) {
    *  e o débito estornado segue contando como despesa paga. O backend recusa,
    *  então a tela cobra antes de deixar confirmar. */
   const ehEstorno = (itemId: number) => catalogos.receita.find(x => x.id === itemId)?.tipo === 'estorno'
+  const itemEstorno = catalogos.receita.find(x => x.tipo === 'estorno')
 
   const estornosIncompletos = (['despesa', 'receita'] as Natureza[]).flatMap(n =>
     n === 'receita'
@@ -814,8 +818,7 @@ export function Importacao({ active }: { active: boolean }) {
                  escolher uma despesa que já casou com outra transação. */}
             {lado.transacoes_sobrando.length > 0 && (
               <div>
-                <Secao n={3} titulo={t.sec3} qtd={lado.transacoes_sobrando.length}
-                  ajuda={`Associe a uma ${t.item} ativa ainda em aberto, ou crie uma ${t.item} nova.`} />
+                <Secao n={3} titulo={t.sec3} qtd={lado.transacoes_sobrando.length} ajuda={t.ajuda3} />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
@@ -835,11 +838,25 @@ export function Importacao({ active }: { active: boolean }) {
                             </td>
                             <td className="px-4 py-2 text-zinc-300">
                               {tx.descricao}
-                              {tx.estorno_sugerido && (
-                                <span className="ml-2 text-[11px] text-amber-500/80"
-                                  title={`Mesmo valor de "${tx.estorno_sugerido.descricao}" em ${new Date(tx.estorno_sugerido.data + 'T00:00:00').toLocaleDateString('pt-BR')} — pode ser estorno`}>
-                                  parece estornar "{tx.estorno_sugerido.descricao}"
-                                </span>
+                              {tx.estorno_sugerido && confirmado === null && (
+                                itemEstorno ? (
+                                  // um clique faz tudo: escolhe o item de estorno e já
+                                  // aponta o débito anulado. Antes era escolher o item
+                                  // no combo e depois procurar o débito — dois passos
+                                  // que ninguém adivinha que existem.
+                                  <button
+                                    onClick={() => associarPar(tx, itemEstorno.id, itemEstorno.nome,
+                                      { estorna_transacao_id: tx.estorno_sugerido!.transacao_id })}
+                                    className="ml-2 text-[11px] text-amber-400 hover:text-amber-300 underline decoration-dotted transition-colors"
+                                    title={`Marca este crédito como estorno de "${tx.estorno_sugerido.descricao}" de ${new Date(tx.estorno_sugerido.data + 'T00:00:00').toLocaleDateString('pt-BR')}, mesmo valor`}>
+                                    é estorno de "{tx.estorno_sugerido.descricao}"?
+                                  </button>
+                                ) : (
+                                  <span className="ml-2 text-[11px] text-amber-500/80"
+                                    title={`Mesmo valor de "${tx.estorno_sugerido.descricao}", poucos dias depois. Para registrar estorno, crie no Catálogo uma receita com Tipo = Estorno.`}>
+                                    parece estornar "{tx.estorno_sugerido.descricao}" — falta uma receita com Tipo = Estorno
+                                  </span>
+                                )
                               )}
                             </td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(Math.abs(tx.valor))}</td>
