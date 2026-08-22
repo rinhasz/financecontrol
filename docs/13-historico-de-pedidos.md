@@ -67,6 +67,32 @@ como duplicata e a transação ficava `agendada` para sempre.
 com a despesa). E o batimento passou a reavaliar lançamentos já casados cuja
 transação mudou de situação, mostrando o status anterior riscado.
 
+**"O batimento está ruim — identificou metade, e várias erradas"** (2026-08)
+Diagnóstico mediu o mês inteiro: 18 de 39 casados e, entre os 10 com correção
+já registrada, **7 repetindo exatamente o erro que o usuário já tinha
+corrigido**.
+
+A causa não era o scoring: `_registrar_dicionario()` gravava as correções em
+`docs/07` (arquivo legível) e **nada lia de volta**. Para email já existia
+aprendizado (`email_despesa_regra`); para extrato, não.
+
+→ Tabela `transacao_despesa_regra`, semeada com as 29 correções já existentes e
+alimentada por toda confirmação. Chave é o *padrão* da descrição, sem data nem
+número de documento, porque o texto muda todo mês. Resultado: 18 → 31
+casamentos, zero erro conhecido.
+
+Bugs encontrados durante a medição, que só apareceram por medir:
+- variável `regras` do meu código colidia com a `regras` do laço (o
+  `regras_match` da despesa), anulando tudo em silêncio — as regras existiam no
+  banco e não surtiam efeito nenhum;
+- o bônus da regra atropelava o valor, fazendo `salário` levar o valor que era
+  do `vale transporte` (mesma descrição, valores diferentes);
+- o próprio avaliador acusava acerto como erro, por assumir uma despesa por
+  descrição quando a mesma descrição serve a várias.
+
+Ferramenta que ficou: `tools/avaliar_batimento.py`, para medir em vez de julgar
+por impressão.
+
 ---
 
 ## Catálogo

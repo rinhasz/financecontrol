@@ -121,6 +121,51 @@ travando lançamento e transação já usados. Montar todos os pares antes de
 decidir evita que uma despesa processada primeiro "roube" a transação de outra
 com palavra-chave parecida (era o caso de "cartao xp" vs "cartao black").
 
+### Regras aprendidas (o que mais pesa)
+
+Toda confirmação grava `padrão de descrição → despesa` em
+`transacao_despesa_regra`. No batimento seguinte:
+
+| Situação | Efeito no score |
+|----------|-----------------|
+| A despesa é dona conhecida daquele padrão | **+8** |
+| O padrão tem dono conhecido, mas é **outra** despesa | **−4** |
+
+O `padrao` ignora datas e números de documento (`padrao_descricao()`), porque
+a descrição muda todo mês: `PIX TRANSF MARIA J28/07` e `...J01/08` são o mesmo
+padrão.
+
+**Por que isso existe:** as correções do usuário iam só para `docs/07`, um
+arquivo legível que **nada lia de volta**. Medido em agosto/2026: de 10
+casamentos para os quais já havia correção registrada, **7 repetiam o mesmo
+erro**. Fechar o ciclo levou o mês de 18 para 31 casamentos, sem erro conhecido.
+
+Dois cuidados que a medição obrigou a acrescentar:
+
+- **Penalidade não vale quando o valor bate na mosca.** Uma mesma descrição
+  serve a várias despesas (mensalidade e material da mesma escola); a segunda
+  precisa conseguir casar antes de ser aprendida.
+- **O bônus não atropela valor.** Se o valor da transação encaixa exato em
+  outra despesa e destoa muito desta, o +8 não é aplicado — foi o que impedia
+  `vale transporte` de receber o valor que era dele, tomado por `salário` só
+  porque dividem a descrição. A condição inclui "existe outra despesa que
+  encaixa no valor" de propósito: com previsto desatualizado (ou placeholder
+  de R$ 1,00), a regra ainda é a melhor evidência disponível.
+
+**Desaprender** é tão importante quanto aprender: ao rejeitar uma sugestão, a
+regra da despesa recusada é apagada. Sem isso a regra errada disputaria com a
+certa para sempre.
+
+Para medir depois de mexer no scoring:
+
+```bash
+python tools/avaliar_batimento.py 2026-08
+```
+
+Ele usa as correções de `docs/07` como gabarito e reporta ACERTO / ERRO /
+PERDIDO. Atenção ao viés: esse gabarito também alimenta as regras, então ele
+mede se o ciclo funciona — **não** se generaliza para descrições nunca vistas.
+
 ### Casamento por palavra inteira, não substring
 
 `tem_palavra(alvo, kw)` usa fronteira de palavra (regex `\b`). Com `in` puro

@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS posicao_investimento (
   rentabilidade      REAL
 );
 
+-- Aprendizado do batimento: "esse texto do extrato é essa despesa".
+-- Equivalente, para extrato bancário, do que email_despesa_regra já fazia
+-- para email. Sem isto o usuário corrigia os mesmos erros todo mês: as
+-- correções iam só para docs/07 (arquivo legível) e nada as lia de volta.
+-- A chave é o PADRÃO da descrição (ver padrao_descricao), não o texto
+-- literal, porque data e número de documento mudam a cada mês.
+CREATE TABLE IF NOT EXISTS transacao_despesa_regra (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  padrao     TEXT NOT NULL,
+  despesa_id INTEGER NOT NULL REFERENCES despesa(id),
+  acertos    INTEGER NOT NULL DEFAULT 1,
+  criado_em  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(padrao, despesa_id)
+);
+
 CREATE TABLE IF NOT EXISTS email_despesa_regra (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   remetente  TEXT NOT NULL UNIQUE,
@@ -139,8 +154,81 @@ def init_db():
         conn.execute('ALTER TABLE lancamento ADD COLUMN tipo_codigo TEXT')
 
     conn.commit()
+    _seed_regras_transacao(conn)
     conn.close()
     print(f'[db] initialized at {DB_PATH}')
+
+
+def _seed_regras_transacao(conn):
+    """Migra para a tabela as correções que já existiam só em docs/07.
+
+    Até aqui as correções do usuário eram gravadas apenas naquele arquivo
+    (legível, mas nunca lido de volta pelo app). Esta semeadura roda uma
+    única vez, quando a tabela ainda está vazia, para esse histórico não se
+    perder — daí em diante quem alimenta é a confirmação do batimento.
+    """
+    if conn.execute('SELECT COUNT(*) FROM transacao_despesa_regra').fetchone()[0]:
+        return
+
+    caminho = os.path.join(BASE_DIR, 'docs', '07-dicionario-despesas.md')
+    if not os.path.exists(caminho):
+        return
+
+    despesas = {r[1].strip().lower(): r[0] for r in conn.execute('SELECT id, nome FROM despesa')}
+    n = 0
+    with open(caminho, encoding='utf-8') as f:
+        for linha in f:
+            m = re.match(r'\|\s*`(.+?)`\s*\|\s*(.+?)\s*\|', linha)
+            if not m:
+                continue
+            despesa_id = despesas.get(m.group(2).strip().lower())
+            if despesa_id:
+                registrar_regra_transacao(conn, m.group(1).strip(), despesa_id)
+                n += 1
+    conn.commit()
+    if n:
+        print(f'[db] {n} regras de batimento semeadas a partir do dicionário')
+
+
+def padrao_descricao(descricao: str) -> str:
+    """Reduz a descrição do extrato ao que se repete mês a mês.
+
+    A mesma despesa vem com texto ligeiramente diferente todo mês, porque a
+    descrição carrega data e número de documento:
+        'PIX TRANSF MARIA J28/07'  e  'PIX TRANSF MARIA J01/08'
+        'INT IPTU02102204944'
+    Guardar a regra pelo texto literal só acertaria no mês em que foi
+    aprendida. Removendo data e sequências longas de dígitos sobra a parte
+    estável ('pix transf maria j', 'int iptu'), que é o que identifica a
+    despesa.
+
+    O que NÃO se remove: letras coladas ao número ('maria j' vs 'maria l',
+    'claro s.a.' vs 'claro bl/it') — são justamente o que distingue duas
+    despesas parecidas.
+    """
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(descricao or ''))
+    s = ''.join(c for c in s if not unicodedata.combining(c)).lower()
+    s = re.sub(r'\d{1,2}/\d{1,2}(?:/\d{2,4})?', ' ', s)   # datas
+    s = re.sub(r'\d{4,}', ' ', s)                          # documento/conta
+    s = re.sub(r'[^a-z0-9./-]+', ' ', s)
+    # sobra do passo acima: pedaços sem letra nenhuma ('.', '-', '.072').
+    # Só entram tokens que tenham ao menos uma letra — é a letra que
+    # identifica a despesa; dígito solto é resto de número de documento.
+    tokens = [t.strip('./-') for t in s.split()]
+    return ' '.join(t for t in tokens if t and re.search(r'[a-z]', t))
+
+
+def registrar_regra_transacao(conn, descricao: str, despesa_id: int):
+    """Grava (ou reforça) 'esse padrão de descrição é essa despesa'."""
+    padrao = padrao_descricao(descricao)
+    if not padrao or not despesa_id:
+        return
+    conn.execute(
+        'INSERT INTO transacao_despesa_regra (padrao, despesa_id) VALUES (?,?) '
+        'ON CONFLICT(padrao, despesa_id) DO UPDATE SET acertos = acertos + 1',
+        (padrao, despesa_id)
+    )
 
 
 def get_config_value(conn, chave: str, default: str) -> str:

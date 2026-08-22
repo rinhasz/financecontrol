@@ -4,7 +4,8 @@ import io
 import os
 from datetime import date
 from flask import Blueprint, jsonify, request
-from .db import get_db, get_config_value, periodo_competencia
+from .db import (get_db, get_config_value, periodo_competencia,
+                 padrao_descricao, registrar_regra_transacao)
 
 DICIONARIO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', '07-dicionario-despesas.md')
 
@@ -364,6 +365,26 @@ def rodar_batimento():
 
     import json as _json
 
+    # Regras aprendidas das confirmações anteriores: padrão de descrição ->
+    # despesas que o usuário já disse pertencerem àquele texto.
+    regras_aprendidas = {}
+    for r in conn.execute('SELECT padrao, despesa_id FROM transacao_despesa_regra'):
+        regras_aprendidas.setdefault(r['padrao'], set()).add(r['despesa_id'])
+    padrao_por_tx = {t['id']: padrao_descricao(t['descricao']) for t in transacoes}
+
+    # Transações cujo valor encaixa quase exato no previsto de alguma despesa.
+    # Só nessas o valor tem força para conter uma regra aprendida (abaixo):
+    # se ninguém encaixa no valor, o previsto provavelmente é que está
+    # desatualizado, e aí a regra continua sendo a melhor evidência.
+    tx_com_dono_por_valor = set()
+    for t in transacoes:
+        tx_abs = abs(t['valor'])
+        for l in lancamentos:
+            esp = l['valor_esperado']
+            if esp > 0 and abs(tx_abs - esp) / esp <= 0.01:
+                tx_com_dono_por_valor.add(t['id'])
+                break
+
     # Monta todos os pares (lançamento, transação) com score >= 3 primeiro,
     # sem travar nenhum casamento ainda — evita que uma despesa processada
     # antes "roube" a transação de outra despesa com palavra-chave parecida
@@ -379,12 +400,15 @@ def rodar_batimento():
             esperado = l['valor_esperado']
             score = 0
 
+            bateu_valor = False
             if l['tipo_valor'] == 'fixo':
                 if esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.005:
                     score += 3
+                    bateu_valor = True
             else:
                 if esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.15:
                     score += 2
+                    bateu_valor = esperado > 0 and abs(tx_abs - esperado) / esperado <= 0.01
 
             if l['dia_vencimento']:
                 tx_dia = int(t['data'].split('-')[2])
@@ -402,6 +426,36 @@ def rodar_batimento():
                     score += 2 * len(keywords)
                 elif matched_kw > 0:
                     score += 1
+
+            # O que o usuário já confirmou vale mais que qualquer heurística:
+            # ele viu o extrato e disse de quem era. E o inverso também é
+            # informação — se este texto pertence a outra despesa, casá-lo
+            # aqui provavelmente repete um erro já corrigido antes.
+            # Vários pagamentos ao mesmo destinatário dividem a descrição
+            # (salário, adiantamento e vale transporte da mesma pessoa) e só o
+            # valor os separa. Quando o valor desta transação encaixa exato em
+            # OUTRA despesa e destoa muito desta, a regra aprendida não pode
+            # atropelar — mas a condição é essa, não só o valor destoar: com
+            # previsto desatualizado (ou placeholder), a regra ainda é a
+            # melhor evidência que existe.
+            valor_contradiz = (esperado > 0
+                               and abs(tx_abs - esperado) / esperado > 0.5
+                               and t['id'] in tx_com_dono_por_valor)
+
+            donos = regras_aprendidas.get(padrao_por_tx.get(t['id']))
+            if donos:
+                if l['despesa_id'] in donos:
+                    if not valor_contradiz:
+                        score += 8
+                elif not bateu_valor:
+                    # penalidade, não desqualificação: uma mesma descrição
+                    # pode servir a duas despesas (ex: mensalidade e material
+                    # da mesma escola, separadas só pelo valor) e a segunda
+                    # ainda precisa conseguir casar antes de ser aprendida.
+                    # Por isso valor batendo na mosca isenta da penalidade:
+                    # é evidência mais forte que a regra aprendida de outra
+                    # despesa que divide o mesmo texto.
+                    score -= 4
 
             if score >= 3:
                 candidatos.append((score, l, t))
@@ -511,6 +565,15 @@ def confirmar_batimento():
             if despesa_id_sugerido:
                 row = conn.execute('SELECT nome FROM despesa WHERE id=?', (despesa_id_sugerido,)).fetchone()
                 nome_sugerido = row['nome'] if row else None
+                # o usuário rejeitou esta sugestão: desaprende, senão a regra
+                # errada continuaria disputando com a certa nos próximos meses.
+                # (não basta o desaprender de _persistir_par: ali só cai o
+                # vínculo já gravado, e uma sugestão recusada nunca chegou a
+                # ser gravada)
+                conn.execute(
+                    'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
+                    (padrao_descricao(transacao['descricao']), despesa_id_sugerido)
+                )
             _registrar_dicionario(transacao['descricao'], despesa['nome'], nome_sugerido)
 
     conn.commit()
@@ -523,13 +586,19 @@ def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, trans
     existe, marca como pago/agendado conforme a situação da transação, e
     reverte qualquer vínculo anterior errado que a transação já tivesse."""
     despesa_errada = conn.execute(
-        'SELECT id FROM lancamento WHERE transacao_id=? AND despesa_id != ?',
+        'SELECT id, despesa_id FROM lancamento WHERE transacao_id=? AND despesa_id != ?',
         (transacao_id, despesa_id)
     ).fetchone()
     if despesa_errada:
         conn.execute(
             "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, valor_real=NULL, data_pagamento=NULL WHERE id=?",
             (despesa_errada['id'],)
+        )
+        # desaprende: sem isto a regra errada continuaria competindo com a
+        # certa todo mês, e o usuário corrigiria o mesmo caso para sempre
+        conn.execute(
+            'DELETE FROM transacao_despesa_regra WHERE padrao=? AND despesa_id=?',
+            (padrao_descricao(transacao['descricao']), despesa_errada['despesa_id'])
         )
 
     conn.execute(
@@ -546,6 +615,10 @@ def _persistir_par(conn, mes_ref: str, despesa_id: int, transacao_id: int, trans
         "UPDATE transacao SET despesa_id=?, classificacao='recorrente' WHERE id=?",
         (despesa_id, transacao_id)
     )
+    # Confirmar é o usuário dizendo "esse texto é essa despesa" — vale tanto
+    # quando ele corrigiu quanto quando aceitou a sugestão. É o que faz o
+    # batimento do mês que vem já nascer certo.
+    registrar_regra_transacao(conn, transacao['descricao'], despesa_id)
 
 
 @bp.route('/batimento/corrigir', methods=['POST'])

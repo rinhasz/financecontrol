@@ -121,6 +121,30 @@ alteram status de pagamento** — servem só para copiar o código na hora de pa
 
 ---
 
+## transacao_despesa_regra (aprendizado descrição → despesa)
+
+O que o batimento aprendeu das confirmações anteriores. Antes disso as
+correções iam só para `docs/07` (arquivo legível) e nada as lia de volta — o
+usuário corrigia os mesmos erros todo mês.
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| id | INTEGER PK | |
+| padrao | TEXT | Descrição reduzida ao que se repete (ver abaixo) |
+| despesa_id | INTEGER FK → despesa | |
+| acertos | INTEGER | Quantas vezes foi confirmada |
+| criado_em | DATETIME | |
+
+**UNIQUE(padrao, despesa_id)** — o mesmo padrão pode ter mais de uma despesa
+(a mesma escola cobra mensalidade e material; o mesmo destinatário recebe
+salário e vale transporte), e nesses casos quem decide é o valor.
+
+`padrao` vem de `padrao_descricao()`: a descrição sem datas nem sequências
+longas de dígitos, que mudam a cada mês. `PIX TRANSF MARIA J28/07` e
+`PIX TRANSF MARIA J01/08` viram ambas `pix transf maria j`.
+
+---
+
 ## email_despesa_regra (aprendizado remetente → despesa)
 
 Gravada toda vez que o usuário confirma a associação de um boleto/Pix achado
