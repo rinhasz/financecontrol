@@ -230,6 +230,7 @@ Três passos: **Selecionar** → **Revisar** → **Concluído**.
 | # | Seção | O que a linha mostra | O que o combo oferece |
 |---|-------|----------------------|-----------------------|
 | 1 | Despesas casadas | despesa + transação + status | — (só "Não é essa despesa") |
+
 | 2 | Despesas ativas que não encontrei | despesa + previsto | as **transações** sobrando |
 | 3 | Transações sem despesa | data + descrição + valor | as **despesas** ainda em aberto (+ nova) |
 
@@ -258,6 +259,27 @@ no render, e não mantido à mão em cada ação.
 Trocar a despesa de um casamento devolve a antiga para a seção 2 (a não ser que
 ela tenha casado com outra transação) — daí `valor_esperado` viajar junto em
 `detalhes`, senão não haveria previsto para exibir na volta.
+
+### A seção 1 inclui o que já foi gravado
+
+Não só as sugestões da rodada: `detalhes` traz também os casamentos **já
+persistidos** do mês (`ja_gravados`, o complemento exato de `defasados`).
+
+Sem isso, um vínculo confirmado errado ficava **intocável**. Depois de gravado,
+a despesa sai da busca por `status='nao_encontrado'` e a transação sai do
+`despesa_id IS NULL` — o par não aparecia em nenhuma das três seções e a única
+saída era resetar o mês inteiro. Foi assim que `PIX QRS MERCADO PAG01/08`
+(R$ 143,88) ficou preso em `Teatro Maju` sem que houvesse como perceber ou
+desfazer pela tela.
+
+Essas linhas vêm marcadas `ja_gravado` e com o rótulo "gravado". **"Confirmar
+tudo" não as reenvia** enquanto não forem trocadas: regravar o mesmo par não
+muda nada no banco e ainda contaria como mais um acerto da regra aprendida,
+inflando o contador a cada rodada do batimento.
+
+O contador `total` passou a ser `len(detalhes) + len(nao_encontrados)` — antes
+saía de `lancamentos`, que não enxerga defasados nem já gravados, e o placar
+mentia conforme essas listas cresciam.
 
 O combo da seção 3 lista **só as despesas da seção 2** (ativas e ainda não
 associadas no mês), não o catálogo inteiro: oferecer tudo deixava escolher uma

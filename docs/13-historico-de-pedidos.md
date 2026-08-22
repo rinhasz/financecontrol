@@ -118,6 +118,23 @@ sem despesa. As duas últimas são espelho (mesma associação por pontas oposta
 alimentam a mesma função e comem da mesma lista, encolhendo juntas. O combo da
 seção 3 passou a listar só as despesas da seção 2.
 
+**"Onde está esse PIX de R$ 143,88? Não vi casado nem disponível"** (2026-08)
+Estava casado — com `Teatro Maju`, e errado (o boleto de R$ 155,08 da Rede
+Batista, esse sim o Teatro, seguia solto). O problema não era o casamento: era
+não haver **como enxergá-lo**. A seção 1 mostrava só as sugestões da rodada, e
+depois de gravado o par some das três seções (a despesa deixa de ser
+`nao_encontrado`, a transação deixa de ter `despesa_id IS NULL`). Um vínculo
+errado virava permanente, com reset do mês como única saída.
+
+→ `detalhes` passou a incluir os casamentos já persistidos (`ja_gravados`),
+marcados com o rótulo "gravado". "Confirmar tudo" não os reenvia enquanto não
+forem trocados — regravar o mesmo par não muda nada e ainda inflaria o contador
+de acertos da regra aprendida. `total` virou `detalhes + nao_encontrados`, que
+não mente quando essas listas crescem.
+
+Corrigido o caso, o batimento seguinte já casou `Teatro Maju` com a Rede
+Batista sozinho.
+
 ---
 
 ## Catálogo

@@ -615,6 +615,39 @@ def rodar_batimento():
             'status_anterior': l['status'],
         })
 
+    # Casamentos já gravados e coerentes (o complemento exato de `defasados`).
+    # Sem eles a seção "despesas casadas" mostrava só as sugestões novas, e um
+    # vínculo confirmado errado ficava intocável: a despesa some da busca por
+    # 'nao_encontrado' e a transação some do `despesa_id IS NULL`, então o par
+    # não aparecia em nenhuma das três seções e não havia como desfazê-lo sem
+    # resetar o mês inteiro.
+    ja_gravados = conn.execute("""
+        SELECT l.id, l.despesa_id, l.valor_esperado, d.nome as despesa_nome,
+               t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
+               t.data as tx_data, t.situacao as tx_situacao
+        FROM lancamento l
+        JOIN despesa d ON d.id = l.despesa_id
+        JOIN transacao t ON t.id = l.transacao_id
+        WHERE l.mes_ref = ?
+          AND l.status = (CASE WHEN t.situacao = 'efetivada' THEN 'pago' ELSE 'agendado' END)
+        ORDER BY t.data
+    """, (mes_ref,)).fetchall()
+
+    for l in ja_gravados:
+        detalhes.append({
+            'lancamento_id': l['id'],
+            'despesa_id': l['despesa_id'],
+            'despesa_id_sugerido': l['despesa_id'],
+            'despesa_nome': l['despesa_nome'],
+            'valor_esperado': l['valor_esperado'],
+            'transacao_id': l['tx_id'],
+            'descricao_transacao': l['tx_descricao'],
+            'valor': abs(l['tx_valor']),
+            'data': l['tx_data'],
+            'status': 'pago' if l['tx_situacao'] == 'efetivada' else 'agendado',
+            'ja_gravado': True,
+        })
+
     nao_encontrados = [
         {'lancamento_id': l['id'], 'despesa_id': l['despesa_id'], 'despesa_nome': l['despesa_nome'], 'valor_esperado': l['valor_esperado']}
         for l in lancamentos if l['id'] not in lanc_sugerido
@@ -623,9 +656,10 @@ def rodar_batimento():
 
     conn.close()
     return jsonify({
-        # total inclui os defasados: eles também entram em detalhes, e sem
-        # somá-los aqui o contador da tela mostraria coisas como "15/12"
-        'ok': True, 'matched': len(detalhes), 'total': len(lancamentos) + len(defasados),
+        # total é derivado das próprias listas devolvidas — casadas + em aberto.
+        # Contar só `lancamentos` deixava o placar mentir conforme entravam
+        # defasados e já gravados, que não estão naquela busca.
+        'ok': True, 'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
         'periodo': {'ini': ini, 'fim': fim},
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,

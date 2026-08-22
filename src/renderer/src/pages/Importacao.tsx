@@ -21,6 +21,9 @@ interface DetalheMatch {
   // presente só quando o casamento já existia e o status mudou desde então
   // (ex: estava agendado e o débito caiu) — ver rodar_batimento
   status_anterior?: 'pago' | 'agendado' | 'nao_encontrado'
+  // casamento já persistido numa confirmação anterior. Aparece aqui para poder
+  // ser corrigido — só é regravado se a despesa for trocada.
+  ja_gravado?: boolean
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -247,14 +250,20 @@ export function Importacao({ active }: { active: boolean }) {
     setBuscandoTx(null)
   }
 
+  // O que já estava gravado e não foi tocado não é reenviado: regravar o mesmo
+  // par não muda nada no banco e ainda contaria como mais um acerto da regra
+  // aprendida, inflando o placar a cada vez que o batimento roda.
+  const paresPendentes = (resultado?.detalhes ?? [])
+    .filter(d => !d.ja_gravado || d.despesa_id !== d.despesa_id_sugerido)
+
   async function confirmarTudo() {
-    if (!resultado || resultado.detalhes.length === 0) return
+    if (paresPendentes.length === 0) return
     setConfirmando(true)
     try {
-      const res = await api.batimento.confirmar(mesRef, resultado.detalhes.map(d => ({
+      const res = await api.batimento.confirmar(mesRef, paresPendentes.map(d => ({
         transacao_id: d.transacao_id, despesa_id: d.despesa_id, despesa_id_sugerido: d.despesa_id_sugerido
       })))
-      setConfirmado(res.confirmados ?? resultado.detalhes.length)
+      setConfirmado(res.confirmados ?? paresPendentes.length)
     } finally {
       setConfirmando(false)
     }
@@ -415,7 +424,8 @@ export function Importacao({ active }: { active: boolean }) {
             {resultado.detalhes.length > 0 && (
               <div>
                 <Secao n={1} titulo="Despesas casadas" qtd={resultado.detalhes.length}
-                  ajuda="Se alguma despesa estiver errada, corrija na linha." />
+                  ajuda={'Inclui o que já foi gravado antes. Se alguma despesa estiver errada, corrija na linha — '
+                    + 'só o que você trocar é regravado.'} />
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
                     <thead>
@@ -431,7 +441,12 @@ export function Importacao({ active }: { active: boolean }) {
                       {resultado.detalhes.map((d, i) => (
                         <Fragment key={d.transacao_id}>
                           <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
-                            <td className="px-4 py-2 text-zinc-200 font-medium">{d.despesa_nome}</td>
+                            <td className="px-4 py-2 text-zinc-200 font-medium">
+                              {d.despesa_nome}
+                              {d.ja_gravado && d.despesa_id === d.despesa_id_sugerido && (
+                                <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">gravado</span>
+                              )}
+                            </td>
                             <td className="px-4 py-2 text-zinc-400">{d.descricao_transacao}</td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(d.valor)}</td>
                             <td className="px-4 py-2 text-center whitespace-nowrap">
@@ -607,9 +622,9 @@ export function Importacao({ active }: { active: boolean }) {
 
             {confirmado === null ? (
               <div className="flex items-center gap-3 pt-2">
-                <button onClick={confirmarTudo} disabled={confirmando || resultado.detalhes.length === 0}
+                <button onClick={confirmarTudo} disabled={confirmando || paresPendentes.length === 0}
                   className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-                  {confirmando ? 'Gravando...' : `Confirmar tudo (${resultado.detalhes.length})`}
+                  {confirmando ? 'Gravando...' : `Confirmar tudo (${paresPendentes.length})`}
                 </button>
                 <p className="text-sm text-zinc-500">Nada é gravado até você clicar aqui — pode sair e voltar sem perder o que já revisou.</p>
               </div>
