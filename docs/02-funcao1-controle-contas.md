@@ -1,17 +1,26 @@
 # Função 1 — Controle de Contas Mensais
 
+> **Este documento é a especificação conceitual original.** A implementação
+> evoluiu em pontos importantes (mês de competência, preview antes de gravar,
+> importação incremental, filtro de despesas ativas). Onde os dois divergirem,
+> vale [10-importacao-e-batimento.md](10-importacao-e-batimento.md).
+
 ## Fluxo completo
 
 ```
 Cadastro único        → Catálogo de despesas (seed: aba "Catálogo Despesas")
          ↓
 Abertura do mês       → Gerar lancamentos do catálogo ativo
+                        (competência: dia 27 do mês anterior — doc 10)
          ↓
-Importação de extrato → OFX / CSV / PDF → tabela transacao
+Importação de extrato → OFX / CSV / Excel → tabela transacao
+                        (incremental: reimportar não duplica)
          ↓
-Batimento automático  → Casa lancamento ↔ transacao (verde/azul/branco)
+Batimento (preview)   → Sugere lancamento ↔ transacao — NÃO grava
          ↓
-Conferência           → Usuário revisa, resolve conflitos, edita valores
+Conferência           → Usuário revisa, corrige, associa o que sobrou
+         ↓
+Confirmar tudo        → Só aqui persiste (verde/azul/branco)
          ↓
 Resgate do dia 1      → Calculadora (doc 04)
 ```
@@ -89,7 +98,7 @@ transacao WHERE
 
 | Campo | Cálculo |
 |-------|---------|
-| Total | `SUM(lancamento.valor_esperado)` onde status qualquer |
+| Total | `SUM(valor_real se pago, senão valor_esperado)` — só despesas ativas, ou inativas com movimento no mês (doc 10) |
 | Pago | `SUM(valor_real)` onde `status = pago` |
 | Agendado | `SUM(valor_esperado)` onde `status = agendado` |
 | A vencer | `SUM(valor_esperado)` onde `status = nao_encontrado` |

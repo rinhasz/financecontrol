@@ -24,6 +24,24 @@ conversa com o usuário.
 | `ITAU VISA     0703-7489` | cartao azul | — |
 | `Agendado` | financ imob | — |
 | `DA  CLARO BL/IT 77712744` | net | — |
+| `PIX TRANSF DEUSA D01/08` | salario deusa final mes | adiantamento deusa |
+| `INT IPTU02102204944` | iptu apto | cartao porto |
+| `PAG BOLETO LELLO` | reforma thiago | cartao azul |
+| `PIX TRANSF MARIA J01/08` | mesada maju | material maju |
+| `PAG BOLETO ITAU UNIBANCO HOLDING S.A.` | cartao black | — |
+| `INT /DOC ARREC E-SOCI 07` | esocial deusa | — |
+| `PAG BOLETO BANCO BRADESCARD S A` | cartao amazon | — |
+| `PAG TIT 662992535000` | condominio | — |
+| `PIX TRANSF INGRID 03/08` | fisio thalita | — |
+| `PAG BOLETO ENEL DISTRIBUICAO SAO PAULO` | conta luz | — |
+| `PAG BOLETO REDE BATISTA DE EDUCACAO DA` | material malu | — |
+| `PAG BOLETO CCM - CENTRO DE CULTURA MUSI` | escola musica maju | — |
+| `PAG BOLETO EDIFICIO LINCOLN GARDEN` | condominio | — |
+| `DA  CLARO S.A. 77712744` | net claro | — |
+| `PIX TRANSF PIERANG06/08` | personal thalita | — |
+| `PAG TIT 348295769000` | cartao porto | — |
+| `PIX QRS SUL AMERICA` | convenio sogra | — |
+| `PAG TIT BANCO 237` | cartao azul | — |
 
 ## Notas
 

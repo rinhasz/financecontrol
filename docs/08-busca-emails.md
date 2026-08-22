@@ -44,21 +44,42 @@ passa a usar o Gemini em duas etapas:
 Sem a chave, cai para a lógica antiga (palavra-chave + regex) — sem custo
 de API, mas mais limitada.
 
-### Validação obrigatória da linha digitável
+## Boleto **e** Pix
 
-Um LLM pode "alucinar" uma linha digitável plausível em vez de admitir que
-não achou nenhuma — isso é inaceitável para um dado usado em pagamento.
-Toda linha digitável que o Gemini retorna passa por `_linha_digitavel_valida()`
-antes de ir pra tela:
-- precisa ter exatamente 47 ou 48 dígitos;
-- não pode ser degenerada (todos os dígitos iguais, sequência óbvia tipo
-  `12345...`);
-- os dígitos precisam aparecer **literalmente** no texto extraído do
-  email/PDF (comparação por substring) — não passa se o modelo inventou.
+Nem toda cobrança vem como boleto: várias operadoras (SulAmérica, por
+exemplo) mandam **código Pix "copia e cola"**. Os dois formatos são
+reconhecidos, e o tipo fica gravado em `lancamento.tipo_codigo`
+(`boleto`/`pix`) para a tela Mês Atual rotular o botão corretamente
+("Copiar boleto" ou "Copiar Pix").
+
+Ambos são achados por assinatura estrutural, sem precisar entender o
+conteúdo:
+
+| Tipo | Assinatura | Regex |
+|------|-----------|-------|
+| Boleto | 5 blocos de dígitos, 47–48 dígitos no total | `RE_LINHA_DIGITAVEL` |
+| Pix (BR Code / EMV) | começa em `00020...`, termina no CRC `6304XXXX` | `RE_PIX` |
+
+O regex de Pix tolera espaço/quebra de linha no meio, porque o HTML do email
+pode reformatar o texto ao virar texto puro (`_extrair_texto_html`); os
+espaços são removidos antes de validar e guardar.
+
+### Validação obrigatória do código de pagamento
+
+Um LLM pode "alucinar" um código plausível em vez de admitir que não achou
+nenhum — inaceitável para um dado usado em pagamento. Todo código que o
+Gemini retorna passa por validação antes de ir pra tela:
+
+- **Boleto** (`_linha_digitavel_valida`): exatamente 47 ou 48 dígitos; não
+  degenerado (dígitos todos iguais, sequência óbvia tipo `12345...`).
+- **Pix** (`_codigo_pix_valido`): tamanho entre 40 e 700; começa com `0002`;
+  tem `6304` perto do fim.
+- **Os dois**: os caracteres precisam aparecer **literalmente** no texto
+  extraído do email/PDF — se o modelo inventou, não passa.
 
 Mesmo assim, a tela mostra um aviso pra sempre conferir contra o email
-original antes de pagar. Isso não é uma garantia absoluta, só reduz bastante
-o risco de um número inventado passar despercebido.
+original antes de pagar. Isso não é garantia absoluta, só reduz bastante o
+risco de um número inventado passar despercebido.
 
 ## Regras aprendidas (remetente → despesa)
 
@@ -111,31 +132,116 @@ A solução foi reescrever para **OAuth2 + Microsoft Graph API**:
    dispositivo e o link → usuário confirma no navegador →
    `POST /api/email/conectar/finalizar` (fica bloqueado aguardando; por
    isso o Flask roda com `threaded=True`) confirma e salva o token.
-4. Escolhe um período (data início/fim) → `POST /api/email/buscar` busca
-   todas as mensagens do INBOX nesse período uma única vez, classifica
-   (Gemini, ou palavra-chave se a chave não estiver configurada) e
-   extrai valor/linha digitável dos candidatos (corpo HTML + anexos PDF
-   via `pdfplumber`). Remetentes já associados antes (`email_despesa_regra`)
-   entram automaticamente com a despesa pré-preenchida.
-5. Mostra uma lista plana de boletos (não mais agrupada por despesa, já
-   que agora cobre despesas sem correspondência óbvia por palavra-chave):
-   assunto, remetente, data, valor, linha digitável com botão de copiar,
-   e um seletor de despesa + mês pra associar. PDFs escaneados como
-   imagem (sem texto extraível) não são suportados — aparece "linha
-   digitável não encontrada, abra o email manualmente" em vez de falhar.
-6. Ao confirmar a associação (`POST /api/email/associar`): grava
-   `linha_digitavel` no `lancamento` da despesa/mês (sem mexer em status
-   de pagamento) e grava/atualiza a regra remetente→despesa para a
-   próxima busca.
-7. Em Mês Atual, qualquer lançamento com `linha_digitavel` preenchida
-   ganha um botão "Copiar boleto".
+4. Escolhe um período (data início/fim) → `POST /api/email/buscar/iniciar`
+   dispara a busca **em thread de fundo, um dia por vez** (ver "Busca
+   dia a dia" abaixo). A tela acompanha por polling em
+   `GET /api/email/buscar/status`.
+5. Mostra uma lista plana de boletos (não agrupada por despesa, já que
+   cobre despesas sem correspondência óbvia por palavra-chave): assunto,
+   remetente, data, valor, código de pagamento com botão de copiar, e um
+   seletor de despesa + mês pra associar. PDFs escaneados como imagem
+   (sem texto extraível) não são suportados — aparece "código de
+   pagamento não encontrado, abra o email manualmente" em vez de falhar.
+6. Associar **não grava na hora**: entra numa lista de pendentes (ver
+   "Revisão em lote").
+7. Em Mês Atual, qualquer lançamento com código ganha um botão
+   "Copiar boleto" ou "Copiar Pix", conforme `tipo_codigo`.
+
+## Busca dia a dia, interrompível
+
+Buscar um período inteiro numa requisição só não escala: numa caixa com
+~3000 emails em 2 meses, a chamada demorava minutos, sem retorno nenhum
+na tela e sem como interromper — e ainda corria risco de timeout.
+
+Hoje a busca roda numa **thread de fundo**, processando **um dia por
+vez** e publicando o progresso em `_busca_job` a cada dia concluído:
+
+- `POST /email/buscar/iniciar` — dispara e retorna na hora (`total_dias`).
+- `GET /email/buscar/status` — progresso, avisos e os boletos achados
+  **até agora**; a tela vai preenchendo a lista conforme os dias passam.
+- `POST /email/buscar/cancelar` — pede parada; a busca encerra ao fim do
+  dia corrente e **mantém tudo que já achou** (nada é descartado).
+
+Só uma busca por vez (app de um usuário só): iniciar outra enquanto uma
+roda devolve HTTP 409. Se a tela remontar com uma busca em andamento no
+servidor, ela retoma o acompanhamento em vez de perder o progresso.
+
+A classificação pelo Gemini é feita em **lotes de 200** mensagens. Um
+prompt com tudo de uma vez é frágil (estoura limite, trunca, dá timeout)
+e, quando falhava, a exceção era engolida e a busca dizia "nada
+encontrado" — um falso negativo silencioso. Hoje cada lote falha
+isoladamente e as falhas aparecem como aviso na tela.
+
+O corpo do email é buscado **sob demanda**, só para quem passou na
+classificação. Trazer o HTML completo de milhares de mensagens no
+`$select` em massa era lento e consumia muita memória à toa.
+
+O cliente Gemini tem **timeout de 60s** (`HttpOptions(timeout=60_000)`).
+Sem ele, uma chamada travada ficava pendurada para sempre e a busca nunca
+terminava nem dava erro.
+
+## Revisão em lote (confirmar tudo / cancelar tudo / desfazer)
+
+Associar um boleto **não grava nada** na hora: cria uma pendência na
+tela. A barra fixa no topo mostra quantas há, com **"Confirmar tudo"** e
+**"Cancelar tudo"**; cada item tem **"Desfazer"** individual. Só
+`POST /email/associar/lote` persiste — mesmo padrão preview→confirmar do
+batimento (doc 10) e da importação de catálogo (doc 11).
+
+A lista fica em duas seções: primeiro os **associados/pendentes**, depois
+os **não associados**, para a revisão seguir de cima para baixo.
+
+Ao confirmar, para cada item: grava `linha_digitavel` + `tipo_codigo` no
+`lancamento` da despesa/mês, **atualiza o `valor_esperado`** com o valor
+achado no email, e grava/atualiza a regra remetente→despesa.
+
+> A atualização do valor foi um bug real: como quase todo mês já tem um
+> lançamento herdado do histórico, o `INSERT OR IGNORE` nunca disparava e
+> o valor do email era descartado — só o código era salvo.
+
+**Desfazer só existe antes de confirmar.** Depois de gravado, vira
+lançamento normal; para reverter, edita-se em Mês Atual.
+
+## Repetir mês anterior
+
+Depois de uma busca com pelo menos uma associação confirmada, o período é
+guardado em `localStorage` e aparece o botão **"Repetir mês anterior"**.
+Ele desloca o período salvo em +1 mês e refaz a busca.
+
+Durante essa repetição, todo boleto cujo remetente **já foi confirmado
+antes** (`origem_sugestao === 'regra'`) entra automaticamente como
+pendente, já preenchido. Sugestão vinda da IA ou de palavra-chave
+**nunca** entra sozinha — fica em "não associados" para revisão manual.
+Assim o resumo já sai pronto: em cima o que foi reconhecido, embaixo o
+que sobrou. Tudo ainda pode ser desfeito antes de confirmar.
+
+Cada boleto carrega `origem_sugestao`: `regra` (remetente já associado),
+`ia` (só o Gemini sugeriu) ou `palavra_chave` (fallback sem Gemini).
+
+## Endpoints
+
+| Rota | Método | O que faz |
+|------|--------|-----------|
+| `/api/email/status` | GET | Se está configurado e qual conta está conectada |
+| `/api/email/conectar/iniciar` | POST | Inicia device code flow |
+| `/api/email/conectar/finalizar` | POST | Aguarda o login no navegador (bloqueia) |
+| `/api/email/buscar/iniciar` | POST | Dispara a busca em thread de fundo |
+| `/api/email/buscar/status` | GET | Progresso + boletos achados até agora |
+| `/api/email/buscar/cancelar` | POST | Para ao fim do dia corrente |
+| `/api/email/associar/lote` | POST | Persiste as associações revisadas |
+
+`/email/status` **não pode depender de rede**: ele lê a conta direto do
+arquivo de cache de token, sem instanciar o MSAL. Já foi o contrário, e
+uma rede lenta deixava a tela inteira sem renderizar (ver doc 12).
 
 ## Notas para manutenção futura
 
 - Se um dia o usuário trocar de provedor de email, só `api/email_busca.py`
-  muda — o resto do app (catálogo, competência, regex de extração) é
+  muda — o resto do app (catálogo, competência, extração de código) é
   reaproveitável.
-- Se a busca por `$filter` de data no Graph API começar a retornar volume
-  grande (muitos emails no período), falta paginação mais agressiva — hoje
-  já pagina via `@odata.nextLink`, mas não há limite superior nem
-  amostragem; para uma caixa de entrada muito cheia isso pode ficar lento.
+- A busca gasta uma chamada de extração do Gemini por email candidato, o
+  que domina o tempo total. Se ficar caro/lento, o caminho é filtrar
+  melhor os candidatos antes da extração, não paralelizar às cegas.
+- O estado da busca (`_busca_job`) é global em memória, adequado a um app
+  desktop de um usuário. Para múltiplos usuários seria preciso job_id e
+  sessão.

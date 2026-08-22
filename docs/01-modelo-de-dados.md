@@ -1,6 +1,14 @@
 # Modelo de Dados (Relacional)
 
-Banco: SQLite (arquivo local). Cada mês é gerado do catálogo — não existe "copiar aba".
+Banco: SQLite (arquivo local `dev.sqlite`). Cada mês é gerado do catálogo —
+não existe "copiar aba". O schema vive em `api/db.py` (`SCHEMA` + `init_db()`);
+este documento é o espelho legível dele.
+
+**Migrações:** o projeto não usa ferramenta de migração. `init_db()` roda o
+`CREATE TABLE IF NOT EXISTS` e depois aplica `ALTER TABLE` condicionais
+(checando `PRAGMA table_info`) para colunas adicionadas depois — é assim que
+`linha_digitavel` e `tipo_codigo` entraram sem quebrar bancos existentes.
+Ao acrescentar coluna nova, siga esse mesmo padrão.
 
 ---
 
@@ -44,8 +52,14 @@ Substitui a cópia de aba. Chave única por mês + despesa.
 | transacao_id | INTEGER FK → transacao (nullable) | Preenchido após batimento |
 | valor_real | REAL (nullable) | Valor efetivo após casamento |
 | data_pagamento | DATE (nullable) | Data real do débito |
+| linha_digitavel | TEXT (nullable) | Código de pagamento achado por email — boleto **ou** Pix (ver doc 08) |
+| tipo_codigo | TEXT (nullable) | `boleto` \| `pix` — qual código está em `linha_digitavel`; define o rótulo do botão em Mês Atual |
 
-**UNIQUE(mes_ref, despesa_id)**
+**UNIQUE(mes_ref, despesa_id)** — é o que permite `INSERT OR IGNORE` para
+"garantir que o lançamento do mês existe" sem duplicar.
+
+`linha_digitavel`/`tipo_codigo` são preenchidos pela busca de emails e **não
+alteram status de pagamento** — servem só para copiar o código na hora de pagar.
 
 ---
 
@@ -72,7 +86,7 @@ Substitui a cópia de aba. Chave única por mês + despesa.
 |-------|------|-----------|
 | id | INTEGER PK | |
 | banco | TEXT | |
-| formato | TEXT | `ofx` \| `csv` \| `pdf` |
+| formato | TEXT | `ofx` \| `csv` \| `xls` \| `xlsx` \| `xlsm` |
 | arquivo | TEXT | Nome original do arquivo |
 | data_import | DATETIME | |
 | periodo_ini | DATE | |
@@ -104,6 +118,34 @@ Substitui a cópia de aba. Chave única por mês + despesa.
 | valor | REAL | Valor ao final do mês |
 | valor_mes_anterior | REAL | Para calcular rentabilidade |
 | rentabilidade | REAL | `valor / valor_mes_anterior - 1` |
+
+---
+
+## email_despesa_regra (aprendizado remetente → despesa)
+
+Gravada toda vez que o usuário confirma a associação de um boleto/Pix achado
+por email. Na busca seguinte, o mesmo remetente já vem com a despesa
+pré-preenchida — é o que sustenta o botão "Repetir mês anterior" (doc 08).
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| id | INTEGER PK | |
+| remetente | TEXT UNIQUE | Endereço de email do emissor (ex.: `boleto@jaime.com.br`) |
+| despesa_id | INTEGER FK → despesa | |
+| criado_em | DATETIME | |
+
+Espelho legível (só para consulta humana): [09-dicionario-emails.md](09-dicionario-emails.md).
+A fonte de verdade é a tabela.
+
+---
+
+## config (chave/valor)
+
+| Chave | Padrão | Uso |
+|-------|--------|-----|
+| `reserva_desejada` | `5000` | Colchão na calculadora de resgate (doc 04) |
+| `saldo_conta` | `0` | Saldo atual informado pelo usuário |
+| `dia_recebimento_salario` | `27` | Define o mês de competência (doc 10) — despesas de um mês começam a ser pagas quando o salário cai, no dia 27 do mês anterior |
 
 ---
 
