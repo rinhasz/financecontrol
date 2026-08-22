@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS despesa (
   -- aparece no extrato; 'esporadica' não gera lançamento nenhum e só existe
   -- no mês em que uma transação for associada a ela (doc 14)
   recorrencia          TEXT NOT NULL DEFAULT 'fixa',
+  -- eixo INDEPENDENTE da recorrência: pode acontecer mais de uma vez no mesmo
+  -- mês? A escola cobra mensalidade e material (fixa, vários); o aluguel é um
+  -- só (fixa, um). É este campo que decide se o item continua na lista de
+  -- associação depois de já ter recebido uma transação.
+  varios_por_mes       INTEGER NOT NULL DEFAULT 0,
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -84,6 +89,7 @@ CREATE TABLE IF NOT EXISTS receita (
   valor_padrao         REAL,
   regras_match         TEXT NOT NULL DEFAULT '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}',
   recorrencia          TEXT NOT NULL DEFAULT 'fixa',
+  varios_por_mes       INTEGER NOT NULL DEFAULT 0,
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -243,6 +249,16 @@ def init_db():
     colunas_despesa = [r[1] for r in conn.execute('PRAGMA table_info(despesa)').fetchall()]
     if 'recorrencia' not in colunas_despesa:
         conn.execute("ALTER TABLE despesa ADD COLUMN recorrencia TEXT NOT NULL DEFAULT 'fixa'")
+
+    # migração: "aceita mais de um por mês" deixa de ser deduzido da
+    # recorrência e vira campo próprio. O valor inicial reproduz exatamente o
+    # comportamento anterior (esporádica aceitava vários; fixa, um só), então
+    # nada muda até o usuário marcar.
+    for tabela in ('despesa', 'receita'):
+        cols = [r[1] for r in conn.execute(f'PRAGMA table_info({tabela})').fetchall()]
+        if cols and 'varios_por_mes' not in cols:
+            conn.execute(f'ALTER TABLE {tabela} ADD COLUMN varios_por_mes INTEGER NOT NULL DEFAULT 0')
+            conn.execute(f"UPDATE {tabela} SET varios_por_mes=1 WHERE recorrencia='esporadica'")
 
     # migração: lado da receita na transação (doc 14). Criadas já na fase 2,
     # junto com as tabelas, para a fase 3 não precisar de outra migração e não

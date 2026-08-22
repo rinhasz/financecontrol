@@ -478,10 +478,29 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
         ORDER BY t.data
     """, (mes_ref, c['status_ok'], c['status_pendente'])).fetchall()
 
+    # Vínculos que moram só na transação, sem lançamento: item esporádico e a
+    # 2ª ocorrência de um item "mais de um por mês". Também precisam aparecer na
+    # seção 1 — senão um vínculo errado fica intocável, exatamente o problema
+    # que já tinha acontecido com os casamentos gravados.
+    extras = conn.execute(f"""
+        SELECT t.id as tx_id, t.descricao as tx_descricao, t.valor as tx_valor,
+               t.data as tx_data, t.situacao as tx_situacao,
+               d.id as item_id, d.nome as item_nome
+        FROM transacao t JOIN {c['catalogo']} d ON d.id = t.{c['fk']}
+        WHERE t.tipo = ? AND t.data BETWEEN ? AND ?
+          AND NOT EXISTS (SELECT 1 FROM {c['lancamento']} l WHERE l.transacao_id = t.id)
+        ORDER BY t.data
+    """, (c['tipo_tx'], ini, fim)).fetchall()
+
     for l in defasados:
         detalhes.append(_detalhe_de_lancamento(l, natureza, status_anterior=l['status']))
     for l in ja_gravados:
         detalhes.append(_detalhe_de_lancamento(l, natureza, ja_gravado=True))
+    for l in extras:
+        d = _detalhe_de_lancamento(
+            {**dict(l), 'id': 0, 'valor_esperado': abs(l['tx_valor'])}, natureza, ja_gravado=True)
+        d['sem_lancamento'] = True   # a tela não deve devolvê-lo à seção 2
+        detalhes.append(d)
 
     tipos = {}
     if natureza == 'receita':
@@ -489,9 +508,15 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
         # esporádico) ou qual débito anular (estorno)
         tipos = {r['id']: r['tipo'] for r in conn.execute('SELECT id, tipo FROM receita')}
 
+    # "aceita mais de um por mês" é atributo do catálogo (doc 14 §1): é ele que
+    # decide se o item continua na lista de associação depois de já ter casado.
+    varios = {r['id']: bool(r['varios_por_mes'])
+              for r in conn.execute(f"SELECT id, varios_por_mes FROM {c['catalogo']}")}
+
     nao_encontrados = [
         {'natureza': natureza, 'lancamento_id': l['id'], 'item_id': l['item_id'],
          'item_nome': l['item_nome'], 'valor_esperado': l['valor_esperado'],
+         'varios_por_mes': varios.get(l['item_id'], False),
          **({'tipo': tipos.get(l['item_id'])} if natureza == 'receita' else {})}
         for l in lancamentos if l['id'] not in lanc_sugerido
     ]
@@ -505,11 +530,20 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
     # `nao_encontrados` — e sem isto a tela não teria como oferecê-los na seção
     # 3, deixando "estorno" e "resgate esporádico" inalcançáveis. Vão à parte
     # justamente porque não são uma cobrança em aberto: não têm previsão.
-    esporadicos = [
+    # Itens que a seção 3 oferece **sempre**, independente de já terem casado:
+    #  - esporádicos, que não têm lançamento e portanto não estão em
+    #    `nao_encontrados`;
+    #  - os marcados "mais de um por mês", que continuam disponíveis depois do
+    #    primeiro casamento (a escola cobra mensalidade e material no mesmo mês).
+    # Sem esta lista, o item saía do combo assim que recebia uma transação.
+    sempre_disponiveis = [
         {'natureza': natureza, 'item_id': r['id'], 'item_nome': r['nome'],
+         'varios_por_mes': bool(r['varios_por_mes']),
+         'recorrencia': r['recorrencia'],
          **({'tipo': r['tipo']} if natureza == 'receita' else {})}
         for r in conn.execute(
-            f"SELECT * FROM {c['catalogo']} WHERE ativo=1 AND recorrencia='esporadica' ORDER BY nome")
+            f"SELECT * FROM {c['catalogo']} "
+            "WHERE ativo=1 AND (recorrencia='esporadica' OR varios_por_mes=1) ORDER BY nome")
     ]
 
     return {
@@ -519,7 +553,7 @@ def _batimento_de(conn, natureza: str, mes_ref: str, ini: str, fim: str) -> dict
         'matched': len(detalhes), 'total': len(detalhes) + len(nao_encontrados),
         'detalhes': detalhes,
         'nao_encontrados': nao_encontrados,
-        'esporadicos': esporadicos,
+        'sempre_disponiveis': sempre_disponiveis,
         'transacoes_sobrando': sobrando,
     }
 
@@ -683,24 +717,41 @@ def _persistir_par(conn, mes_ref: str, item_id: int, transacao_id: int, transaca
             (padrao_descricao(transacao['descricao']), transacao[fk])
         )
 
-    esporadico = conn.execute(
-        f"SELECT recorrencia='esporadica' FROM {c['catalogo']} WHERE id=?", (item_id,)
-    ).fetchone()[0]
+    item = conn.execute(
+        f"SELECT recorrencia, varios_por_mes FROM {c['catalogo']} WHERE id=?", (item_id,)
+    ).fetchone()
+    esporadico = item['recorrencia'] == 'esporadica'
 
+    # Onde este par é registrado depende de haver lançamento livre no mês.
+    #
+    # `lancamento` tem UNIQUE(mes_ref, item_id): cabe um por mês. O primeiro
+    # casamento ocupa esse lugar — é ele que carrega a previsão. Do segundo em
+    # diante (item marcado "mais de um por mês"), o registro é a própria
+    # transação, e o Mês Atual mostra a linha extra a partir dela.
+    #
+    # Item esporádico nunca tem lançamento, então cai direto no segundo caso.
+    lanc = None
     if not esporadico:
         conn.execute(
             f"INSERT OR IGNORE INTO {tab} (mes_ref, {fk}, valor_esperado, status) "
             "VALUES (?,?,?,'nao_encontrado')",
             (mes_ref, item_id, abs(transacao['valor']))
         )
+        lanc = conn.execute(
+            f'SELECT id, transacao_id FROM {tab} WHERE {fk}=? AND mes_ref=?',
+            (item_id, mes_ref)
+        ).fetchone()
+
+    ocupa_lancamento = lanc is not None and lanc['transacao_id'] in (None, transacao_id)
+    if ocupa_lancamento:
         conn.execute(
             f"""UPDATE {tab} SET status=?, transacao_id=?, valor_real=?, {c['data_mov']}=?
-                WHERE {fk}=? AND mes_ref=?""",
+                WHERE id=?""",
             (motor.status_de(natureza, transacao['situacao']), transacao_id,
-             abs(transacao['valor']), transacao['data'], item_id, mes_ref)
+             abs(transacao['valor']), transacao['data'], lanc['id'])
         )
 
-    classificacao = 'receita' if natureza == 'receita' else ('extra' if esporadico else 'recorrente')
+    classificacao = 'receita' if natureza == 'receita' else ('recorrente' if ocupa_lancamento else 'extra')
     conn.execute(
         f'UPDATE transacao SET {fk}=?, classificacao=? WHERE id=?',
         (item_id, classificacao, transacao_id)

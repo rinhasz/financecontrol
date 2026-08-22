@@ -35,6 +35,7 @@ Ao acrescentar coluna nova, siga esse mesmo padrão.
 | valor_padrao | REAL | Valor de referência |
 | regras_match | JSON | `{ palavras_chave: [], faixa_valor: [min, max], janela_dias: N, banco: "" }` |
 | recorrencia | TEXT | `fixa` \| `esporadica` — ver abaixo |
+| varios_por_mes | BOOLEAN | Pode acontecer mais de uma vez no mesmo mês |
 | ativo | BOOLEAN | Despesas inativas não geram lançamentos |
 
 **`recorrencia`** responde "acontece todo mês?", que é diferente de
@@ -44,9 +45,13 @@ Ao acrescentar coluna nova, siga esse mesmo padrão.
 - `fixa` — abre lançamento previsto todo mês e cobra atenção se não aparecer
   no extrato;
 - `esporadica` — **não gera lançamento**. A transação associada (com
-  `despesa_id` preenchido) é o registro do fato, o que permite N ocorrências
-  no mesmo mês — impossível via `lancamento`, que tem `UNIQUE(mes_ref,
-  despesa_id)`. Ver [14](14-receitas-e-esporadicas.md).
+  `despesa_id` preenchido) é o registro do fato.
+
+**`varios_por_mes`** é um eixo à parte: "pode acontecer mais de uma vez no mesmo
+mês?". `lancamento` tem `UNIQUE(mes_ref, despesa_id)`, então o primeiro
+casamento ocupa o lançamento e os seguintes ficam só na transação. É este campo
+— não a recorrência — que decide se o item continua disponível para associar
+depois de já ter casado. Ver [14](14-receitas-e-esporadicas.md).
 
 Lançamentos antigos de uma despesa que virou esporádica **não são apagados**:
 são a série histórica que alimenta a previsão de valor. Eles apenas deixam de

@@ -62,21 +62,22 @@ def upsert_catalogo():
               data.get('tipo_valor', 'variavel'),
               data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'), data.get('regras_match') or REGRAS_PADRAO,
-              data.get('recorrencia', 'fixa'))
+              data.get('recorrencia', 'fixa'),
+              1 if data.get('varios_por_mes') else 0)
 
     try:
         with db() as conn:
             if data.get('id'):
                 conn.execute("""
                     UPDATE receita SET nome=?, categoria_id=?, dia_recebimento=?, tipo=?, tipo_valor=?,
-                    padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, ativo=? WHERE id=?
+                    padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, varios_por_mes=?, ativo=? WHERE id=?
                 """, (*campos, data.get('ativo', 1), data['id']))
                 receita_id = data['id']
             else:
                 cur = conn.execute("""
                     INSERT INTO receita (nome, categoria_id, dia_recebimento, tipo, tipo_valor,
-                                         padrao_variabilidade, valor_padrao, regras_match, recorrencia)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                                         padrao_variabilidade, valor_padrao, regras_match, recorrencia, varios_por_mes)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                 """, campos)
                 receita_id = cur.lastrowid
     except sqlite3.IntegrityError:

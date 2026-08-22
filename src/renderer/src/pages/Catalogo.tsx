@@ -15,6 +15,7 @@ interface Item {
   dia: number | null; tipo_valor: string
   padrao_variabilidade: string; valor_padrao: number; regras_match: string; ativo: number
   recorrencia: 'fixa' | 'esporadica'
+  varios_por_mes: number
   tipo?: string
   conta_como_renda?: boolean
 }
@@ -38,6 +39,7 @@ interface FormState {
   tipo_valor: string
   padrao_variabilidade: string
   recorrencia: string
+  varios_por_mes: boolean
   tipo: string
   valor_padrao: string
   dia: string
@@ -69,6 +71,7 @@ function itemParaForm(d: Item): FormState {
     tipo_valor: d.tipo_valor,
     padrao_variabilidade: d.padrao_variabilidade,
     recorrencia: d.recorrencia ?? 'fixa',
+    varios_por_mes: !!d.varios_por_mes,
     tipo: d.tipo ?? 'outra',
     valor_padrao: String(d.valor_padrao ?? ''),
     dia: d.dia != null ? String(d.dia) : '',
@@ -125,7 +128,7 @@ export function Catalogo() {
     setErro('')
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {
@@ -138,6 +141,7 @@ export function Catalogo() {
       tipo_valor: form.tipo_valor,
       padrao_variabilidade: form.padrao_variabilidade,
       recorrencia: form.recorrencia,
+      varios_por_mes: form.varios_por_mes,
       valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
     }
@@ -233,6 +237,15 @@ export function Catalogo() {
           <option value="esporadica">Esporádica</option>
         </select>
       </Field>
+      <Field label="Repetições">
+        <label className="flex items-center gap-1.5 text-sm text-zinc-300 h-[30px] cursor-pointer"
+          title="Marque quando o mesmo item pode aparecer mais de uma vez no extrato do mesmo mês (ex: a escola cobra mensalidade e material). Assim ele continua disponível para associar depois do primeiro casamento.">
+          <input type="checkbox" checked={form.varios_por_mes}
+            onChange={e => setForm(f => f && { ...f, varios_por_mes: e.target.checked })}
+            className="rounded" />
+          Mais de um por mês
+        </label>
+      </Field>
       <Field label="Valor previsto">
         <input value={form.valor_padrao} onChange={e => setForm(f => f && { ...f, valor_padrao: e.target.value })}
           className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-24 text-right" />
@@ -281,6 +294,12 @@ export function Catalogo() {
                       <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
                         title="Não gera previsão mensal — só aparece no mês em que acontecer">
                         esporádica
+                      </span>
+                    )}
+                    {!!d.varios_por_mes && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-sky-500/70"
+                        title="Pode acontecer mais de uma vez no mesmo mês">
+                        várias/mês
                       </span>
                     )}
                   </td>

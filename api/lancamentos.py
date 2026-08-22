@@ -119,20 +119,21 @@ def _receitas_do_mes(conn, mes_ref: str) -> list:
 
 
 def _esporadicas_do_mes(conn, mes_ref: str, natureza: str = 'despesa'):
-    """Despesas esporádicas que aconteceram no mês.
+    """Movimentos do mês que **não cabem** num lançamento.
 
-    Elas não têm lançamento (doc 14) — a transação associada é o registro. Cada
-    transação vira uma linha própria, de propósito: três consultas médicas no
-    mesmo mês são três despesas, e é justamente isso que o lançamento, com seu
-    UNIQUE(mes_ref, despesa_id), não conseguiria representar.
+    `lancamento` tem UNIQUE(mes_ref, item_id): cabe um por mês. Sobra tudo isto,
+    que precisa aparecer na tela do mesmo jeito:
+
+    - item esporádico, que não tem lançamento nenhum;
+    - a segunda (terceira, quarta) transação de um item marcado "mais de um por
+      mês" — três consultas médicas no mesmo mês são três despesas.
+
+    O critério é justamente esse: **transação sem lançamento apontando para
+    ela**. Quem já tem lançamento fica de fora, senão apareceria duas vezes — a
+    via antiga e a nova — e o mês fecharia com o valor dobrado.
 
     O `id` devolvido é negativo para não colidir com id de lançamento no
     frontend, e sinaliza "esta linha não é editável como lançamento".
-
-    Transação que já tem lançamento apontando para ela fica de fora: é o caso
-    de uma despesa que virou esporádica *depois* de já ter casado no mês. Sem
-    esse filtro ela apareceria duas vezes — pela via antiga e pela nova — e o
-    mês fecharia com o valor dobrado.
     """
     from .motor_batimento import cfg, status_de
     c = cfg(natureza)
@@ -148,8 +149,7 @@ def _esporadicas_do_mes(conn, mes_ref: str, natureza: str = 'despesa'):
         FROM transacao t
         JOIN {c['catalogo']} d ON d.id = t.{c['fk']}
         LEFT JOIN categoria c ON c.id = d.categoria_id
-        WHERE d.recorrencia = 'esporadica' AND t.tipo = ?
-          AND t.data BETWEEN ? AND ?
+        WHERE t.tipo = ? AND t.data BETWEEN ? AND ?
           AND NOT EXISTS (SELECT 1 FROM {c['lancamento']} l WHERE l.transacao_id = t.id)
     """, (c['tipo_tx'], ini, fim)).fetchall()
 

@@ -31,13 +31,19 @@ interface DetalheMatch {
   // débito este crédito anula
   objetivo?: string | null
   estorna_transacao_id?: number | null
+  // vínculo que mora só na transação (item esporádico, ou 2ª ocorrência de um
+  // "mais de um por mês"). Não tem lançamento, então não volta para a seção 2.
+  sem_lancamento?: boolean
 }
 
-/** Item do catálogo que não gera previsão mensal — não está em
- *  `nao_encontrados` porque não tem lançamento, mas precisa ser oferecido. */
-interface Esporadico {
+/** Item que a seção 3 oferece sempre: esporádico (não tem lançamento, logo não
+ *  está em `nao_encontrados`) ou marcado "mais de um por mês" (continua
+ *  disponível mesmo depois de já ter casado). */
+interface SempreDisponivel {
   item_id: number
   item_nome: string
+  varios_por_mes?: boolean
+  recorrencia?: 'fixa' | 'esporadica'
   tipo?: string
 }
 
@@ -77,6 +83,9 @@ interface NaoEncontrado {
   item_id: number
   item_nome: string
   valor_esperado: number
+  // atributo do catálogo: pode acontecer mais de uma vez no mesmo mês. É o que
+  // decide se o item continua na lista depois de já ter recebido uma transação.
+  varios_por_mes?: boolean
   tipo?: string
 }
 
@@ -85,7 +94,7 @@ interface LadoBatimento {
   total: number
   detalhes: DetalheMatch[]
   nao_encontrados: NaoEncontrado[]
-  esporadicos: Esporadico[]
+  sempre_disponiveis: SempreDisponivel[]
   transacoes_sobrando: TransacaoSobrando[]
 }
 
@@ -244,7 +253,7 @@ export function Importacao({ active }: { active: boolean }) {
       // tenha casado com outra transação). Sem isso a despesa liberada sumia
       // da tela e a recém-escolhida continuava aparecendo como não encontrada.
       const antiga = r.detalhes.find(x => x.transacao_id === d.transacao_id)
-      const liberada = antiga && antiga.item_id !== despesaId
+      const liberada = antiga && !antiga.sem_lancamento && antiga.item_id !== despesaId
         && !detalhes.some(x => x.item_id === antiga.item_id)
         ? [{ lancamento_id: antiga.lancamento_id, item_id: antiga.item_id,
              item_nome: antiga.item_nome, valor_esperado: antiga.valor_esperado }]
@@ -319,7 +328,7 @@ export function Importacao({ active }: { active: boolean }) {
     if (!id || id === 'nova') return undefined
     const n = Number(id)
     return lado?.nao_encontrados.find(x => x.item_id === n)?.tipo
-      ?? lado?.esporadicos.find(x => x.item_id === n)?.tipo
+      ?? lado?.sempre_disponiveis.find(x => x.item_id === n)?.tipo
   }
 
   async function aplicarAssociacao(t: TransacaoSobrando) {
@@ -334,7 +343,7 @@ export function Importacao({ active }: { active: boolean }) {
       if (!selecionadaAssoc) return
       despesaId = Number(selecionadaAssoc)
       despesaNome = lado?.nao_encontrados.find(x => x.item_id === despesaId)?.item_nome
-        ?? lado?.esporadicos.find(x => x.item_id === despesaId)?.item_nome
+        ?? lado?.sempre_disponiveis.find(x => x.item_id === despesaId)?.item_nome
         ?? catalogo.find(ds => ds.id === despesaId)?.nome ?? '?'
     }
     const tipo = tipoDoItem(selecionadaAssoc)
@@ -414,17 +423,31 @@ export function Importacao({ active }: { active: boolean }) {
     nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
   }))
 
-  const opcoesDespesa = [
-    ...(lado?.nao_encontrados ?? [])
-      .filter(n => !despesasAssociadas.has(n.item_id))
-      .map(n => ({
-        id: n.item_id,
-        nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome
-      })),
-    // esporádicos podem receber mais de uma transação no mesmo mês, então não
-    // são filtrados por "já associado" como os fixos
-    ...(lado?.esporadicos ?? []).map(e => ({ id: e.item_id, nome: `${e.item_nome}  ·  esporádica` }))
-  ]
+  // Sai da lista quem já casou — a não ser que o catálogo diga que aquele item
+  // pode acontecer mais de uma vez no mês. Antes isso era deduzido da
+  // recorrência, o que impedia uma despesa fixa de receber duas cobranças no
+  // mesmo mês (a escola cobrando mensalidade e material, por exemplo).
+  const disponivel = (item: { item_id: number; varios_por_mes?: boolean }) =>
+    item.varios_por_mes || !despesasAssociadas.has(item.item_id)
+
+  const opcoesDespesa = (() => {
+    const vistos = new Set<number>()
+    const out: { id: number; nome: string }[] = []
+    for (const n of lado?.nao_encontrados ?? []) {
+      if (!disponivel(n) || vistos.has(n.item_id)) continue
+      vistos.add(n.item_id)
+      out.push({ id: n.item_id, nome: n.valor_esperado > 0 ? `${n.item_nome}  ·  ${formatBRL(n.valor_esperado)}` : n.item_nome })
+    }
+    // um item fixo marcado "mais de um por mês" aparece nas duas listas — a
+    // primeira ocorrência já entrou acima, com o previsto
+    for (const e of lado?.sempre_disponiveis ?? []) {
+      if (vistos.has(e.item_id)) continue
+      vistos.add(e.item_id)
+      const marca = e.recorrencia === 'esporadica' ? 'esporádica' : 'mais de um por mês'
+      out.push({ id: e.item_id, nome: `${e.item_nome}  ·  ${marca}` })
+    }
+    return out
+  })()
 
   return (
     <div className="flex flex-col h-full pt-3">

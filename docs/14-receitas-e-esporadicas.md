@@ -39,14 +39,39 @@ Essa é a distinção operacional, não uma etiqueta:
   *"não encontrei"*, porque não ter acontecido é o estado normal.
 
 > **Por que esporádica não usa lançamento.** `lancamento` tem
-> `UNIQUE(mes_ref, despesa_id)` — um por mês. Isso é correto para o que
-> acontece uma vez por mês, e **errado** para o que pode acontecer três vezes
-> (três consultas médicas, dois resgates com objetivos diferentes). Sem
-> previsão a fazer, o lançamento também não agregaria nada: a transação já tem
-> valor e data. Então o item esporádico dispensa a camada inteira.
->
-> (A mesma limitação existe hoje para fixas — duas transações da mesma despesa
-> no mesmo mês não cabem. É pré-existente e fica fora deste escopo.)
+> `UNIQUE(mes_ref, despesa_id)` — um por mês. Sem previsão a fazer, o lançamento
+> também não agregaria nada: a transação já tem valor e data. Então o item
+> esporádico dispensa a camada inteira.
+
+### Terceiro eixo: `varios_por_mes`
+
+"Pode acontecer mais de uma vez no mesmo mês?" **não** é a mesma pergunta que
+"acontece todo mês?". A escola cobra mensalidade e material — fixa e várias; o
+aluguel é fixo e um só; uma consulta médica é esporádica e podem ser três.
+
+A primeira versão deduzia isso da recorrência (esporádica ⇒ várias, fixa ⇒
+uma), o que impedia uma despesa **fixa** de receber duas cobranças no mesmo mês.
+Agora é campo próprio do catálogo, marcado pelo usuário:
+
+| `recorrencia` | `varios_por_mes` | Exemplo | Onde o 2º movimento é gravado |
+|---|:---:|---|---|
+| fixa | não | aluguel | não acontece (o item sai da lista após casar) |
+| fixa | **sim** | escola: mensalidade + material | na transação |
+| esporádica | não | IPTU | na transação |
+| esporádica | **sim** | consulta médica | na transação |
+
+**Onde o par é gravado depende de haver lançamento livre**, e não mais da
+recorrência: o primeiro casamento ocupa o lançamento do mês (é ele que carrega
+a previsão); do segundo em diante o registro é a própria transação, e o Mês
+Atual mostra a linha extra a partir dela.
+
+`varios_por_mes` decide **se o item continua na lista de associação** depois de
+já ter casado. Os que continuam vêm no campo `sempre_disponiveis` de cada lado
+do batimento — separado de `nao_encontrados`, que é "ainda não aconteceu".
+
+Migração: o valor inicial reproduz o comportamento anterior
+(`varios_por_mes = 1` onde `recorrencia='esporadica'`), então nada muda até o
+usuário marcar.
 
 > **Efeito colateral desejado:** hoje toda despesa ativa gera lançamento todo
 > mês, então uma despesa ocasional polui a lista de "não encontrei"
@@ -594,3 +619,10 @@ também na aba de receitas. Virou a prop `novaLabel`.
 **O passo "Revisar" não mostrava que o extrato traz entradas.** Ganhou a
 contagem "N saídas · N entradas", para ficar claro antes do batimento que os
 dois lados vieram no mesmo arquivo.
+
+**Vínculo sem lançamento também aparece na seção 1.** A 2ª ocorrência de um
+item "mais de um por mês" — e todo item esporádico — mora só na transação, sem
+lançamento. Sem aparecer entre as casadas, um vínculo errado desses ficaria
+intocável, exatamente o problema já corrigido para os casamentos gravados. Vêm
+marcados `sem_lancamento`, para a tela **não** devolvê-los à seção 2 quando o
+usuário troca o item: não há previsão para onde voltar.
