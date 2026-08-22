@@ -1,8 +1,9 @@
 # Receitas, Esporádicas e Resgates — Especificação
 
-**Status:** **fase 1 implementada** (recorrência fixa/esporádica no lado das
-despesas). Fases 2 a 5 — todo o lado das receitas — seguem apenas
-especificadas. Este documento é o contrato; ver §9 para o que já saiu.
+**Status:** **fases 1 e 2 implementadas** — recorrência fixa/esporádica nas
+despesas, e o catálogo de receitas com `tipo`. O schema do lado da receita está
+inteiro no banco; falta a lógica (batimento de créditos, Mês Atual, estorno).
+Este documento é o contrato; ver §9 para o que já saiu.
 
 Até aqui o app só enxerga **saídas recorrentes**. Este documento estende o
 modelo em três eixos, pedidos juntos porque são o mesmo problema visto de
@@ -434,7 +435,7 @@ Cada fase é utilizável sozinha e commitável separadamente.
 | Fase | Entrega | Por que nesta ordem |
 |---|---|---|
 | **1** ✅ | Migração + campo `recorrencia` + efeito no batimento de despesas | Menor mudança, valor imediato: tira a despesa ocasional da lista de "não encontrei" |
-| **2** | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
+| **2** ✅ | Catálogo de receitas com `tipo` (tabela, endpoints, aba no Catálogo) | Sem isso não há o que casar — e o `tipo` já nasce junto, porque é ele que classifica |
 | **3** | Motor de batimento genérico + seletor Saídas/Entradas | O grosso; reusa tudo do doc 10 |
 | **4** | Mês Atual com dois blocos + calculadora de resgate fechada | Consome tudo acima |
 | **5** | Estorno com sugestão automática | Independente; último por ser o de menor uso |
@@ -492,3 +493,18 @@ vazio de esporádica.
 *depois* de já ter casado no mês apareceria duas vezes — pelo lançamento antigo
 e pela transação. `_esporadicas_do_mes()` ignora transação que já tenha
 lançamento apontando para ela.
+
+**Fase 2 criou o schema inteiro do lado da receita**, incluindo
+`lancamento_receita`, `transacao_receita_regra` e as colunas novas de
+`transacao` — que só serão usadas na fase 3. Foi de propósito: uma migração só,
+em vez de duas, evita a possibilidade de um banco meio migrado.
+
+**`/api/receitas` antigo removido.** Era o CRUD do formato velho da tabela e
+apontaria para colunas que não existem mais. `/api/resumo` deixou de somar
+daquela tabela e passou a somar `lancamento_receita` filtrando pelos tipos que
+contam como renda — na fase 2 isso devolve 0, exatamente como antes, porque a
+tabela antiga estava vazia.
+
+**Importar catálogo por planilha não existe no lado da receita.** A operação
+desativa tudo que não está no arquivo, o que faz sentido para 58 despesas vindas
+de uma planilha e nenhum para meia dúzia de entradas.

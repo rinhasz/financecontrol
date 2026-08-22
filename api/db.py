@@ -69,12 +69,42 @@ CREATE TABLE IF NOT EXISTS lancamento (
   UNIQUE(mes_ref, despesa_id)
 );
 
+-- Catálogo de receitas: espelho de `despesa` para o lado da entrada (doc 14).
+-- `tipo` é o que decide se aquilo conta como renda: resgate de investimento e
+-- estorno entram na conta como dinheiro que chega, mas não são renda nova.
 CREATE TABLE IF NOT EXISTS receita (
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  mes_ref TEXT NOT NULL,
-  tipo    TEXT NOT NULL,
-  valor   REAL NOT NULL,
-  origem  TEXT
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome                 TEXT NOT NULL UNIQUE,
+  categoria_id         INTEGER REFERENCES categoria(id),
+  dia_recebimento      INTEGER,
+  tipo                 TEXT NOT NULL DEFAULT 'outra',
+  tipo_valor           TEXT NOT NULL DEFAULT 'variavel',
+  padrao_variabilidade TEXT NOT NULL DEFAULT 'variavel_nao_sazonal',
+  valor_padrao         REAL,
+  regras_match         TEXT NOT NULL DEFAULT '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}',
+  recorrencia          TEXT NOT NULL DEFAULT 'fixa',
+  ativo                INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lancamento_receita (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  mes_ref          TEXT NOT NULL,
+  receita_id       INTEGER NOT NULL REFERENCES receita(id),
+  valor_esperado   REAL NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL DEFAULT 'nao_encontrado',
+  transacao_id     INTEGER REFERENCES transacao(id),
+  valor_real       REAL,
+  data_recebimento TEXT,
+  UNIQUE(mes_ref, receita_id)
+);
+
+CREATE TABLE IF NOT EXISTS transacao_receita_regra (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  padrao     TEXT NOT NULL,
+  receita_id INTEGER NOT NULL REFERENCES receita(id),
+  acertos    INTEGER NOT NULL DEFAULT 1,
+  criado_em  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(padrao, receita_id)
 );
 
 CREATE TABLE IF NOT EXISTS posicao_investimento (
@@ -143,9 +173,39 @@ def get_db():
     return conn
 
 
+def _migrar_receita_para_catalogo(conn) -> None:
+    """Troca a tabela `receita` do formato antigo (mes_ref/tipo/valor/origem)
+    pelo catálogo do doc 14.
+
+    O formato antigo era um resquício do desenho original da Função 4: uma
+    linha por receita por mês, sem catálogo e sem tela. Nunca foi usado.
+
+    `CREATE TABLE IF NOT EXISTS` não converte tabela existente, então a troca é
+    explícita — e **só acontece se a tabela estiver vazia**. Havendo qualquer
+    linha, aborta com erro em vez de destruir dado: este código roda no banco
+    real do usuário, e a premissa "está vazia" foi verificada num banco
+    específico, não é garantia universal.
+    """
+    colunas = [r[1] for r in conn.execute('PRAGMA table_info(receita)').fetchall()]
+    if not colunas or 'mes_ref' not in colunas:
+        return  # já é o catálogo novo (ou a tabela ainda nem existe)
+
+    n = conn.execute('SELECT COUNT(*) FROM receita').fetchone()[0]
+    if n:
+        raise RuntimeError(
+            f'A tabela `receita` tem {n} linhas no formato antigo e a migração do '
+            'doc 14 as apagaria. Migre esses dados à mão antes de continuar.'
+        )
+
+    conn.execute('DROP TABLE receita')
+    conn.executescript(SCHEMA)  # recria no formato novo
+    print('[db] tabela `receita` (vazia) recriada como catálogo — doc 14')
+
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    _migrar_receita_para_catalogo(conn)
 
     # migração: bancos criados antes de linha_digitavel existir
     colunas = [r[1] for r in conn.execute('PRAGMA table_info(lancamento)').fetchall()]
@@ -163,6 +223,19 @@ def init_db():
     colunas_despesa = [r[1] for r in conn.execute('PRAGMA table_info(despesa)').fetchall()]
     if 'recorrencia' not in colunas_despesa:
         conn.execute("ALTER TABLE despesa ADD COLUMN recorrencia TEXT NOT NULL DEFAULT 'fixa'")
+
+    # migração: lado da receita na transação (doc 14). Criadas já na fase 2,
+    # junto com as tabelas, para a fase 3 não precisar de outra migração e não
+    # existir banco meio migrado.
+    colunas_transacao = [r[1] for r in conn.execute('PRAGMA table_info(transacao)').fetchall()]
+    if 'receita_id' not in colunas_transacao:
+        conn.execute('ALTER TABLE transacao ADD COLUMN receita_id INTEGER REFERENCES receita(id)')
+    if 'objetivo' not in colunas_transacao:
+        # rótulo do resgate esporádico ("compra do carro") — por ocorrência,
+        # não por item de catálogo, porque muda a cada resgate
+        conn.execute('ALTER TABLE transacao ADD COLUMN objetivo TEXT')
+    if 'estorna_transacao_id' not in colunas_transacao:
+        conn.execute('ALTER TABLE transacao ADD COLUMN estorna_transacao_id INTEGER REFERENCES transacao(id)')
 
     conn.commit()
     _seed_regras_transacao(conn)

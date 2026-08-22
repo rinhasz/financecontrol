@@ -188,7 +188,16 @@ def resumo():
     cfg = {r['chave']: float(r['valor']) for r in conn.execute('SELECT chave, valor FROM config').fetchall()}
     reserva = cfg.get('reserva_desejada', 5000)
     saldo = cfg.get('saldo_conta', 0)
-    receitas = conn.execute('SELECT COALESCE(SUM(valor),0) FROM receita WHERE mes_ref=?', (mes_ref,)).fetchone()[0] or 0
+    # Renda do mês: só o que conta como renda (doc 14). Resgate e estorno
+    # entram na conta como dinheiro chegando, mas não são renda nova — somá-los
+    # faria a calculadora de resgate concluir que não é preciso resgatar nada.
+    # Fase 2: ainda não há lançamento de receita, então isto devolve 0 — mesmo
+    # resultado de antes, quando a tabela `receita` estava vazia.
+    receitas = conn.execute("""
+        SELECT COALESCE(SUM(COALESCE(lr.valor_real, lr.valor_esperado)), 0)
+        FROM lancamento_receita lr JOIN receita r ON r.id = lr.receita_id
+        WHERE lr.mes_ref = ? AND r.tipo NOT IN ('resgate_mensal','resgate_esporadico','estorno','transferencia')
+    """, (mes_ref,)).fetchone()[0] or 0
     resgate = max(0, total + reserva - saldo - receitas)
 
     conn.close()
@@ -211,39 +220,6 @@ def set_config():
     conn = get_db()
     for k, v in data.items():
         conn.execute('INSERT OR REPLACE INTO config (chave, valor) VALUES (?,?)', (k, str(v)))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
-
-
-@bp.route('/receitas')
-def list_receitas():
-    mes_ref = request.args.get('mes', '')
-    conn = get_db()
-    rows = conn.execute('SELECT * FROM receita WHERE mes_ref=? ORDER BY tipo', (mes_ref,)).fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-
-@bp.route('/receitas', methods=['POST'])
-def upsert_receita():
-    data = request.json or {}
-    conn = get_db()
-    if data.get('id'):
-        conn.execute('UPDATE receita SET tipo=?, valor=?, origem=? WHERE id=?',
-                     (data['tipo'], data['valor'], data.get('origem'), data['id']))
-    else:
-        conn.execute('INSERT INTO receita (mes_ref, tipo, valor, origem) VALUES (?,?,?,?)',
-                     (data['mes_ref'], data['tipo'], data['valor'], data.get('origem')))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
-
-
-@bp.route('/receitas/<int:rid>', methods=['DELETE'])
-def delete_receita(rid):
-    conn = get_db()
-    conn.execute('DELETE FROM receita WHERE id=?', (rid,))
     conn.commit()
     conn.close()
     return jsonify({'ok': True})

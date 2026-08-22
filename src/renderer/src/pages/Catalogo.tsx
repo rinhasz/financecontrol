@@ -3,14 +3,29 @@ import { api } from '../lib/api'
 import { cn, formatBRL } from '../lib/utils'
 import { ImportarCatalogoModal } from '../components/ImportarCatalogoModal'
 
-interface Despesa {
+type Natureza = 'despesa' | 'receita'
+
+/** Forma comum das duas naturezas. O catálogo de receitas é espelho do de
+ *  despesas (doc 14) e só diverge em dois pontos: o dia se chama
+ *  `dia_recebimento` no banco, e receita tem `tipo` — que é o campo que decide
+ *  se aquilo conta como renda. A normalização acontece na borda (carregar e
+ *  salvar), então o resto da tela não precisa saber de qual lado está. */
+interface Item {
   id: number; nome: string; categoria_id: number | null; categoria_nome: string
-  dia_vencimento: number | null; tipo_valor: string
+  dia: number | null; tipo_valor: string
   padrao_variabilidade: string; valor_padrao: number; regras_match: string; ativo: number
   recorrencia: 'fixa' | 'esporadica'
+  tipo?: string
+  conta_como_renda?: boolean
 }
 
 interface Categoria { id: number; nome: string }
+
+const TIPO_RECEITA_LABEL: Record<string, string> = {
+  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
+  resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
+  estorno: 'Estorno', transferencia: 'Transferência'
+}
 
 const PADRAO_LABEL: Record<string, string> = {
   fixa: 'Fixa', variavel_sazonal: 'Sazonal', variavel_nao_sazonal: 'Variável',
@@ -23,8 +38,9 @@ interface FormState {
   tipo_valor: string
   padrao_variabilidade: string
   recorrencia: string
+  tipo: string
   valor_padrao: string
-  dia_vencimento: string
+  dia: string
   palavras_chave: string
 }
 
@@ -36,7 +52,15 @@ const ORDEM_LABEL: Record<Ordem, string> = {
   dia_vencimento: 'Dia de vencimento'
 }
 
-function despesaParaForm(d: Despesa): FormState {
+/** Normaliza o que vem da API para a forma comum. */
+function paraItem(r: Record<string, unknown>, natureza: Natureza): Item {
+  return {
+    ...(r as unknown as Item),
+    dia: (natureza === 'receita' ? r.dia_recebimento : r.dia_vencimento) as number | null
+  }
+}
+
+function itemParaForm(d: Item): FormState {
   let palavras_chave = ''
   try { palavras_chave = (JSON.parse(d.regras_match).palavras_chave ?? []).join(', ') } catch { /* regras_match inválido, deixa vazio */ }
   return {
@@ -45,14 +69,16 @@ function despesaParaForm(d: Despesa): FormState {
     tipo_valor: d.tipo_valor,
     padrao_variabilidade: d.padrao_variabilidade,
     recorrencia: d.recorrencia ?? 'fixa',
+    tipo: d.tipo ?? 'outra',
     valor_padrao: String(d.valor_padrao ?? ''),
-    dia_vencimento: d.dia_vencimento != null ? String(d.dia_vencimento) : '',
+    dia: d.dia != null ? String(d.dia) : '',
     palavras_chave
   }
 }
 
 export function Catalogo() {
-  const [despesas, setDespesas] = useState<Despesa[]>([])
+  const [natureza, setNatureza] = useState<Natureza>('despesa')
+  const [despesas, setDespesas] = useState<Item[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [busca, setBusca] = useState('')
   const [apenasAtivas, setApenasAtivas] = useState(true)
@@ -63,40 +89,46 @@ export function Catalogo() {
   const [criando, setCriando] = useState(false)
   const [importando, setImportando] = useState(false)
 
+  const ehReceita = natureza === 'receita'
+
   async function load() {
     setLoading(true)
     try {
-      const [desp, cats] = await Promise.all([api.catalogo.list(), api.categorias.list()])
-      setDespesas(desp)
+      const [itens, cats] = await Promise.all([
+        ehReceita ? api.receitas.list() : api.catalogo.list(),
+        api.categorias.list()
+      ])
+      setDespesas((itens as Record<string, unknown>[]).map(r => paraItem(r, natureza)))
       setCategorias(cats)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  // trocar de aba fecha qualquer edição aberta: o formulário é do outro lado
+  useEffect(() => { setEditando(null); setCriando(false); setForm(null); load() }, [natureza])
 
   async function toggle(id: number) {
-    await api.catalogo.toggleAtivo(id)
+    await (ehReceita ? api.receitas.toggleAtivo(id) : api.catalogo.toggleAtivo(id))
     load()
   }
 
-  function abrirEdicao(d: Despesa) {
+  function abrirEdicao(d: Item) {
     setCriando(false)
     setEditando(editando === d.id ? null : d.id)
-    setForm(despesaParaForm(d))
+    setForm(itemParaForm(d))
   }
 
   function abrirCriacao() {
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', valor_padrao: '', dia_vencimento: '', palavras_chave: '' })
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {
     if (!form || !form.nome.trim()) return
     const keywords = form.palavras_chave.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
-    await api.catalogo.upsert({
+    const comum = {
       id: id ?? undefined,
       nome: form.nome.trim(),
       categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
@@ -104,9 +136,12 @@ export function Catalogo() {
       padrao_variabilidade: form.padrao_variabilidade,
       recorrencia: form.recorrencia,
       valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
-      dia_vencimento: form.dia_vencimento ? Number(form.dia_vencimento) : null,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
-    })
+    }
+    const dia = form.dia ? Number(form.dia) : null
+    await (ehReceita
+      ? api.receitas.upsert({ ...comum, tipo: form.tipo, dia_recebimento: dia })
+      : api.catalogo.upsert({ ...comum, dia_vencimento: dia }))
     setEditando(null)
     setCriando(false)
     setForm(null)
@@ -128,14 +163,14 @@ export function Catalogo() {
     }
     if (ordem === 'dia_vencimento') {
       // sem dia definido vai pro fim, senão ocuparia o topo sem informar nada
-      const da = a.dia_vencimento ?? Infinity
-      const db = b.dia_vencimento ?? Infinity
+      const da = a.dia ?? Infinity
+      const db = b.dia ?? Infinity
       return da !== db ? da - db : a.nome.localeCompare(b.nome)
     }
     return 0
   })
 
-  const byCategory = filtradas.reduce<Record<string, Despesa[]>>((acc, d) => {
+  const byCategory = filtradas.reduce<Record<string, Item[]>>((acc, d) => {
     const cat = d.categoria_nome || 'Outros'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(d)
@@ -168,6 +203,15 @@ export function Catalogo() {
           <option value="fixo">Fixo</option>
         </select>
       </Field>
+      {ehReceita && (
+        <Field label="Tipo">
+          <select value={form.tipo} onChange={e => setForm(f => f && { ...f, tipo: e.target.value })}
+            title="Resgate, estorno e transferência não contam como renda do mês"
+            className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+            {Object.entries(TIPO_RECEITA_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </Field>
+      )}
       <Field label="Recorrência">
         <select value={form.recorrencia} onChange={e => setForm(f => f && { ...f, recorrencia: e.target.value })}
           title="Esporádica não gera previsão mensal — só aparece no mês em que acontecer"
@@ -180,8 +224,8 @@ export function Catalogo() {
         <input value={form.valor_padrao} onChange={e => setForm(f => f && { ...f, valor_padrao: e.target.value })}
           className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-24 text-right" />
       </Field>
-      <Field label="Dia venc.">
-        <input value={form.dia_vencimento} onChange={e => setForm(f => f && { ...f, dia_vencimento: e.target.value })}
+      <Field label={ehReceita ? 'Dia receb.' : 'Dia venc.'}>
+        <input value={form.dia} onChange={e => setForm(f => f && { ...f, dia: e.target.value })}
           className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-14 text-center" />
       </Field>
       <Field label="Palavras-chave (separadas por vírgula)">
@@ -196,8 +240,8 @@ export function Catalogo() {
     </div>
   )
 
-  function tabela(items: Despesa[], mostrarCategoria: boolean) {
-    const nColunas = mostrarCategoria ? 7 : 6
+  function tabela(items: Item[], mostrarCategoria: boolean) {
+    const nColunas = (mostrarCategoria ? 7 : 6) + (ehReceita ? 1 : 0)
     return (
       <div className="rounded-lg overflow-hidden border border-zinc-800/60">
         <table className="w-full text-sm">
@@ -205,9 +249,10 @@ export function Catalogo() {
             <tr className="border-b border-zinc-800 bg-zinc-900/40">
               <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Nome</th>
               {mostrarCategoria && <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Categoria</th>}
+              {ehReceita && <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Tipo</th>}
               <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Padrão</th>
               <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Previsão</th>
-              <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Dia Venc.</th>
+              <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">{ehReceita ? 'Dia Receb.' : 'Dia Venc.'}</th>
               <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
               <th className="px-4 py-2"></th>
             </tr>
@@ -228,6 +273,15 @@ export function Catalogo() {
                   {mostrarCategoria && (
                     <td className="px-4 py-2.5 text-zinc-500 text-xs">{d.categoria_nome || 'Outros'}</td>
                   )}
+                  {ehReceita && (
+                    <td className="px-4 py-2.5">
+                      <span className={cn('text-xs px-2 py-0.5 rounded',
+                        d.conta_como_renda ? 'text-emerald-400 bg-emerald-950/40' : 'text-zinc-500 bg-zinc-800')}
+                        title={d.conta_como_renda ? 'Conta como renda do mês' : 'Entra na conta, mas não é renda'}>
+                        {TIPO_RECEITA_LABEL[d.tipo ?? 'outra'] ?? d.tipo}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-4 py-2.5">
                     <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
                       {PADRAO_LABEL[d.padrao_variabilidade] ?? d.padrao_variabilidade}
@@ -236,7 +290,7 @@ export function Catalogo() {
                   <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">
                     {d.valor_padrao > 0 ? formatBRL(d.valor_padrao) : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia_vencimento ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-center text-zinc-500 text-xs">{d.dia ?? '—'}</td>
                   <td className="px-4 py-2.5 text-center">
                     <button onClick={() => toggle(d.id)}
                       className={cn('text-xs px-2 py-0.5 rounded border transition-colors',
@@ -271,9 +325,19 @@ export function Catalogo() {
   return (
     <div className="flex flex-col h-full pt-3">
       <div className="px-6 pb-4 flex items-center justify-between flex-none">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Catálogo de Despesas</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">{filtradas.length} despesas</p>
+        <div className="flex items-center gap-4">
+          <div className="flex rounded-md border border-zinc-700 overflow-hidden">
+            {(['despesa', 'receita'] as Natureza[]).map(n => (
+              <button key={n} onClick={() => setNatureza(n)}
+                className={cn('px-3 py-1.5 text-sm transition-colors',
+                  natureza === n ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200')}>
+                {n === 'despesa' ? 'Despesas' : 'Receitas'}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-zinc-500">
+            {filtradas.length} {ehReceita ? 'receitas' : 'despesas'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-zinc-400">
@@ -291,12 +355,16 @@ export function Catalogo() {
             className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-emerald-500 w-48 placeholder:text-zinc-600" />
           <button onClick={abrirCriacao}
             className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
-            + Nova despesa
+            {ehReceita ? '+ Nova receita' : '+ Nova despesa'}
           </button>
-          <button onClick={() => setImportando(true)}
-            className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors whitespace-nowrap">
-            Importar catálogo
-          </button>
+          {/* a importação de planilha é específica de despesa (desativa o que
+              não está no arquivo) — não faz sentido no lado da receita */}
+          {!ehReceita && (
+            <button onClick={() => setImportando(true)}
+              className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors whitespace-nowrap">
+              Importar catálogo
+            </button>
+          )}
         </div>
       </div>
 
@@ -320,7 +388,7 @@ export function Catalogo() {
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
                   <div className="flex-1 h-px bg-zinc-800" />
-                  <span className="text-xs text-zinc-600">{items.length} despesas</span>
+                  <span className="text-xs text-zinc-600">{items.length}</span>
                 </div>
                 {tabela(items, false)}
               </div>

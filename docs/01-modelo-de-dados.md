@@ -92,6 +92,9 @@ alteram status de pagamento** — servem só para copiar o código na hora de pa
 | banco_origem | TEXT | |
 | classificacao | TEXT | `recorrente` \| `extra` \| `receita` \| `transferencia` \| `investimento` |
 | despesa_id | INTEGER FK → despesa (nullable) | Preenchido após batimento |
+| receita_id | INTEGER FK → receita (nullable) | Espelho, para créditos |
+| objetivo | TEXT (nullable) | Rótulo do resgate esporádico ("compra do carro"). Fica aqui, e não no catálogo, porque muda a cada resgate |
+| estorna_transacao_id | INTEGER FK → transacao (nullable) | Qual débito este crédito anula |
 | import_id | INTEGER FK → importacao | |
 
 ---
@@ -110,15 +113,63 @@ alteram status de pagamento** — servem só para copiar o código na hora de pa
 
 ---
 
-## receita (Função 4)
+## receita (catálogo de entradas)
+
+Espelho de `despesa` para o lado da entrada. Ver [14](14-receitas-e-esporadicas.md).
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| id | INTEGER PK | |
+| nome | TEXT UNIQUE | |
+| categoria_id | INTEGER FK → categoria | Mesma tabela de categorias das despesas |
+| dia_recebimento | INTEGER (nullable) | Espelho de `dia_vencimento` |
+| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` |
+| tipo_valor | TEXT | `fixo` \| `variavel` |
+| padrao_variabilidade | TEXT | Mesmos valores de `despesa` |
+| valor_padrao | REAL | |
+| regras_match | JSON | Mesmo formato de `despesa` |
+| recorrencia | TEXT | `fixa` \| `esporadica` |
+| ativo | BOOLEAN | |
+
+**`tipo` decide se aquilo conta como renda.** Resgate de investimento e estorno
+chegam na conta como dinheiro entrando, mas não são renda nova — somá-los
+inflaria a receita do mês e faria a calculadora de resgate concluir que não é
+preciso resgatar nada. Não existe campo `conta_como_renda`: ele é **derivado**
+(`tipo not in {resgate_mensal, resgate_esporadico, estorno, transferencia}`),
+porque dois campos que precisam concordar acabam discordando.
+
+> **Migração destrutiva, com guarda-corpo.** Esta tabela existia antes com
+> outro formato (`mes_ref`/`tipo`/`valor`/`origem`), resquício do desenho
+> original da Função 4, sem catálogo e sem tela. `CREATE TABLE IF NOT EXISTS`
+> não converte tabela existente, então `_migrar_receita_para_catalogo()` faz
+> `DROP` + recria — **e só se a tabela estiver vazia**. Havendo qualquer linha,
+> levanta `RuntimeError` em vez de apagar.
+
+---
+
+## lancamento_receita (instância mensal de uma receita fixa)
+
+Espelho de `lancamento`. Só existe para receitas `fixa` — esporádica não gera
+lançamento (ver `recorrencia` acima).
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | INTEGER PK | |
 | mes_ref | TEXT | `"AAAA-MM"` |
-| tipo | TEXT | `salario` \| `juros` \| `outro` |
-| valor | REAL | |
-| origem | TEXT | Descrição da fonte |
+| receita_id | INTEGER FK → receita | |
+| valor_esperado | REAL | |
+| status | TEXT | `recebido` \| `previsto` \| `nao_encontrado` |
+| transacao_id | INTEGER FK → transacao (nullable) | |
+| valor_real | REAL (nullable) | |
+| data_recebimento | TEXT (nullable) | |
+
+**UNIQUE(mes_ref, receita_id)**
+
+---
+
+## transacao_receita_regra
+
+Espelho exato de `transacao_despesa_regra`, com a mesma `padrao_descricao()`.
 
 ---
 

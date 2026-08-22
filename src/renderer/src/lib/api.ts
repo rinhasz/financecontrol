@@ -50,12 +50,6 @@ async function patch(path: string, body: unknown) {
   return r.json()
 }
 
-async function del(path: string) {
-  const r = await fetch(BASE + path, { method: 'DELETE' })
-  if (!r.ok) throw new Error(await r.text())
-  return r.json()
-}
-
 export const api = {
   lancamentos: {
     list: (mes: string) => get(`/api/lancamentos?mes=${mes}`),
@@ -67,9 +61,10 @@ export const api = {
     set: (data: Record<string, unknown>) => post('/api/config', data)
   },
   receitas: {
-    list: (mes: string) => get(`/api/receitas?mes=${mes}`),
-    upsert: (data: Record<string, unknown>) => post('/api/receitas', data),
-    delete: (id: number) => del(`/api/receitas/${id}`)
+    list: () => get('/api/receitas/catalogo'),
+    tipos: () => get('/api/receitas/tipos'),
+    upsert: (data: Record<string, unknown>) => post('/api/receitas/catalogo', data),
+    toggleAtivo: (id: number) => post(`/api/receitas/catalogo/${id}/toggle`)
   },
   catalogo: {
     list: () => get('/api/catalogo'),
