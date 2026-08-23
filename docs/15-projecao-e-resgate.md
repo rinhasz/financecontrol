@@ -89,10 +89,26 @@ não é preciso resgatar — usando a própria resposta como dado.
 a_vencer  = agendado + Σ max(0, projetado − pago − agendado)
 a_receber = Σ renda projetada ainda não recebida
 
-resgate_necessario = max(0, a_vencer + reserva − saldo − a_receber)
-resgate_ja_feito   = Σ créditos de tipo `resgate_mensal` no mês
-falta_resgatar     = max(0, resgate_necessario − resgate_ja_feito)
+falta_resgatar = max(0, a_vencer + reserva − saldo − a_receber)
 ```
+
+### O saldo vem do extrato
+
+`config.saldo_conta` é lido na importação, da coluna *saldos (R$)* do extrato:
+o **último "SALDO TOTAL DISPONÍVEL DIA" antes da marca "lançamentos futuros"**
+— depois dela vêm agendamentos, que ainda não afetaram a conta. A data fica em
+`config.saldo_data` e aparece na tela ao lado do valor.
+
+Com saldo digitado à mão, ou zerado, a calculadora responde sobre uma conta que
+não existe. No caso real: o saldo era **−111,21**, não zero.
+
+### O resgate já feito NÃO abate
+
+Ele já entrou na conta e portanto **já está dentro do saldo**. Descontá-lo de
+novo contava o mesmo dinheiro duas vezes. Com saldo zerado à mão o erro passava
+despercebido — os dois se cancelavam por acaso; com o saldo real do extrato ele
+diria "não falta nada" numa conta negativa. O valor continua sendo devolvido,
+como informação, no tooltip do card.
 
 O `max(0, ...)` por item importa: uma despesa que veio mais cara que o projetado
 não gera "crédito" para abater outra — o excesso já aconteceu e já está no pago.
@@ -104,3 +120,20 @@ visão analítica, que mostra o gasto e a devolução em blocos separados.
 `totalLiquido` desconta o estorno e é o que alimenta saldo e resgate. Os dois são
 devolvidos, com `estornado` explicitando a diferença — invariante verificada:
 **a soma das linhas exibidas é sempre igual ao total exibido naquela visão**.
+
+---
+
+## Reimportar preservava só metade
+
+Ao ler o saldo do extrato, dois defeitos da substituição de período apareceram:
+
+**O DELETE falhava por chave estrangeira** quando algum estorno apontava para
+uma linha do intervalo (`estorna_transacao_id`). A referência é solta antes de
+apagar; o vínculo que importa (`estorna_despesa_id`) sobrevive — foi exatamente
+para isto que ele existe.
+
+**A reimportação apagava a classificação das entradas.** O snapshot guardava só
+`despesa_id`; `receita_id`, `objetivo` e `estorna_despesa_id` se perdiam em
+silêncio, e `lancamento_receita.transacao_id` nem era desligado. Agora atravessa
+tudo que é decisão do usuário sobre a linha. Verificado com o extrato real: duas
+importações seguidas preservam 60 despesas, 21 receitas e 3 estornos.

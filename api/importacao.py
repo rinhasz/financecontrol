@@ -135,6 +135,11 @@ def _find_header(rows):
             sit_idx = next((j for j, h in enumerate(headers) if re.search(r'situa|status', h)), None)
             if sit_idx is not None:
                 col['situacao'] = sit_idx
+            # coluna de saldo: existe no extrato do Itaú, preenchida só nas
+            # linhas "SALDO TOTAL DISPONÍVEL DIA"
+            sal_idx = next((j for j, h in enumerate(headers) if re.search(r'\bsaldo', h)), None)
+            if sal_idx is not None:
+                col['saldo'] = sal_idx
             return i, col
     return None, {}
 
@@ -198,13 +203,58 @@ def _parse_excel_sheet(rows):
     return txs
 
 
+def _extrair_saldo(rows):
+    """Último saldo disponível do extrato: `(data, valor)` ou `(None, None)`.
+
+    O Itaú intercala linhas "SALDO TOTAL DISPONÍVEL DIA" com o saldo do dia numa
+    coluna própria. O que interessa é o **último antes de "lançamentos
+    futuros"** — depois dessa marca vêm agendamentos, que ainda não afetaram a
+    conta.
+
+    Ler o saldo do extrato importa porque é ele que diz quanto falta resgatar.
+    Com saldo digitado à mão, ou zerado, a calculadora responde sobre uma conta
+    que não existe.
+    """
+    from datetime import datetime as _dt, date as _date
+
+    header_idx, col = _find_header(rows)
+    if header_idx is None or 'saldo' not in col:
+        return None, None
+
+    achado = (None, None)
+    for row in rows[header_idx + 1:]:
+        if row is None:
+            continue
+        rotulo = normalize_text(f"{row[col['data']] if col['data'] < len(row) else ''} "
+                                f"{row[col['descricao']] if col['descricao'] < len(row) else ''}")
+        if 'futur' in rotulo:
+            break
+
+        bruto = row[col['saldo']] if col['saldo'] < len(row) else None
+        if bruto in (None, ''):
+            continue
+        valor = float(bruto) if isinstance(bruto, (int, float)) else parse_br_number(str(bruto))
+        if valor != valor:  # NaN — provavelmente o cabeçalho
+            continue
+
+        raw_data = row[col['data']] if col['data'] < len(row) else None
+        if isinstance(raw_data, (_dt, _date)):
+            data = raw_data.strftime('%Y-%m-%d')
+        else:
+            data = parse_br_date(str(raw_data or ''))
+        if data:
+            achado = (data, valor)
+
+    return achado
+
+
 def parse_excel_content(content: bytes, ext: str):
     sheets = _sheet_rows_xls(content) if ext == 'xls' else _sheet_rows_xlsx(content)
     for rows in sheets:
         txs = _parse_excel_sheet(rows)
         if txs:
-            return txs
-    return []
+            return txs, _extrair_saldo(rows)
+    return [], (None, None)
 
 
 def parse_csv_content(content: str):
@@ -247,8 +297,9 @@ def importar():
     ext = filename.rsplit('.', 1)[-1].lower()
     content = file.read()
 
+    saldo_data, saldo_valor = None, None
     if ext in ('xls', 'xlsx', 'xlsm'):
-        txs = parse_excel_content(content, ext)
+        txs, (saldo_data, saldo_valor) = parse_excel_content(content, ext)
         formato = ext
     else:
         try:
@@ -291,7 +342,8 @@ def importar():
     # recorte é por banco: sem isso, importar um extrato de outra conta
     # apagaria as transações desta no mesmo período.
     antigas = conn.execute(
-        'SELECT id, data, descricao, valor, despesa_id, classificacao FROM transacao '
+        'SELECT id, data, descricao, valor, despesa_id, receita_id, classificacao, '
+        'objetivo, estorna_despesa_id FROM transacao '
         'WHERE data BETWEEN ? AND ? AND banco_origem = ?',
         (ini, fim, banco)
     ).fetchall()
@@ -300,18 +352,24 @@ def importar():
     lanc_por_tx = {}
     if ids_antigos:
         ph = ','.join('?' * len(ids_antigos))
-        for r in conn.execute(
-                f'SELECT id, transacao_id FROM lancamento WHERE transacao_id IN ({ph})', ids_antigos):
-            lanc_por_tx.setdefault(r['transacao_id'], []).append(r['id'])
+        for tabela in ('lancamento', 'lancamento_receita'):
+            for r in conn.execute(
+                    f'SELECT id, transacao_id FROM {tabela} WHERE transacao_id IN ({ph})', ids_antigos):
+                lanc_por_tx.setdefault(r['transacao_id'], []).append((tabela, r['id']))
 
     # Casamentos confirmados são trabalho manual do usuário e têm que atravessar
     # a troca. Por chave exata primeiro; depois por (data, valor), que é o que
     # sobrevive quando o banco reescreve a descrição ao debitar
     # ('PAG TIT 662992535000' -> 'PAG BOLETO EDIFICIO LINCOLN GARDEN').
+    #
+    # Atravessa tudo que é decisão do usuário sobre a linha: a despesa OU a
+    # receita, a classificação, o objetivo do resgate e a despesa estornada.
+    # Guardar só `despesa_id` fazia a reimportação apagar em silêncio toda a
+    # classificação das entradas.
     vinculo_exato = {}
     vinculo_por_valor = {}
     for t in antigas:
-        if not t['despesa_id']:
+        if not (t['despesa_id'] or t['receita_id']):
             continue
         vinculo_exato[(t['data'], t['descricao'], t['valor'])] = t
         vinculo_por_valor.setdefault((t['data'], t['valor']), []).append(t)
@@ -325,6 +383,12 @@ def importar():
     if ids_antigos:
         ph = ','.join('?' * len(ids_antigos))
         conn.execute(f'UPDATE lancamento SET transacao_id=NULL WHERE transacao_id IN ({ph})', ids_antigos)
+        conn.execute(f'UPDATE lancamento_receita SET transacao_id=NULL WHERE transacao_id IN ({ph})', ids_antigos)
+        # um estorno aponta para a linha que anula; sem soltar a referência o
+        # DELETE falha por chave estrangeira. O vínculo que importa
+        # (estorna_despesa_id) é restaurado adiante — foi para sobreviver a
+        # exatamente isto que ele existe.
+        conn.execute(f'UPDATE transacao SET estorna_transacao_id=NULL WHERE estorna_transacao_id IN ({ph})', ids_antigos)
         conn.execute(f'DELETE FROM transacao WHERE id IN ({ph})', ids_antigos)
 
     novos = []
@@ -357,7 +421,7 @@ def importar():
     restaurados = 0
     orfaos = 0
     for antiga in antigas:
-        if not antiga['despesa_id']:
+        if not (antiga['despesa_id'] or antiga['receita_id']):
             continue
         lancs = lanc_por_tx.get(antiga['id'], [])
         alvo = casados.get(antiga['id'])
@@ -366,20 +430,34 @@ def importar():
             # correção do banco. O lançamento volta a ficar em aberto em vez de
             # continuar apontando para algo que não existe mais.
             orfaos += 1
-            for lid in lancs:
+            for tabela, lid in lancs:
+                data_col = 'data_pagamento' if tabela == 'lancamento' else 'data_recebimento'
                 conn.execute(
-                    "UPDATE lancamento SET status='nao_encontrado', transacao_id=NULL, "
-                    "valor_real=NULL, data_pagamento=NULL WHERE id=?", (lid,))
+                    f"UPDATE {tabela} SET status='nao_encontrado', transacao_id=NULL, "
+                    f'valor_real=NULL, {data_col}=NULL WHERE id=?', (lid,))
             continue
         novo_id, t = alvo
-        conn.execute('UPDATE transacao SET despesa_id=?, classificacao=? WHERE id=?',
-                     (antiga['despesa_id'], antiga['classificacao'], novo_id))
-        status = 'pago' if _situacao(t) == 'efetivada' else 'agendado'
-        for lid in lancs:
+        conn.execute(
+            'UPDATE transacao SET despesa_id=?, receita_id=?, classificacao=?, '
+            'objetivo=?, estorna_despesa_id=? WHERE id=?',
+            (antiga['despesa_id'], antiga['receita_id'], antiga['classificacao'],
+             antiga['objetivo'], antiga['estorna_despesa_id'], novo_id))
+        efetivada = _situacao(t) == 'efetivada'
+        for tabela, lid in lancs:
+            status = ('pago' if efetivada else 'agendado') if tabela == 'lancamento' \
+                else ('recebido' if efetivada else 'previsto')
+            data_col = 'data_pagamento' if tabela == 'lancamento' else 'data_recebimento'
             conn.execute(
-                'UPDATE lancamento SET status=?, transacao_id=?, valor_real=?, data_pagamento=? WHERE id=?',
+                f'UPDATE {tabela} SET status=?, transacao_id=?, valor_real=?, {data_col}=? WHERE id=?',
                 (status, novo_id, abs(t['valor']), t['data'], lid))
         restaurados += 1
+
+    # O saldo lido do extrato substitui o digitado: é dado do banco, com data.
+    if saldo_valor is not None:
+        conn.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES ('saldo_conta', ?)",
+                     (str(saldo_valor),))
+        conn.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES ('saldo_data', ?)",
+                     (saldo_data or '',))
 
     from collections import Counter
     antes = Counter((t['data'], t['descricao'], t['valor']) for t in antigas)
@@ -390,6 +468,8 @@ def importar():
     conn.close()
 
     msg = f'{len(txs)} lançamentos do extrato ({ini} a {fim})'
+    if saldo_valor is not None:
+        msg += f' — saldo em {saldo_data}: R$ {saldo_valor:,.2f}'.replace(',', '@').replace('.', ',').replace('@', '.')
     if removidas:
         msg += f' — {removidas} que não estão mais no extrato foram removidos'
     if restaurados:

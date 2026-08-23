@@ -40,6 +40,7 @@ interface Resumo {
   // o que o projetado diz que ainda vai acontecer, e a soma com o agendado —
   // é isso que precisa de dinheiro, não o que já saiu da conta
   aRealizar: number; aVencer: number; aReceber: number
+  saldoData: string
   total: number; reserva: number; saldo: number
   renda: number; rendaRecebida: number
   movimentacao: Record<string, number>
@@ -291,7 +292,15 @@ export function MesAtual() {
                 </div>
               ))}
               <div>
-                <p className="text-zinc-500 text-xs mb-0.5">Saldo conta</p>
+                <p className="text-zinc-500 text-xs mb-0.5">
+                  Saldo conta
+                  {resumo.saldoData && (
+                    <span className="ml-1 text-zinc-600"
+                      title="Lido do extrato na importação — é o saldo do banco, não um valor digitado">
+                      ({new Date(resumo.saldoData + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })})
+                    </span>
+                  )}
+                </p>
                 {saldoEdit ? (
                   <input autoFocus
                     className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-sm text-zinc-200 w-28 outline-none focus:border-emerald-500"
@@ -301,14 +310,18 @@ export function MesAtual() {
                   />
                 ) : (
                   <button onClick={() => setSaldoEdit(true)}
-                    className="text-zinc-200 font-medium hover:text-emerald-400 transition-colors">
+                    className={cn('font-medium hover:text-emerald-400 transition-colors',
+                      resumo.saldo < 0 ? 'text-red-400' : 'text-zinc-200')}>
                     {formatBRL(resumo.saldo)}
                   </button>
                 )}
               </div>
               <div>
-                <p className="text-zinc-500 text-xs mb-0.5">
-                  {resumo.resgateJaFeito > 0 ? 'Ainda falta resgatar' : 'A resgatar'}
+                <p className="text-zinc-500 text-xs mb-0.5"
+                  title={resumo.resgateJaFeito > 0
+                    ? `Já resgatou ${formatBRL(resumo.resgateJaFeito)} neste mês — esse dinheiro já está dentro do saldo acima, por isso não abate daqui`
+                    : undefined}>
+                  A resgatar
                 </p>
                 <p className={cn('text-lg font-bold', resumo.faltaResgatar > 0 ? 'text-amber-400' : 'text-emerald-400')}>
                   {formatBRL(resumo.faltaResgatar)}

@@ -429,16 +429,29 @@ def resumo():
         if not conta_como_renda(tipo):
             movimentacao[tipo] = round(movimentacao.get(tipo, 0.0) + v['pago'] + v['agendado'], 2)
 
-    cfg = {r['chave']: float(r['valor']) for r in conn.execute('SELECT chave, valor FROM config').fetchall()}
-    reserva = cfg.get('reserva_desejada', 5000)
-    saldo = cfg.get('saldo_conta', 0)
+    # só as chaves numéricas: `config` também guarda texto (a data do saldo),
+    # e converter tudo para float quebrava a tela inteira
+    def _num(chave, padrao):
+        row = conn.execute('SELECT valor FROM config WHERE chave=?', (chave,)).fetchone()
+        try:
+            return float(row['valor'])
+        except (TypeError, ValueError):
+            return padrao
+
+    reserva = _num('reserva_desejada', 5000)
+    saldo = _num('saldo_conta', 0)
+    saldo_data = get_config_value(conn, 'saldo_data', '')
 
     a_vencer = round(agendado + a_realizar, 2)
     a_receber = round(a_receber_marcado + a_receber_projetado, 2)
 
+    # O resgate já feito **não** abate: ele já entrou na conta e portanto já está
+    # dentro do `saldo`. Descontá-lo de novo era contar o mesmo dinheiro duas
+    # vezes — com saldo zerado à mão o erro passava despercebido, mas com o saldo
+    # real do extrato ele diria "não falta nada" numa conta negativa.
     resgate_necessario = max(0.0, round(a_vencer + reserva - saldo - a_receber, 2))
     resgate_ja_feito = round(movimentacao.get('resgate_mensal', 0.0), 2)
-    falta_resgatar = max(0.0, round(resgate_necessario - resgate_ja_feito, 2))
+    falta_resgatar = resgate_necessario
 
     ini, fim = periodo_competencia(mes_ref, int(get_config_value(conn, 'dia_recebimento_salario', '26')))
     conn.close()
@@ -450,7 +463,7 @@ def resumo():
         'totalLiquido': round(pago + agendado + a_realizar, 2),
         'estornado': estornado,
         'aVencer': a_vencer,
-        'reserva': reserva, 'saldo': saldo,
+        'reserva': reserva, 'saldo': saldo, 'saldoData': saldo_data,
         'renda': renda, 'rendaRecebida': renda_recebida, 'aReceber': a_receber,
         'movimentacao': movimentacao,
         'saldoMes': round(renda_recebida - pago, 2),
