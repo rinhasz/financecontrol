@@ -747,3 +747,26 @@ conhecida continua ali, como movimentação, até a propagação acontecer.
 `GET /api/consolidado?mes=` faz o agrupamento no backend, para o total e as
 linhas nunca poderem discordar. A invariante verificada é a de sempre: **a soma
 das linhas exibidas é igual ao total exibido**.
+
+---
+
+## Por que o estorno "não funcionava"
+
+O app decide tudo pelo **`tipo`** do item, não pelo nome. O usuário tinha um item
+chamado `estorno` tipado como `reembolso` — para o app era uma receita comum:
+não pedia alvo, não abatia nada e ainda contava como renda. Do lado de quem usa,
+"escolhi estorno e não aconteceu nada".
+
+Duas correções, além de ajustar o dado:
+
+**O tipo agora aparece no combo de classificação** das entradas: cada opção é
+`nome · Tipo`. É onde a decisão acontece, e era o único lugar onde a divergência
+entre nome e tipo ficava invisível. Duas rodadas de "mude o Tipo no Catálogo"
+não resolveram — sinal de que o problema era a tela não mostrar, não o usuário
+não saber.
+
+**A validação passou a rodar sobre o lote inteiro antes de gravar qualquer
+coisa.** Validar dentro do laço fazia um único estorno sem alvo abortar no meio:
+a transação era desfeita (nada parcial, isso estava certo), mas o usuário perdia
+a revisão inteira sem saber qual linha era a culpada. Agora a resposta diz
+quantos e quais, e é explícita: *"Nada foi gravado"*.

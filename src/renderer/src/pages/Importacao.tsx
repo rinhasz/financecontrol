@@ -37,6 +37,16 @@ interface DetalheMatch {
   sem_lancamento?: boolean
 }
 
+/** Rótulo do tipo da receita. A tela precisa mostrá-lo na hora de classificar:
+ *  é o tipo — não o nome do item — que decide se aquilo é renda e se o app vai
+ *  pedir o alvo do estorno. Um item chamado "estorno" mas tipado como
+ *  "reembolso" não estorna nada, e sem exibir o tipo isso é invisível. */
+const TIPO_RECEITA_LABEL: Record<string, string> = {
+  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
+  resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
+  estorno: 'Estorno', transferencia: 'Transferência'
+}
+
 const STATUS_LABEL: Record<string, string> = {
   pago: 'Pago', agendado: 'Agendado', nao_encontrado: 'Em aberto',
   recebido: 'Recebido', previsto: 'Previsto'
@@ -508,7 +518,10 @@ export function Importacao({ active }: { active: boolean }) {
     .filter(d => !!d.varios_por_mes || !despesasAssociadas.has(d.id))
     .map(d => {
       const previsto = previstoPorItem.get(d.id)
-      const marca = previsto && previsto > 0 ? formatBRL(previsto)
+      // no lado das entradas o tipo vem primeiro: é ele que classifica
+      const marca = natureza === 'receita'
+        ? (TIPO_RECEITA_LABEL[d.tipo ?? 'outra'] ?? d.tipo)
+        : previsto && previsto > 0 ? formatBRL(previsto)
         : d.recorrencia === 'esporadica' ? 'esporádica'
         : d.varios_por_mes ? 'mais de um por mês' : null
       return { id: d.id, nome: marca ? `${d.nome}  ·  ${marca}` : d.nome }

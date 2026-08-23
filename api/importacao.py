@@ -616,6 +616,29 @@ def confirmar_batimento():
         return jsonify({'ok': False, 'msg': 'mes_ref e pares são obrigatórios'}), 400
 
     conn = get_db()
+
+    # Valida TODOS os pares antes de gravar qualquer um. Validar dentro do laço
+    # fazia um único estorno sem alvo descartar o lote inteiro — o trabalho de
+    # revisão inteiro se perdia, e a tela não dizia qual linha era a culpada.
+    problemas = []
+    for par in pares:
+        if par.get('natureza') != 'receita':
+            continue
+        item = conn.execute('SELECT nome, tipo FROM receita WHERE id=?', (par.get('item_id'),)).fetchone()
+        if (item and item['tipo'] == 'estorno'
+                and not par.get('estorna_transacao_id') and not par.get('estorna_despesa_id')):
+            problemas.append({'transacao_id': par.get('transacao_id'), 'item_nome': item['nome']})
+
+    if problemas:
+        conn.close()
+        nomes = ', '.join(sorted({p['item_nome'] for p in problemas}))
+        return jsonify({
+            'ok': False,
+            'msg': (f'{len(problemas)} estorno(s) sem alvo ({nomes}): diga qual despesa ou '
+                    'lançamento cada um anula. Nada foi gravado.'),
+            'pendentes': problemas,
+        }), 400
+
     confirmados = 0
     for par in pares:
         natureza = par.get('natureza', 'despesa')
@@ -630,19 +653,6 @@ def confirmar_batimento():
         item = conn.execute(f"SELECT * FROM {c['catalogo']} WHERE id=?", (item_id,)).fetchone()
         if not transacao or not item:
             continue
-
-        # Estorno sem alvo não é estorno: sem saber qual débito foi anulado, o
-        # crédito vira uma entrada solta e o débito estornado continua contando
-        # como despesa paga. A regra é validada aqui, e não só na tela, porque
-        # é a gravação que precisa ser confiável.
-        if (natureza == 'receita' and item['tipo'] == 'estorno'
-                and not par.get('estorna_transacao_id') and not par.get('estorna_despesa_id')):
-            conn.close()
-            return jsonify({
-                'ok': False,
-                'msg': f'"{item["nome"]}" é do tipo estorno: informe qual despesa ou lançamento ele anula.',
-                'transacao_id': transacao_id,
-            }), 400
 
         _persistir_par(conn, mes_ref, item_id, transacao_id, transacao, natureza)
         confirmados += 1
