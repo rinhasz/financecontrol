@@ -770,3 +770,19 @@ coisa.** Validar dentro do laço fazia um único estorno sem alvo abortar no mei
 a transação era desfeita (nada parcial, isso estava certo), mas o usuário perdia
 a revisão inteira sem saber qual linha era a culpada. Agora a resposta diz
 quantos e quais, e é explícita: *"Nada foi gravado"*.
+
+### A consolidada agrupa por categoria
+
+O agrupamento por categoria é fixo; a ordenação escolhida (**maior valor** ou
+**alfabética**) vale **dentro** de cada uma. Ordenar globalmente por valor
+desfaria o agrupamento, que é justamente o que dá sentido à leitura — "quanto
+foi Saúde neste mês".
+
+As categorias vêm com **maior gasto primeiro**: a ordem alfabética delas
+raramente é o que se quer olhar antes.
+
+Toda linha que soma mais de um lançamento ganha um **`+`** e abre o analítico
+ali mesmo, com data, descrição e valor de cada ocorrência — estorno inclusive,
+em negativo, para o líquido se explicar sozinho. As linhas vêm no próprio
+payload de `/api/consolidado`: quem consolidou precisa poder abrir sem uma
+segunda chamada, e sem depender de a outra visão estar carregada.

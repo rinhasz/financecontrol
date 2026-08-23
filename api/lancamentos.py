@@ -201,14 +201,22 @@ def consolidado():
         g = grupos.setdefault(l['item_id'], {
             'item_id': l['item_id'], 'item_nome': l['item_nome'],
             'categoria_nome': l['categoria_nome'], 'bruto': 0.0,
-            'ocorrencias': 0, 'estornado': 0.0,
+            'ocorrencias': 0, 'estornado': 0.0, 'linhas': [],
         })
-        g['bruto'] += l['valor_real'] if l['status'] == 'pago' else l['valor_esperado']
+        valor = l['valor_real'] if l['status'] == 'pago' else l['valor_esperado']
+        g['bruto'] += valor
         g['ocorrencias'] += 1
+        # as linhas que formaram o número vão junto: quem consolida precisa
+        # poder abrir e ver de onde veio, sem uma segunda chamada
+        g['linhas'].append({
+            'tipo': 'gasto', 'valor': valor, 'status': l['status'],
+            'data': l.get('data_pagamento'),
+            'descricao': l.get('descricao_transacao') or l['item_nome'],
+        })
 
     # --- estornos com despesa conhecida abatem daquela despesa ---
     estornos = conn.execute("""
-        SELECT t.estorna_despesa_id as despesa_id, t.valor, t.descricao, d.nome as despesa_nome
+        SELECT t.estorna_despesa_id as despesa_id, t.valor, t.descricao, t.data, d.nome as despesa_nome
         FROM transacao t
         LEFT JOIN despesa d ON d.id = t.estorna_despesa_id
         JOIN receita r ON r.id = t.receita_id
@@ -223,9 +231,14 @@ def consolidado():
             # vira crédito, e some do bloco de saídas
             g = grupos.setdefault(e['despesa_id'], {
                 'item_id': e['despesa_id'], 'item_nome': e['despesa_nome'] or '?',
-                'categoria_nome': None, 'bruto': 0.0, 'ocorrencias': 0, 'estornado': 0.0,
+                'categoria_nome': None, 'bruto': 0.0, 'ocorrencias': 0,
+                'estornado': 0.0, 'linhas': [],
             })
         g['estornado'] += abs(e['valor'])
+        g['linhas'].append({
+            'tipo': 'estorno', 'valor': -abs(e['valor']), 'status': None,
+            'data': e['data'], 'descricao': e['descricao'],
+        })
 
     despesas = []
     total_estornado = 0.0
@@ -236,6 +249,7 @@ def consolidado():
         total_estornado += g['estornado']
         if abs(liquido) < 0.01 and g['estornado'] > 0:
             continue  # anulou por completo — não aparece
+        g['linhas'].sort(key=lambda x: (x['data'] or '9999'))
         despesas.append({**g, 'liquido': liquido})
     despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
 
@@ -278,8 +292,9 @@ def _todas_despesas_do_mes(conn, mes_ref: str) -> list:
     """A mesma lista que /api/lancamentos devolve no lado das saídas."""
     rows = conn.execute("""
         SELECT l.*, d.nome as item_nome, l.despesa_id as item_id,
-               c.nome as categoria_nome
+               c.nome as categoria_nome, t.descricao as descricao_transacao
         FROM lancamento l
+        LEFT JOIN transacao t ON t.id = l.transacao_id
         JOIN despesa d ON d.id = l.despesa_id
         LEFT JOIN categoria c ON c.id = d.categoria_id
         WHERE l.mes_ref = ?

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import { api } from '../lib/api'
 import { formatBRL, mesRefLabel, currentMesRef, prevMesRef, nextMesRef, cn } from '../lib/utils'
 
@@ -63,9 +63,22 @@ type Visao = 'analitica' | 'consolidada'
 
 /** Linha da visão consolidada: uma por item, com as ocorrências somadas e o
  *  estorno já abatido. */
+interface LinhaConsolidada {
+  tipo: 'gasto' | 'estorno'
+  valor: number
+  status: string | null
+  data: string | null
+  descricao: string
+}
 interface DespesaConsolidada {
   item_id: number; item_nome: string; categoria_nome: string | null
   bruto: number; estornado: number; liquido: number; ocorrencias: number
+  linhas: LinhaConsolidada[]
+}
+
+type OrdemCons = 'valor' | 'alfabetica'
+const ORDEM_CONS_LABEL: Record<OrdemCons, string> = {
+  valor: 'Maior valor', alfabetica: 'Ordem alfabética'
 }
 interface ReceitaConsolidada {
   item_id: number; item_nome: string; tipo: string
@@ -394,8 +407,31 @@ export function MesAtual() {
 }
 
 function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
+  const [ordem, setOrdem] = useState<OrdemCons>('valor')
+  const [aberta, setAberta] = useState<number | null>(null)
+
   if (!dados) return <div className="text-zinc-500 text-sm">Sem dados.</div>
   const { despesas, receitas, totais } = dados
+
+  // Categoria é o agrupamento fixo; a ordenação escolhida vale DENTRO de cada
+  // uma. Ordenar globalmente por valor desfaria o agrupamento, que é o que dá
+  // sentido à leitura ("quanto foi Saúde este mês").
+  const porCategoria = despesas.reduce<Record<string, DespesaConsolidada[]>>((acc, d) => {
+    const cat = d.categoria_nome || 'Outros'
+    ;(acc[cat] ??= []).push(d)
+    return acc
+  }, {})
+
+  const ordenar = (itens: DespesaConsolidada[]) => [...itens].sort((a, b) =>
+    ordem === 'valor'
+      ? (b.liquido - a.liquido) || a.item_nome.localeCompare(b.item_nome, 'pt-BR')
+      : a.item_nome.localeCompare(b.item_nome, 'pt-BR'))
+
+  // categorias com maior gasto primeiro — a ordem alfabética delas raramente
+  // é o que se quer olhar antes
+  const categorias = Object.entries(porCategoria)
+    .map(([cat, itens]) => ({ cat, itens: ordenar(itens), total: itens.reduce((s, d) => s + d.liquido, 0) }))
+    .sort((a, b) => b.total - a.total)
 
   return (
     <div className="space-y-5">
@@ -406,58 +442,85 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
         <Card label="Movimentação" value={totais.movimentacao} color="blue" />
       </div>
 
-      <div>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Despesas do mês</span>
-          <div className="flex-1 h-px bg-zinc-800" />
-          <span className="text-xs text-zinc-600">{formatBRL(totais.despesas)}</span>
-        </div>
-        <div className="rounded-lg overflow-hidden border border-zinc-800/60">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 bg-zinc-900/40">
-                <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
-                <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Categoria</th>
-                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Bruto</th>
-                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Estornado</th>
-                <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Líquido</th>
-              </tr>
-            </thead>
-            <tbody>
-              {despesas.map((d, i) => (
-                <tr key={d.item_id} className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
-                  <td className="px-4 py-2.5 text-zinc-300 font-medium">
-                    {d.item_nome}
-                    {d.ocorrencias > 1 && (
-                      <span className="ml-2 text-[10px] text-sky-500/70" title="Ocorrências somadas neste mês">
-                        {d.ocorrencias}x
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-zinc-500 text-xs">{d.categoria_nome || 'Outros'}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-zinc-500">{formatBRL(d.bruto)}</td>
-                  <td className={cn('px-4 py-2.5 text-right tabular-nums',
-                    d.estornado > 0 ? 'text-amber-400' : 'text-zinc-700')}>
-                    {d.estornado > 0 ? `− ${formatBRL(d.estornado)}` : '—'}
-                  </td>
-                  {/* líquido negativo é dinheiro que voltou a mais do que saiu —
-                      acontece quando o estorno é de um gasto de outro mês */}
-                  <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium',
-                    d.liquido < 0 ? 'text-emerald-400' : 'text-zinc-200')}
-                    title={d.liquido < 0 ? 'Voltou mais do que saiu neste mês' : undefined}>
-                    {formatBRL(d.liquido)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {totais.estornado > 0 && (
-          <p className="text-xs text-zinc-500 mt-1.5">
-            Despesa integralmente estornada não aparece: custou zero no mês.
-          </p>
-        )}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Despesas por categoria</span>
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          Dentro da categoria
+          <select value={ordem} onChange={e => setOrdem(e.target.value as OrdemCons)}
+            className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+            {Object.entries(ORDEM_CONS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
       </div>
+
+      {categorias.map(({ cat, itens, total }) => (
+        <div key={cat}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
+            <div className="flex-1 h-px bg-zinc-800" />
+            <span className="text-xs text-zinc-600 tabular-nums">{formatBRL(total)}</span>
+          </div>
+          <div className="rounded-lg overflow-hidden border border-zinc-800/60">
+            <table className="w-full text-sm">
+              <tbody>
+                {itens.map((d, i) => {
+                  const consolidou = d.linhas.length > 1
+                  const aberto = aberta === d.item_id
+                  return (
+                    <Fragment key={d.item_id}>
+                      <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                        <td className="px-4 py-2.5 text-zinc-300 font-medium">
+                          {consolidou ? (
+                            <button onClick={() => setAberta(aberto ? null : d.item_id)}
+                              className="text-zinc-300 hover:text-emerald-400 transition-colors"
+                              title={`${d.linhas.length} lançamentos somados — clique para ver`}>
+                              <span className="inline-block w-4 text-zinc-500 tabular-nums">{aberto ? '−' : '+'}</span>
+                              {d.item_nome}
+                              <span className="ml-2 text-[10px] text-sky-500/70">{d.linhas.length}x</span>
+                            </button>
+                          ) : (
+                            <span><span className="inline-block w-4" />{d.item_nome}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-zinc-500 w-32">{formatBRL(d.bruto)}</td>
+                        <td className={cn('px-4 py-2.5 text-right tabular-nums w-32',
+                          d.estornado > 0 ? 'text-amber-400' : 'text-zinc-700')}>
+                          {d.estornado > 0 ? `− ${formatBRL(d.estornado)}` : '—'}
+                        </td>
+                        <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium w-32',
+                          d.liquido < 0 ? 'text-emerald-400' : 'text-zinc-200')}
+                          title={d.liquido < 0 ? 'Voltou mais do que saiu neste mês' : undefined}>
+                          {formatBRL(d.liquido)}
+                        </td>
+                      </tr>
+                      {aberto && d.linhas.map((l, j) => (
+                        <tr key={j} className="bg-zinc-900/60 border-t border-zinc-800/30 text-xs">
+                          <td className="pl-12 pr-4 py-1.5 text-zinc-500">
+                            {l.data ? new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR') + '  ·  ' : ''}
+                            {l.descricao}
+                            {l.tipo === 'estorno' && <span className="ml-2 text-amber-500/80">estorno</span>}
+                          </td>
+                          <td colSpan={2}></td>
+                          <td className={cn('px-4 py-1.5 text-right tabular-nums',
+                            l.valor < 0 ? 'text-amber-400' : 'text-zinc-400')}>
+                            {formatBRL(l.valor)}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      {totais.estornado > 0 && (
+        <p className="text-xs text-zinc-500">
+          Despesa integralmente estornada não aparece: custou zero no mês.
+        </p>
+      )}
 
       {receitas.length > 0 && (
         <div>
