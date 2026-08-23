@@ -50,21 +50,22 @@ def _gravar(conn, data):
     if data.get('id'):
         conn.execute("""
             UPDATE despesa SET nome=?, categoria_id=?, dia_vencimento=?, tipo_valor=?,
-            padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, varios_por_mes=?, ativo=? WHERE id=?
+            padrao_variabilidade=?, valor_padrao=?, regras_match=?, recorrencia=?, varios_por_mes=?, tipo_projecao=?, ativo=? WHERE id=?
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'), data.get('regras_match'),
               data.get('recorrencia', 'fixa'), 1 if data.get('varios_por_mes') else 0,
-              data.get('ativo', 1), data['id']))
+              data.get('tipo_projecao', 'media_movel_6'), data.get('ativo', 1), data['id']))
         despesa_id = data['id']
     else:
         cur = conn.execute("""
-            INSERT INTO despesa (nome, categoria_id, dia_vencimento, tipo_valor, padrao_variabilidade, valor_padrao, recorrencia, varios_por_mes, regras_match)
-            VALUES (?,?,?,?,?,?,?,?,?)
+            INSERT INTO despesa (nome, categoria_id, dia_vencimento, tipo_valor, padrao_variabilidade, valor_padrao, recorrencia, varios_por_mes, tipo_projecao, regras_match)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'), data.get('recorrencia', 'fixa'),
               1 if data.get('varios_por_mes') else 0,
+              data.get('tipo_projecao', 'media_movel_6'),
               data.get('regras_match', '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}')))
         despesa_id = cur.lastrowid
 

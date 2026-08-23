@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS despesa (
   -- só (fixa, um). É este campo que decide se o item continua na lista de
   -- associação depois de já ter recebido uma transação.
   varios_por_mes       INTEGER NOT NULL DEFAULT 0,
+  -- como estimar quanto vai custar no mês, a partir do histórico consolidado:
+  -- media_simples | media_movel_6 | media_sazonal (ver api/projecao.py)
+  tipo_projecao        TEXT NOT NULL DEFAULT 'media_movel_6',
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -90,6 +93,7 @@ CREATE TABLE IF NOT EXISTS receita (
   regras_match         TEXT NOT NULL DEFAULT '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}',
   recorrencia          TEXT NOT NULL DEFAULT 'fixa',
   varios_por_mes       INTEGER NOT NULL DEFAULT 0,
+  tipo_projecao        TEXT NOT NULL DEFAULT 'media_movel_6',
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -259,6 +263,17 @@ def init_db():
         if cols and 'varios_por_mes' not in cols:
             conn.execute(f'ALTER TABLE {tabela} ADD COLUMN varios_por_mes INTEGER NOT NULL DEFAULT 0')
             conn.execute(f"UPDATE {tabela} SET varios_por_mes=1 WHERE recorrencia='esporadica'")
+
+        # migração: tipo de projeção. O valor inicial é derivado do
+        # `padrao_variabilidade` que já estava cadastrado — o que se sabia
+        # sobre o comportamento de cada despesa vira o método de estimativa,
+        # em vez de todo mundo começar no mesmo padrão arbitrário.
+        if cols and 'tipo_projecao' not in cols:
+            from .projecao import PADRAO_PARA_PROJECAO, MEDIA_MOVEL_6
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN tipo_projecao TEXT NOT NULL DEFAULT '{MEDIA_MOVEL_6}'")
+            for padrao, projecao in PADRAO_PARA_PROJECAO.items():
+                conn.execute(f'UPDATE {tabela} SET tipo_projecao=? WHERE padrao_variabilidade=?',
+                             (projecao, padrao))
 
     # migração: lado da receita na transação (doc 14). Criadas já na fase 2,
     # junto com as tabelas, para a fase 3 não precisar de outra migração e não

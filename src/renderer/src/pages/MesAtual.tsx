@@ -37,6 +37,9 @@ interface Receita {
 interface Resumo {
   periodo: { ini: string; fim: string }
   pago: number; agendado: number; naoEncontrado: number
+  // o que o projetado diz que ainda vai acontecer, e a soma com o agendado —
+  // é isso que precisa de dinheiro, não o que já saiu da conta
+  aRealizar: number; aVencer: number; aReceber: number
   total: number; reserva: number; saldo: number
   renda: number; rendaRecebida: number
   movimentacao: Record<string, number>
@@ -264,7 +267,7 @@ export function MesAtual() {
           <Card label="Total do mês"  value={resumo.total}        color="zinc" />
           <Card label="Pago"          value={resumo.pago}         color="emerald" />
           <Card label="Agendado"      value={resumo.agendado}     color="blue" />
-          <Card label="Em aberto"     value={resumo.naoEncontrado} color="amber" />
+          <Card label="A realizar"    value={resumo.aRealizar}    color="amber" />
           <Card label="Recebido − pago" value={resumo.saldoMes}   color={resumo.saldoMes >= 0 ? 'emerald' : 'amber'} />
         </div>
       )}
@@ -276,9 +279,11 @@ export function MesAtual() {
             <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3 font-medium">Calculadora de Resgate</p>
             <div className="grid grid-cols-5 gap-4 text-sm">
               {[
-                ['Total a vencer', formatBRL(resumo.total)],
-                ['Reserva',        formatBRL(resumo.reserva)],
-                ['Renda do mês',   formatBRL(resumo.renda)],
+                // "a vencer" é agendado + o que a projeção diz que ainda falta.
+                // O que já foi pago não entra: esse dinheiro já saiu do saldo.
+                ['A vencer',     formatBRL(resumo.aVencer)],
+                ['Reserva',      formatBRL(resumo.reserva)],
+                ['Renda a receber', formatBRL(resumo.aReceber)],
               ].map(([lbl, val]) => (
                 <div key={lbl}>
                   <p className="text-zinc-500 text-xs mb-0.5">{lbl}</p>

@@ -16,6 +16,7 @@ interface Item {
   padrao_variabilidade: string; valor_padrao: number; regras_match: string; ativo: number
   recorrencia: 'fixa' | 'esporadica'
   varios_por_mes: number
+  tipo_projecao: string
   tipo?: string
   conta_como_renda?: boolean
 }
@@ -26,6 +27,15 @@ const TIPO_RECEITA_LABEL: Record<string, string> = {
   salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
   resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
   estorno: 'Estorno', transferencia: 'Transferência'
+}
+
+/** Como estimar quanto o item vai custar/render no mês, a partir do histórico
+ *  consolidado. A natureza do gasto muda o que é uma boa estimativa: conta de
+ *  luz pede sazonal, mensalidade pede média recente. Ver api/projecao.py. */
+const PROJECAO_LABEL: Record<string, string> = {
+  media_simples: 'Média simples (todo o histórico)',
+  media_movel_6: 'Média móvel (6 últimos meses)',
+  media_sazonal: 'Média sazonal (mesmo mês de outros anos)'
 }
 
 const PADRAO_LABEL: Record<string, string> = {
@@ -40,6 +50,7 @@ interface FormState {
   padrao_variabilidade: string
   recorrencia: string
   varios_por_mes: boolean
+  tipo_projecao: string
   tipo: string
   valor_padrao: string
   dia: string
@@ -72,6 +83,7 @@ function itemParaForm(d: Item): FormState {
     padrao_variabilidade: d.padrao_variabilidade,
     recorrencia: d.recorrencia ?? 'fixa',
     varios_por_mes: !!d.varios_por_mes,
+    tipo_projecao: d.tipo_projecao ?? 'media_movel_6',
     tipo: d.tipo ?? 'outra',
     valor_padrao: String(d.valor_padrao ?? ''),
     dia: d.dia != null ? String(d.dia) : '',
@@ -128,7 +140,7 @@ export function Catalogo() {
     setErro('')
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo_projecao: 'media_movel_6', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {
@@ -142,6 +154,7 @@ export function Catalogo() {
       padrao_variabilidade: form.padrao_variabilidade,
       recorrencia: form.recorrencia,
       varios_por_mes: form.varios_por_mes,
+      tipo_projecao: form.tipo_projecao,
       valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
     }
@@ -235,6 +248,13 @@ export function Catalogo() {
           className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
           <option value="fixa">Todo mês</option>
           <option value="esporadica">Esporádica</option>
+        </select>
+      </Field>
+      <Field label="Projeção">
+        <select value={form.tipo_projecao} onChange={e => setForm(f => f && { ...f, tipo_projecao: e.target.value })}
+          title="Como estimar o valor deste item no mês, a partir do histórico. Sazonal cai para média simples se não houver o mesmo mês no histórico."
+          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500">
+          {Object.entries(PROJECAO_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </Field>
       <Field label="Repetições">

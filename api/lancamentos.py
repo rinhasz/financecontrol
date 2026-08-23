@@ -89,7 +89,18 @@ def list_lancamentos():
         ORDER BY c.nome, d.nome
     """, (mes_ref,)).fetchall()
 
+    # O previsto de uma linha em aberto passa a vir da projeção (api/projecao.py),
+    # que olha o histórico consolidado. `valor_esperado` era o palpite antigo,
+    # herdado do mês anterior; mantê-lo faria a lista somar um total diferente do
+    # que a calculadora usa.
+    from . import projecao as pj
+    proj = pj.projecoes_do_mes(conn, 'despesa', mes_ref)
+
     despesas = [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref, 'despesa')
+    for d in despesas:
+        d['projetado'] = proj.get(d['item_id'])
+        if d['status'] == 'nao_encontrado' and d['projetado'] is not None:
+            d['valor_esperado'] = d['projetado']
     despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
 
     receitas = _receitas_do_mes(conn, mes_ref)
@@ -112,8 +123,15 @@ def _receitas_do_mes(conn, mes_ref: str) -> list:
         ORDER BY r.nome
     """, (mes_ref,)).fetchall()
 
+    from . import projecao as pj
+    proj = pj.projecoes_do_mes(conn, 'receita', mes_ref)
+
     itens = [{**dict(r), 'item_id': r['receita_id']} for r in rows]
     itens += _esporadicas_do_mes(conn, mes_ref, 'receita')
+    for r in itens:
+        r['projetado'] = proj.get(r['item_id'])
+        if r['status'] == 'nao_encontrado' and r['projetado'] is not None:
+            r['valor_esperado'] = r['projetado']
     itens.sort(key=lambda x: (x['tipo'], x['item_nome'].lower()))
     return itens
 
@@ -327,84 +345,120 @@ def update_lancamento(lid):
 
 @bp.route('/resumo')
 def resumo():
+    """Fechamento do mês e a calculadora de resgate.
+
+    Cada item tem três números, por definição: **pago** (já saiu da conta),
+    **agendado** (marcado, ainda vai sair) e **projetado** (quanto se espera que
+    custe no total, estimado do histórico — ver api/projecao.py).
+
+    Daí sai o que a calculadora precisa: *a vencer* = agendado + o que ainda
+    falta acontecer para chegar ao projetado. O que já foi pago **não** entra —
+    esse dinheiro já saiu e já está descontado do saldo. Somá-lo era o erro que
+    fazia um mês inteiramente quitado ainda pedir resgate.
+    """
+    from . import projecao as pj
+
     mes_ref = request.args.get('mes', '')
     conn = get_db()
-    # mesmo filtro de /lancamentos — se o resumo somasse despesas que a lista
-    # não mostra, o total da tela não bateria com as linhas exibidas
-    rows = conn.execute("""
-        SELECT l.status,
-               SUM(CASE WHEN l.status='pago' THEN l.valor_real ELSE l.valor_esperado END) as total
-        FROM lancamento l
-        JOIN despesa d ON d.id = l.despesa_id
-        WHERE l.mes_ref=? AND (d.ativo = 1 OR l.status != 'nao_encontrado')
-          AND (d.recorrencia = 'fixa' OR l.status != 'nao_encontrado')
-        GROUP BY l.status
-    """, (mes_ref,)).fetchall()
 
-    pago = next((r['total'] for r in rows if r['status'] == 'pago'), 0) or 0
-    agendado = next((r['total'] for r in rows if r['status'] == 'agendado'), 0) or 0
-    nao = next((r['total'] for r in rows if r['status'] == 'nao_encontrado'), 0) or 0
+    proj_d = pj.projecoes_do_mes(conn, 'despesa', mes_ref)
+    real_d = pj.realizado_do_mes(conn, 'despesa', mes_ref)
+    proj_r = pj.projecoes_do_mes(conn, 'receita', mes_ref)
+    real_r = pj.realizado_do_mes(conn, 'receita', mes_ref)
 
-    # Esporádicas não estão em `lancamento`, mas estão na lista da tela — se o
-    # resumo as ignorasse, o total não bateria com as linhas exibidas
-    for e in _esporadicas_do_mes(conn, mes_ref, 'despesa'):
-        if e['status'] == 'pago':
-            pago += e['valor_real']
-        else:
-            agendado += e['valor_real']
+    varios = {n: {r['id'] for r in conn.execute(
+        f'SELECT id FROM {tab} WHERE varios_por_mes = 1')}
+        for n, tab in (('despesa', 'despesa'), ('receita', 'receita'))}
 
-    total = pago + agendado + nao
+    def totalizar(projecoes, realizados, natureza, somente=None):
+        """(realizado, agendado, a_realizar) somando item a item.
 
-    # --- lado da entrada ---------------------------------------------------
-    # Renda e movimentação vêm da MESMA lista que a tela mostra, e são somadas
-    # separadas: resgate e estorno chegam na conta como dinheiro entrando, mas
-    # não são renda nova. Somá-los faria a calculadora concluir que não é
-    # preciso resgatar nada — justamente o erro que o `tipo` existe para evitar.
+        `a_realizar` é por item e nunca negativo: uma despesa que veio mais cara
+        que o projetado não gera "crédito" para abater outra — o excesso já
+        aconteceu e já está no realizado.
+
+        **Item que já teve movimento no mês não projeta resíduo**, a menos que
+        seja "mais de um por mês". Uma conta que só acontece uma vez e já foi
+        paga não vai acontecer de novo: insistir na diferença contra o projetado
+        fazia um mês inteiramente quitado ainda aparecer com valor a vencer.
+        """
+        feito = agendado = falta = 0.0
+        for item_id in set(projecoes) | set(realizados):
+            if somente is not None and item_id not in somente:
+                continue
+            r = realizados.get(item_id, {'pago': 0.0, 'agendado': 0.0})
+            feito += r['pago']
+            agendado += r['agendado']
+            aconteceu = r['pago'] != 0 or r['agendado'] != 0
+            if not aconteceu or item_id in varios[natureza]:
+                falta += max(0.0, projecoes.get(item_id, 0.0) - r['pago'] - r['agendado'])
+        return round(feito, 2), round(agendado, 2), round(falta, 2)
+
+    pago, agendado, a_realizar = totalizar(proj_d, real_d, 'despesa')
+
+    # A lista analítica mostra o mês **bruto** — o gasto numa linha e o estorno
+    # noutra, nos dois blocos. `pago` acima é líquido (o estorno já abatido),
+    # que é o certo para saldo e resgate. Os dois números convivem: o card do
+    # total na visão analítica usa o bruto, para bater com as linhas exibidas.
+    estornado = round(sum(
+        abs(r['valor']) for r in conn.execute(
+            'SELECT t.valor FROM transacao t JOIN receita x ON x.id = t.receita_id '
+            "WHERE x.tipo = 'estorno' AND t.estorna_despesa_id IS NOT NULL "
+            'AND t.data BETWEEN ? AND ?',
+            periodo_competencia(mes_ref, int(get_config_value(conn, 'dia_recebimento_salario', '26'))))), 2)
+
+    # Só o que é renda de verdade entra na conta do resgate: resgate e estorno
+    # chegam na conta mas não são renda nova (doc 14). Isso vale sobretudo para
+    # o PROJETADO — contar um resgate futuro como renda faria a calculadora
+    # concluir que não é preciso resgatar, usando a própria resposta como dado.
     from .receitas import conta_como_renda
+    tipos = {r['id']: r['tipo'] for r in conn.execute('SELECT id, tipo FROM receita')}
+    itens_renda = {i for i, t in tipos.items() if conta_como_renda(t)}
 
-    renda = 0.0
-    renda_recebida = 0.0
+    recebido, a_receber_marcado, a_receber_projetado = totalizar(
+        proj_r, real_r, 'receita', somente=itens_renda)
+    renda = round(sum(
+        v['pago'] + v['agendado']
+        for i, v in real_r.items() if conta_como_renda(tipos.get(i, 'outra'))), 2)
+    renda_recebida = round(sum(
+        v['pago'] for i, v in real_r.items() if conta_como_renda(tipos.get(i, 'outra'))), 2)
+
     movimentacao = {}
-    for r in _receitas_do_mes(conn, mes_ref):
-        valor = r['valor_real'] if r['valor_real'] is not None else r['valor_esperado']
-        if conta_como_renda(r['tipo']):
-            renda += valor
-            if r['status'] == 'recebido':
-                renda_recebida += valor
-        else:
-            movimentacao[r['tipo']] = movimentacao.get(r['tipo'], 0.0) + valor
+    for i, v in real_r.items():
+        tipo = tipos.get(i, 'outra')
+        if not conta_como_renda(tipo):
+            movimentacao[tipo] = round(movimentacao.get(tipo, 0.0) + v['pago'] + v['agendado'], 2)
 
     cfg = {r['chave']: float(r['valor']) for r in conn.execute('SELECT chave, valor FROM config').fetchall()}
     reserva = cfg.get('reserva_desejada', 5000)
     saldo = cfg.get('saldo_conta', 0)
 
-    # O ciclo do resgate, fechado: quanto precisa, quanto já foi feito, quanto
-    # falta. Só o resgate MENSAL abate — o esporádico tem objetivo próprio e
-    # não é resposta ao déficit do mês (doc 14).
-    resgate_necessario = max(0, total + reserva - saldo - renda)
-    resgate_ja_feito = movimentacao.get('resgate_mensal', 0.0)
-    falta_resgatar = max(0, resgate_necessario - resgate_ja_feito)
+    a_vencer = round(agendado + a_realizar, 2)
+    a_receber = round(a_receber_marcado + a_receber_projetado, 2)
 
-    # a competência não é o mês do calendário; mostrar o intervalo evita o
-    # usuário ter que deduzir a regra de antecipação de fim de semana/feriado
+    resgate_necessario = max(0.0, round(a_vencer + reserva - saldo - a_receber, 2))
+    resgate_ja_feito = round(movimentacao.get('resgate_mensal', 0.0), 2)
+    falta_resgatar = max(0.0, round(resgate_necessario - resgate_ja_feito, 2))
+
     ini, fim = periodo_competencia(mes_ref, int(get_config_value(conn, 'dia_recebimento_salario', '26')))
-
     conn.close()
+
     return jsonify({
         'periodo': {'ini': ini, 'fim': fim},
-        'pago': pago, 'agendado': agendado, 'naoEncontrado': nao,
-        'total': total, 'reserva': reserva, 'saldo': saldo,
-        'renda': renda, 'rendaRecebida': renda_recebida,
+        'pago': pago, 'agendado': agendado, 'aRealizar': a_realizar,
+        'total': round(pago + estornado + agendado + a_realizar, 2),
+        'totalLiquido': round(pago + agendado + a_realizar, 2),
+        'estornado': estornado,
+        'aVencer': a_vencer,
+        'reserva': reserva, 'saldo': saldo,
+        'renda': renda, 'rendaRecebida': renda_recebida, 'aReceber': a_receber,
         'movimentacao': movimentacao,
-        # realizado contra realizado: somar renda ainda não recebida com gasto
-        # já pago daria um saldo que não existe em lugar nenhum. "Vai fechar o
-        # mês?" é a pergunta que a calculadora de resgate responde, logo abaixo.
-        'saldoMes': renda_recebida - pago,
+        'saldoMes': round(renda_recebida - pago, 2),
         'resgateNecessario': resgate_necessario,
         'resgateJaFeito': resgate_ja_feito,
         'faltaResgatar': falta_resgatar,
-        # nomes antigos mantidos para não quebrar nada que ainda os leia
-        'receitas': renda, 'resgate': resgate_necessario,
+        # nomes antigos, mantidos para não quebrar quem ainda os leia
+        'naoEncontrado': a_realizar, 'receitas': renda, 'resgate': resgate_necessario,
     })
 
 
