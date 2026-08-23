@@ -786,3 +786,18 @@ ali mesmo, com data, descrição e valor de cada ocorrência — estorno inclusi
 em negativo, para o líquido se explicar sozinho. As linhas vêm no próprio
 payload de `/api/consolidado`: quem consolidou precisa poder abrir sem uma
 segunda chamada, e sem depender de a outra visão estar carregada.
+
+### Anulados não somem, ficam à parte
+
+Despesa integralmente estornada **não entra no total** — custou zero — mas vai
+para um bloco próprio, *"Anulados no mês"*, com o mesmo `+` de detalhe. Some do
+total sem sumir da tela.
+
+A primeira versão simplesmente descartava a linha, e o efeito só ficou claro com
+dado real: dois casos do usuário — `condominio sogra` (boleto Lello devolvido
+por Marcia) e `pagto incorreto ou duplicado` (duas cobranças estornadas) —
+desapareciam por completo, e R$ 7.257,45 de movimento não tinham onde ser vistos.
+Um gasto que aconteceu e voltou é informação; o que não pode é contar no total.
+
+O detalhe é o mesmo componente nos dois blocos (`LinhasDetalhe`): gastos em
+positivo, estornos em negativo com a etiqueta, somando exatamente o líquido.

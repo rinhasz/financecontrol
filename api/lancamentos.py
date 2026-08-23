@@ -241,17 +241,22 @@ def consolidado():
         })
 
     despesas = []
+    anulados = []
     total_estornado = 0.0
     for g in grupos.values():
         liquido = round(g['bruto'] - g['estornado'], 2)
         # contabiliza antes de filtrar: o abatimento total é o que mais importa
         # mostrar, e some justamente nos casos em que a linha é removida
         total_estornado += g['estornado']
-        if abs(liquido) < 0.01 and g['estornado'] > 0:
-            continue  # anulou por completo — não aparece
         g['linhas'].sort(key=lambda x: (x['data'] or '9999'))
-        despesas.append({**g, 'liquido': liquido})
-    despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
+        linha = {**g, 'liquido': liquido}
+        # Anulou por completo: fica fora do total (custou zero) mas **não some**.
+        # Vai para uma lista à parte, com o detalhe, senão o gasto e a devolução
+        # desapareceriam sem deixar rastro e o mês pareceria não tê-los tido.
+        (anulados if abs(liquido) < 0.01 and g['estornado'] > 0 else despesas).append(linha)
+
+    ordenar = lambda xs: sorted(xs, key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
+    despesas, anulados = ordenar(despesas), ordenar(anulados)
 
     # --- entradas: agrupa por item; estorno já abatido acima não entra aqui ---
     abatidos = {e['despesa_id'] for e in estornos}
@@ -278,6 +283,7 @@ def consolidado():
     return jsonify({
         'periodo': {'ini': ini, 'fim': fim},
         'despesas': despesas,
+        'anulados': anulados,
         'receitas': receitas,
         'totais': {
             'despesas': round(sum(d['liquido'] for d in despesas), 2),

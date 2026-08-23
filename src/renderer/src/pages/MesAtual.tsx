@@ -86,6 +86,9 @@ interface ReceitaConsolidada {
 }
 interface Consolidado {
   despesas: DespesaConsolidada[]
+  // anularam por completo: fora do total, mas exibidos à parte para o gasto e
+  // a devolução não sumirem do mês sem deixar rastro
+  anulados: DespesaConsolidada[]
   receitas: ReceitaConsolidada[]
   totais: { despesas: number; estornado: number; renda: number; movimentacao: number }
 }
@@ -406,12 +409,41 @@ export function MesAtual() {
   )
 }
 
+/** Detalhe de uma linha consolidada: os gastos que a formaram e os estornos
+ *  que a abateram, em negativo. A soma das linhas é o líquido — é o que
+ *  permite conferir de onde veio o número sem sair da tela. */
+function LinhasDetalhe({ linhas }: { linhas: LinhaConsolidada[] }) {
+  return (
+    <>
+      {linhas.map((l, j) => (
+        <tr key={j} className="bg-zinc-900/60 border-t border-zinc-800/30 text-xs">
+          <td className="pl-12 pr-4 py-1.5 text-zinc-500">
+            {l.data ? new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR') + '  ·  ' : ''}
+            {l.descricao}
+            {l.tipo === 'estorno' && (
+              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] text-amber-400 bg-amber-950/40">
+                estorno
+              </span>
+            )}
+          </td>
+          <td colSpan={2}></td>
+          <td className={cn('px-4 py-1.5 text-right tabular-nums',
+            l.valor < 0 ? 'text-amber-400' : 'text-zinc-400')}>
+            {formatBRL(l.valor)}
+          </td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
+
 function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
   const [ordem, setOrdem] = useState<OrdemCons>('valor')
   const [aberta, setAberta] = useState<number | null>(null)
 
   if (!dados) return <div className="text-zinc-500 text-sm">Sem dados.</div>
-  const { despesas, receitas, totais } = dados
+  const { despesas, anulados, receitas, totais } = dados
 
   // Categoria é o agrupamento fixo; a ordenação escolhida vale DENTRO de cada
   // uma. Ordenar globalmente por valor desfaria o agrupamento, que é o que dá
@@ -493,20 +525,7 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
                           {formatBRL(d.liquido)}
                         </td>
                       </tr>
-                      {aberto && d.linhas.map((l, j) => (
-                        <tr key={j} className="bg-zinc-900/60 border-t border-zinc-800/30 text-xs">
-                          <td className="pl-12 pr-4 py-1.5 text-zinc-500">
-                            {l.data ? new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR') + '  ·  ' : ''}
-                            {l.descricao}
-                            {l.tipo === 'estorno' && <span className="ml-2 text-amber-500/80">estorno</span>}
-                          </td>
-                          <td colSpan={2}></td>
-                          <td className={cn('px-4 py-1.5 text-right tabular-nums',
-                            l.valor < 0 ? 'text-amber-400' : 'text-zinc-400')}>
-                            {formatBRL(l.valor)}
-                          </td>
-                        </tr>
-                      ))}
+                      {aberto && <LinhasDetalhe linhas={d.linhas} />}
                     </Fragment>
                   )
                 })}
@@ -516,10 +535,50 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
         </div>
       ))}
 
-      {totais.estornado > 0 && (
-        <p className="text-xs text-zinc-500">
-          Despesa integralmente estornada não aparece: custou zero no mês.
-        </p>
+      {anulados.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              Anulados no mês
+            </span>
+            <div className="flex-1 h-px bg-zinc-800" />
+            <span className="text-xs text-zinc-600 tabular-nums">{formatBRL(0)}</span>
+          </div>
+          <p className="text-xs text-zinc-500 mb-1.5">
+            Gasto e devolução de mesmo valor — custaram zero, então ficam fora do total.
+            Abra para ver as duas pontas.
+          </p>
+          <div className="rounded-lg overflow-hidden border border-zinc-800/60 opacity-70">
+            <table className="w-full text-sm">
+              <tbody>
+                {anulados.map((d, i) => {
+                  const aberto = aberta === d.item_id
+                  return (
+                    <Fragment key={d.item_id}>
+                      <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                        <td className="px-4 py-2.5 text-zinc-400 font-medium">
+                          <button onClick={() => setAberta(aberto ? null : d.item_id)}
+                            className="hover:text-emerald-400 transition-colors"
+                            title={`${d.linhas.length} lançamentos que se anulam — clique para ver`}>
+                            <span className="inline-block w-4 text-zinc-500">{aberto ? '−' : '+'}</span>
+                            {d.item_nome}
+                            <span className="ml-2 text-[10px] text-zinc-600">{d.categoria_nome || 'Outros'}</span>
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-zinc-500 w-32">{formatBRL(d.bruto)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-amber-400/70 w-32">
+                          − {formatBRL(d.estornado)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-zinc-500 w-32">{formatBRL(0)}</td>
+                      </tr>
+                      {aberto && <LinhasDetalhe linhas={d.linhas} />}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {receitas.length > 0 && (
