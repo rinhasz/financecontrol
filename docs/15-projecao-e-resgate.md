@@ -102,6 +102,19 @@ o **último "SALDO TOTAL DISPONÍVEL DIA" antes da marca "lançamentos futuros"*
 Com saldo digitado à mão, ou zerado, a calculadora responde sobre uma conta que
 não existe. No caso real: o saldo era **−111,21**, não zero.
 
+O saldo acompanha **o último extrato importado**, inclusive para trás: importar
+um arquivo antigo devolve o saldo daquela data. É coerente com "o extrato é a
+verdade", e a data exibida denuncia o que aconteceu.
+
+**A defasagem fica à vista.** A resposta da calculadora depende do saldo, e o
+saldo só muda ao importar — saldo velho dá resposta velha sem avisar. Passando
+de 3 dias, a data aparece em âmbar com a idade ao lado; sem nenhum saldo lido de
+extrato, aparece "(digitado)".
+
+> **O backend não recarrega sozinho.** Uma importação feita com o app aberto
+> antes da atualização roda o código antigo — foi o que fez o saldo continuar
+> zerado depois desta mudança. Fechar e reabrir é parte do procedimento (doc 12).
+
 ### O resgate já feito NÃO abate
 
 Ele já entrou na conta e portanto **já está dentro do saldo**. Descontá-lo de

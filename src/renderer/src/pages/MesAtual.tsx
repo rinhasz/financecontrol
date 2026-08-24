@@ -294,10 +294,26 @@ export function MesAtual() {
               <div>
                 <p className="text-zinc-500 text-xs mb-0.5">
                   Saldo conta
-                  {resumo.saldoData && (
-                    <span className="ml-1 text-zinc-600"
-                      title="Lido do extrato na importação — é o saldo do banco, não um valor digitado">
-                      ({new Date(resumo.saldoData + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })})
+                  {resumo.saldoData ? (() => {
+                    // A resposta da calculadora depende do saldo, e o saldo só é
+                    // atualizado ao importar. Saldo velho dá resposta velha sem
+                    // avisar — então a defasagem fica à vista.
+                    const dias = Math.floor(
+                      (Date.now() - new Date(resumo.saldoData + 'T00:00:00').getTime()) / 86400000)
+                    const velho = dias > 3
+                    return (
+                      <span className={cn('ml-1', velho ? 'text-amber-500/80' : 'text-zinc-600')}
+                        title={velho
+                          ? `Saldo de ${dias} dias atrás — importe o extrato novo para a conta ficar certa`
+                          : 'Lido do extrato na importação, não digitado'}>
+                        ({new Date(resumo.saldoData + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        {velho ? ` · ${dias}d` : ''})
+                      </span>
+                    )
+                  })() : (
+                    <span className="ml-1 text-amber-500/80"
+                      title="Nenhum saldo lido de extrato — importe um .xls do Itaú para a calculadora usar o saldo real">
+                      (digitado)
                     </span>
                   )}
                 </p>
