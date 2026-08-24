@@ -44,8 +44,21 @@ A base é sempre a **visão consolidada** do mês: ocorrências somadas e estorn
 abatidos. Projetar sobre lançamento cru contaria duas vezes uma despesa cobrada
 em duas parcelas, e contaria um gasto que foi devolvido.
 
-Só se olha o **passado**: usar o próprio mês para projetá-lo seria circular, e o
-mês corrente quase sempre está incompleto.
+### O que fica fora da amostra
+
+- **O mês projetado e os posteriores.** Projetar um mês com ele mesmo é circular.
+- **O mês corrente**, que quase sempre está em andamento. Metade de um mês puxa
+  a média para baixo e faria a previsão do mês seguinte encolher só porque hoje
+  é dia 10.
+
+A exclusão do corrente **cede quando é ele o único histórico existente** — sem
+isso a projeção seria zero, o que é pior que uma amostra imperfeita. Mesma
+lógica do fallback da sazonal.
+
+> Isso vale hoje: depois da limpeza do histórico, agosto/2026 é o único mês real
+> e também o corrente. Setembro projeta a partir dele por causa do fallback;
+> assim que agosto fechar e setembro virar o corrente, a regra passa a operar
+> normalmente.
 
 ### Valor inicial de cada item
 
@@ -150,3 +163,25 @@ para isto que ele existe.
 silêncio, e `lancamento_receita.transacao_id` nem era desligado. Agora atravessa
 tudo que é decisão do usuário sobre a linha. Verificado com o extrato real: duas
 importações seguidas preservam 60 despesas, 21 receitas e 3 estornos.
+
+---
+
+## Limpeza do histórico (agosto/2026 em diante)
+
+O histórico anterior a agosto/2026 foi apagado a pedido: 1128 lançamentos, dos
+quais **zero** tinham valor real e **zero** tinham transação. Não era histórico —
+era a planilha de previsões importada no início, nunca conferida contra extrato.
+Projetar sobre ela seria projetar sobre palpites antigos.
+
+Junto, um ajuste pontual (script, não faz parte do app): as despesas e receitas
+ativas sem `dia_vencimento`/`dia_recebimento` receberam o dia do movimento real
+de agosto/2026. Passaram de 19 para 49 despesas com dia, e de 0 para 9 receitas.
+Duas despesas ficaram sem dia por não terem tido movimento no mês
+(`Demais compras`, `Cantina Colégio Batista`).
+
+## "Em aberto" + PREVISTO
+
+Item que ainda não foi pago, recebido nem agendado mostra status **Em aberto**
+com o selo **PREVISTO** ao lado. O valor daquela linha não veio do extrato: veio
+da projeção. Sem dizer isso, um previsto se confunde com um realizado — e a
+diferença é exatamente o que separa "já saiu da conta" de "estimativa".

@@ -60,7 +60,20 @@ const TIPO_LABEL: Record<string, string> = {
 const TIPOS_MOVIMENTACAO = new Set(['resgate_mensal', 'resgate_esporadico', 'estorno', 'transferencia'])
 
 const STATUS_RECEITA_LABEL: Record<string, string> = {
-  recebido: 'Recebido', previsto: 'Previsto', nao_encontrado: 'Não recebido'
+  recebido: 'Recebido', previsto: 'Previsto', nao_encontrado: 'Em aberto'
+}
+
+/** Item que não aconteceu ainda: o valor exibido não veio do extrato, veio da
+ *  projeção. Sem dizer isso, um previsto se confunde com um realizado — e a
+ *  diferença é justamente o que separa "já saiu da conta" de "estimativa". */
+function SeloPrevisto() {
+  return (
+    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide
+      text-amber-400 bg-amber-950/40 border border-amber-800/40"
+      title="Valor estimado pelo método de projeção cadastrado, não lido do extrato">
+      PREVISTO
+    </span>
+  )
 }
 
 type Visao = 'analitica' | 'consolidada'
@@ -417,6 +430,7 @@ export function MesAtual() {
                             <span className={cn('inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border', STATUS_STYLE[l.status])}>
                               {STATUS_LABEL[l.status]}
                             </span>
+                            {l.status === 'nao_encontrado' && <SeloPrevisto />}
                           </td>
                           <td className="px-4 py-2.5 text-right">
                             {l.linha_digitavel && (
@@ -692,6 +706,7 @@ function BlocoReceitas({ titulo, itens, total, esmaecido }: {
                       : 'bg-zinc-800/30 text-zinc-500 border-zinc-700/30')}>
                     {STATUS_RECEITA_LABEL[r.status] ?? r.status}
                   </span>
+                  {r.status === 'nao_encontrado' && <SeloPrevisto />}
                 </td>
               </tr>
             ))}

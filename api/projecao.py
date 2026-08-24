@@ -94,13 +94,33 @@ def series_consolidadas(conn, natureza: str) -> dict:
     return series
 
 
-def projetar(serie: dict, mes_ref: str, tipo: str) -> float:
+def mes_corrente(conn) -> str:
+    """Competência em que estamos hoje."""
+    from datetime import date
+    return mes_ref_de(date.today().isoformat(),
+                      int(get_config_value(conn, 'dia_recebimento_salario', '26')))
+
+
+def projetar(serie: dict, mes_ref: str, tipo: str, corrente: str = None) -> float:
     """Valor projetado de um item para `mes_ref`, a partir da sua série.
 
-    Só olha meses **anteriores** ao projetado: usar o próprio mês para
-    projetá-lo seria circular, e o mês corrente costuma estar incompleto.
+    Fora da conta ficam:
+
+    - o **próprio mês projetado** e os posteriores — projetar um mês com ele
+      mesmo é circular;
+    - o **mês corrente**, que quase sempre está em andamento. Metade de um mês
+      puxa a média para baixo e faria a previsão do mês seguinte encolher só
+      porque hoje é dia 10.
+
+    A exclusão do corrente **cede** quando é ele o único histórico que existe:
+    sem isso a projeção seria zero, o que é pior que uma amostra imperfeita. É a
+    mesma lógica do fallback da média sazonal.
     """
     passado = {m: v for m, v in serie.items() if m < mes_ref}
+    if corrente:
+        sem_corrente = {m: v for m, v in passado.items() if m != corrente}
+        if sem_corrente:
+            passado = sem_corrente
     if not passado:
         return 0.0
 
@@ -132,8 +152,9 @@ def projecoes_do_mes(conn, natureza: str, mes_ref: str) -> dict:
         f"SELECT id, tipo_projecao FROM {c['catalogo']} "
         "WHERE ativo = 1 AND recorrencia = 'fixa'").fetchall()
 
+    corrente = mes_corrente(conn)
     return {i['id']: round(projetar(series.get(i['id'], {}), mes_ref,
-                                    i['tipo_projecao'] or MEDIA_MOVEL_6), 2)
+                                    i['tipo_projecao'] or MEDIA_MOVEL_6, corrente), 2)
             for i in itens}
 
 
