@@ -107,10 +107,28 @@ falta_resgatar = max(0, a_vencer + reserva − saldo − a_receber)
 
 ### O saldo vem do extrato
 
-`config.saldo_conta` é lido na importação, da coluna *saldos (R$)* do extrato:
-o **último "SALDO TOTAL DISPONÍVEL DIA" antes da marca "lançamentos futuros"**
-— depois dela vêm agendamentos, que ainda não afetaram a conta. A data fica em
-`config.saldo_data` e aparece na tela ao lado do valor.
+`config.saldo_conta` é lido na importação, da coluna *saldos (R$)* do extrato.
+A data fica em `config.saldo_data` e aparece na tela ao lado do valor.
+
+O Itaú fecha cada dia com uma linha *SALDO TOTAL DISPONÍVEL DIA*, **depois** dos
+lançamentos daquele dia. Mas o extrato puxado hoje traz, no máximo, o saldo de
+**ontem**: os movimentos de hoje já aparecem e ainda não têm linha de saldo
+fechando. Então o saldo é o **último fechamento mais o que veio depois dele**:
+
+```
+21/08  PIX ...                       -272,50
+21/08  SALDO TOTAL DISPONÍVEL DIA               -111,21   ← último fechamento
+22/08  PIX ...                        -50,00              ← ainda sem fechamento
+22/08  CRÉDITO ...                   +200,00
+                                                  38,79   ← saldo de verdade
+```
+
+Ler só o fechamento deixaria a calculadora **um dia atrasada**, e um dia de
+movimento pode ser justamente o que decide quanto resgatar. A data devolvida é
+a do último movimento contado, não a do fechamento.
+
+A contagem para na marca *"lançamentos futuros"*: dali em diante são
+agendamentos, que ainda não saíram da conta.
 
 Com saldo digitado à mão, ou zerado, a calculadora responde sobre uma conta que
 não existe. No caso real: o saldo era **−111,21**, não zero.

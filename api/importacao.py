@@ -204,16 +204,25 @@ def _parse_excel_sheet(rows):
 
 
 def _extrair_saldo(rows):
-    """Último saldo disponível do extrato: `(data, valor)` ou `(None, None)`.
+    """Saldo atual da conta segundo o extrato: `(data, valor)`.
 
-    O Itaú intercala linhas "SALDO TOTAL DISPONÍVEL DIA" com o saldo do dia numa
-    coluna própria. O que interessa é o **último antes de "lançamentos
-    futuros"** — depois dessa marca vêm agendamentos, que ainda não afetaram a
-    conta.
+    O Itaú fecha cada dia com uma linha "SALDO TOTAL DISPONÍVEL DIA", **depois**
+    dos lançamentos daquele dia. Mas o extrato puxado hoje traz, no máximo, o
+    saldo de ontem: os movimentos de hoje já aparecem e ainda não têm linha de
+    saldo fechando.
 
-    Ler o saldo do extrato importa porque é ele que diz quanto falta resgatar.
-    Com saldo digitado à mão, ou zerado, a calculadora responde sobre uma conta
-    que não existe.
+    Então o saldo é o último fechamento **mais** o que veio depois dele:
+
+        21/08  PIX ...            -272,50
+        21/08  SALDO DO DIA                 -111,21   <- último fechamento
+        22/08  PIX ...             -50,00              <- ainda sem fechamento
+                                             -161,21   <- saldo de verdade
+
+    Ler só o último fechamento deixaria a calculadora um dia atrasada, e um dia
+    de movimento pode ser justamente o que decide quanto resgatar.
+
+    Para de contar na marca "lançamentos futuros": dali em diante são
+    agendamentos, que ainda não saíram da conta.
     """
     from datetime import datetime as _dt, date as _date
 
@@ -221,7 +230,22 @@ def _extrair_saldo(rows):
     if header_idx is None or 'saldo' not in col:
         return None, None
 
-    achado = (None, None)
+    def _data_da(row):
+        bruto = row[col['data']] if col['data'] < len(row) else None
+        if isinstance(bruto, (_dt, _date)):
+            return bruto.strftime('%Y-%m-%d')
+        return parse_br_date(str(bruto or ''))
+
+    def _numero(row, chave):
+        bruto = row[col[chave]] if col[chave] < len(row) else None
+        if bruto in (None, ''):
+            return None
+        valor = float(bruto) if isinstance(bruto, (int, float)) else parse_br_number(str(bruto))
+        return None if valor != valor else valor  # NaN = cabeçalho
+
+    saldo_data, saldo_valor = None, None
+    posteriores, data_posterior = 0.0, None
+
     for row in rows[header_idx + 1:]:
         if row is None:
             continue
@@ -230,22 +254,23 @@ def _extrair_saldo(rows):
         if 'futur' in rotulo:
             break
 
-        bruto = row[col['saldo']] if col['saldo'] < len(row) else None
-        if bruto in (None, ''):
-            continue
-        valor = float(bruto) if isinstance(bruto, (int, float)) else parse_br_number(str(bruto))
-        if valor != valor:  # NaN — provavelmente o cabeçalho
+        fechamento = _numero(row, 'saldo')
+        if fechamento is not None:
+            data = _data_da(row)
+            if data:
+                # novo fechamento: o que foi acumulado já está dentro dele
+                saldo_data, saldo_valor = data, fechamento
+                posteriores, data_posterior = 0.0, None
             continue
 
-        raw_data = row[col['data']] if col['data'] < len(row) else None
-        if isinstance(raw_data, (_dt, _date)):
-            data = raw_data.strftime('%Y-%m-%d')
-        else:
-            data = parse_br_date(str(raw_data or ''))
-        if data:
-            achado = (data, valor)
+        movimento = _numero(row, 'valor')
+        if movimento is not None and saldo_valor is not None:
+            posteriores += movimento
+            data_posterior = _data_da(row) or data_posterior
 
-    return achado
+    if saldo_valor is None:
+        return None, None
+    return (data_posterior or saldo_data), round(saldo_valor + posteriores, 2)
 
 
 def parse_excel_content(content: bytes, ext: str):
