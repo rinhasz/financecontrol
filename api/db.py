@@ -118,6 +118,45 @@ CREATE TABLE IF NOT EXISTS transacao_receita_regra (
   UNIQUE(padrao, receita_id)
 );
 
+-- Posição de investimentos (doc 16). Uma linha por produto por foto: cada
+-- importação é uma `carga`, e a posição de uma data é substituída por completo
+-- quando reimportada — mesma regra do extrato bancário.
+--
+-- Os saldos vêm em quatro colunas porque os dois regimes convivem: produto de
+-- emissão (LCI/LCA/LIG/CDB Itaú) rende por accrual e o banco informa o saldo
+-- acumulado; produto de corretora é marcado a mercado (MTM). Guardar tudo no
+-- mesmo campo perderia a distinção, que é justamente o que decide qual resgatar.
+CREATE TABLE IF NOT EXISTS carga_investimento (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  data_posicao TEXT NOT NULL,
+  arquivo      TEXT,
+  origens      TEXT,
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS investimento (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  data_posicao          TEXT NOT NULL,
+  origem                TEXT NOT NULL,   -- emissao_itau | acoes | rf_corretora
+  produto               TEXT NOT NULL,   -- LCI | LCA | LIG | CDB | ACAO | CRA | CRI | DEB
+  ativo                 TEXT,            -- código/rótulo do papel, quando existe
+  emissor               TEXT,
+  indexador             TEXT,            -- DI | IPCA | PRE
+  perc_indexador        REAL,            -- 94.0 (% do DI)
+  taxa                  REAL,            -- 13.24 (% a.a.)
+  data_aplicacao        TEXT,
+  data_vencimento       TEXT,
+  data_liquidez         TEXT,
+  pu                    REAL NOT NULL DEFAULT 1,
+  quantidade            REAL,
+  valor_aplicacao       REAL,
+  saldo_bruto_accrual   REAL,
+  saldo_liquido_accrual REAL,
+  saldo_bruto_mtm       REAL,
+  saldo_liquido_mtm     REAL,
+  carga_id              INTEGER REFERENCES carga_investimento(id)
+);
+
 CREATE TABLE IF NOT EXISTS posicao_investimento (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   mes_ref            TEXT NOT NULL,

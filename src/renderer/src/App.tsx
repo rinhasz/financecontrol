@@ -3,16 +3,18 @@ import { MesAtual } from './pages/MesAtual'
 import { Catalogo } from './pages/Catalogo'
 import { Importacao } from './pages/Importacao'
 import { EmailBusca } from './pages/EmailBusca'
+import { Investimentos } from './pages/Investimentos'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { cn } from './lib/utils'
 
-type Page = 'mes' | 'catalogo' | 'importacao' | 'email'
+type Page = 'mes' | 'catalogo' | 'importacao' | 'email' | 'investimentos'
 
 const NAV = [
   { id: 'mes' as Page, label: 'Mês Atual', icon: CalendarIcon },
   { id: 'catalogo' as Page, label: 'Catálogo', icon: ListIcon },
   { id: 'importacao' as Page, label: 'Importar Extrato', icon: UploadIcon },
-  { id: 'email' as Page, label: 'Procurar em Emails', icon: MailIcon }
+  { id: 'email' as Page, label: 'Procurar em Emails', icon: MailIcon },
+  { id: 'investimentos' as Page, label: 'Investimentos', icon: WalletIcon }
 ]
 
 export default function App(): JSX.Element {
@@ -75,9 +77,21 @@ export default function App(): JSX.Element {
           <div className={cn('h-full', page !== 'email' && 'hidden')}>
             <ErrorBoundary nome="Procurar em Emails"><EmailBusca active={page === 'email'} /></ErrorBoundary>
           </div>
+          <div className={cn('h-full', page !== 'investimentos' && 'hidden')}>
+            <ErrorBoundary nome="Investimentos"><Investimentos active={page === 'investimentos'} /></ErrorBoundary>
+          </div>
         </div>
       </main>
     </div>
+  )
+}
+
+function WalletIcon({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5" />
+      <circle cx="17" cy="13" r="1" />
+    </svg>
   )
 }
 

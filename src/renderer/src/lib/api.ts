@@ -89,6 +89,15 @@ export const api = {
     },
     importarConfirmar: (plano: unknown) => post('/api/catalogo/importar/confirmar', plano)
   },
+  investimentos: {
+    listar: (data?: string) => get('/api/investimentos' + (data ? `?data=${data}` : '')),
+    datas: () => get('/api/investimentos/datas'),
+    importar: (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return fetch('/api/investimentos/importar', { method: 'POST', body: fd }).then(r => r.json())
+    }
+  },
   categorias: {
     list: () => get('/api/categorias')
   },

@@ -21,6 +21,7 @@ from api.db import init_db, seed_db
 from api.lancamentos import bp as bp_lancamentos
 from api.catalogo import bp as bp_catalogo
 from api.receitas import bp as bp_receitas
+from api.investimentos import bp as bp_investimentos
 from api.importacao import bp as bp_importacao
 from api.email_busca import bp as bp_email_busca
 
@@ -45,6 +46,7 @@ def serve_frontend(path):
 app.register_blueprint(bp_lancamentos, url_prefix='/api')
 app.register_blueprint(bp_catalogo,    url_prefix='/api')
 app.register_blueprint(bp_receitas,    url_prefix='/api')
+app.register_blueprint(bp_investimentos, url_prefix='/api')
 app.register_blueprint(bp_importacao,  url_prefix='/api')
 app.register_blueprint(bp_email_busca, url_prefix='/api')
 
