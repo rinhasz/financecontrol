@@ -303,11 +303,36 @@ número que esta tela existe para conferir.
 | fechamento de ação | Yahoo Finance | dia sem pregão simplesmente não vem |
 | PU de debênture | ANBIMA, mercado secundário | arquivo diário `db{ddmmaa}.txt`, campo 11 |
 
-**CRI e CRA não têm fonte pública gratuita.** A ANBIMA publica o arquivo de
-debêntures aberto, mas não o de CRI/CRA — testados os padrões de URL
-equivalentes, todos 404, e a API de preços exige credencial. Esses papéis são
-valorizados **por accrual do indexador contratado**, o que captura o carrego mas
-não o spread de mercado. Fica marcado no método, em vez de fingir um preço.
+**CRI e CRA têm, sim, fonte pública gratuita — a afirmação anterior aqui estava
+errada.** O que não existe é o arquivo `.txt` diário nos moldes do de debêntures
+(testados os padrões de URL equivalentes, todos 404) e a API oficial
+(`api.anbima.com.br/feed/precos-indices/v1/cri-cra/mercado-secundario`) exige
+credencial. Mas a página pública **Taxas de CRI e CRA** publica, sem login, os
+últimos 5 dias úteis com PU de 8 casas, taxa indicativa, % PU par / VNE e
+duration:
+
+```
+POST https://www.anbima.com.br/pt_br/informar/precos-e-indices/precos/
+     taxas-de-cri-e-cra/taxas-de-cri-e-cra.htm
+  doui_fromForm = Form_4028B8816C8C4C20016C8C5236B6086D
+  lumII         = 4028B8816C8C4C20016C8C5236B6086D
+  doui_renderAction = none
+  lum_filters.codigo.value = CRA019001E7   # aceita prefixo: CRA023 traz os 45
+  filtroTermo              = CRA019001E7
+```
+
+O PU sai de `<td class="pu">`; a data de `<td class="data-referencia">`.
+
+**Mas ela não cobre todo o universo.** A ANBIMA precifica os papéis sob o seu
+Código de Negociação, e o CRA da carteira — `CRA02300NAX`, Dexco IPCA+6,05%
+17/10/2033 — **não está lá**: a busca devolve zero linhas, enquanto o controle
+com um código conhecido devolve os 5 dias corretamente, e nenhum dos 45 papéis
+`CRA023*` precificados é da Dexco. Por isso a fonte não foi ligada: ela não
+resolveria nenhum papel desta carteira hoje.
+
+Esses papéis seguem valorizados **por accrual do indexador contratado**, o que
+captura o carrego mas não o spread. Fica marcado no método, em vez de fingir um
+preço.
 
 ## O que acontece quando falta dado
 
@@ -346,6 +371,35 @@ mostrou que **o banco também acrua**. A suspeita anterior de marcação vinha d
 valor do banco ficar abaixo do juro real puro; a explicação é mais simples, o
 IPCA de agosto/2026 era **negativo**, e o VNA caiu. Não faz falta uma fonte de
 preço para LIG.
+
+## O CRA de R$ 188 que continua sem explicação
+
+Único desvio grande que sobra na conferência de 28/08: o CRA Dexco IPCA+6,05%
+2033 fez **+0,221% em 3 dias** (R$ 98.819,46 → R$ 99.037,66) contra **+0,031%**
+de carrego. R$ 218,20 de movimento onde caberiam R$ 30,49.
+
+Chamar isso de "marcação a mercado" foi uma inferência por exclusão, e ela **não
+resiste ao teste**. Puxando os 145 CRA IPCA+ que a ANBIMA precificou nas duas
+datas, a variação de PU de 25/08 para 28/08 foi:
+
+| medida | variação de PU |
+|---|---:|
+| mediana geral | +0,027% |
+| mediana com duration 1.200–1.800 du | -0,176% |
+| **Itaú, no nosso CRA** | **+0,221%** |
+
+Ou seja: o setor andou o carrego, e este papel andou sete vezes isso. Não é
+movimento de curva. As hipóteses que sobram, nenhuma verificável de fora:
+
+- **preço interno do Itaú** — papel ilíquido fora da cobertura ANBIMA, marcado
+  pela curva de crédito do próprio banco;
+- **o valor de 25/08 é que estava defasado**, e o de 28/08 recompõe — coerente
+  com a coluna "PREÇO UNITÁRIO" congelada (ver doc 12), mas sem terceiro ponto
+  no tempo não dá para separar de uma reprecificação real.
+
+Fica registrado como **não explicado**, e não como marcação. O desvio zera na
+próxima importação de qualquer forma, porque a valorização parte do saldo
+importado.
 
 **Sem IR/IOF.** A valorização é bruta. O líquido depende de prazo e de fato
 gerador, e entra quando a fase de resgate precisar comparar alternativas.
