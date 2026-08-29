@@ -11,6 +11,7 @@ pedido ainda não está na base.
 |---|---|---|
 | `DI` | taxa CDI do dia, em % ao dia | Banco Central, SGS série 12 |
 | `IPCA` | variação do mês, em % | Banco Central, SGS série 433 |
+| `IPCA_PROJ` | projeção do mês ainda não fechado | Banco Central, boletim Focus |
 | `ACAO:<ticker>` | fechamento ajustado | Yahoo Finance |
 | `DEB:<código>` | PU indicativo | ANBIMA, mercado secundário de debêntures |
 
@@ -23,6 +24,8 @@ from datetime import date, datetime, timedelta
 from .db import feriados_bancarios
 
 SGS = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.{serie}/dados'
+FOCUS = ('https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/odata/'
+         'ExpectativaMercadoMensais')
 YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.SA'
 ANBIMA_DEB = 'https://www.anbima.com.br/informacoes/merc-sec-debentures/arqs/db{ddmmaa}.txt'
 
@@ -104,6 +107,36 @@ def baixar_sgs(conn, serie_sgs: int, nome: str, ini: date, fim: date) -> int:
     return n
 
 
+def baixar_focus_ipca(conn, mes: date) -> int:
+    """Projeção de IPCA do mês, mediana do boletim Focus.
+
+    O VNA de um papel IPCA+ é corrigido pela **projeção** do mês corrente, não
+    pelo último índice fechado — é o que a ANBIMA publica e o que o banco usa.
+    Conferido contra o extrato: numa LIG IPCA+ de R$ 90 mil, carregar o IPCA de
+    julho (+0,07%) deixava o cálculo R$ 23,99 acima do banco; a mediana do Focus
+    para agosto (-0,18%, contra -0,205% implícito no banco) deixa R$ 2,19.
+
+    O Olinda **não** lê `+` como espaço, então a query vai montada à mão com
+    `%20` — com `params=` do requests o serviço devolve 400.
+    """
+    from urllib.parse import quote
+    ref = mes.strftime('%m/%Y')
+    filtro = (f"Indicador eq 'IPCA' and DataReferencia eq '{ref}' "
+              'and baseCalculo eq 0')
+    url = (f'{FOCUS}?%24format=json&%24top=1&%24orderby={quote("Data desc")}'
+           f'&%24filter={quote(filtro)}')
+    r = _get(url)
+    r.raise_for_status()
+    itens = r.json().get('value') or []
+    if not itens:
+        return 0
+    # guardada no dia 1º do mês de referência, igual à série fechada, para as
+    # duas poderem ser comparadas pela mesma chave
+    gravar(conn, 'IPCA_PROJ', mes.replace(day=1).isoformat(),
+           float(itens[0]['Mediana']), f"focus-{itens[0]['Data']}")
+    return 1
+
+
 def baixar_acao(conn, ticker: str, ini: date, fim: date) -> int:
     """Fechamentos diários. Pede uma janela folgada porque o Yahoo devolve só
     pregões — dia sem negociação simplesmente não vem, e é assim que se
@@ -163,6 +196,16 @@ def garantir_series(conn, tickers: list, debentures: list, ini: date, fim: date)
     # o CDI de um dia só sai no dia seguinte; a janela folgada evita buraco
     tenta('DI', lambda: baixar_sgs(conn, 12, 'DI', ini - timedelta(days=10), fim))
     tenta('IPCA', lambda: baixar_sgs(conn, 433, 'IPCA', ini - timedelta(days=120), fim))
+
+    # a projeção de cada mês tocado pela janela — o mês corrente quase nunca
+    # está fechado, e é justamente ele que corrige o VNA
+    meses, m = set(), ini.replace(day=1)
+    while m <= fim:
+        meses.add(m)
+        m = (m + timedelta(days=32)).replace(day=1)
+    for m in sorted(meses):
+        tenta(f"IPCA_PROJ:{m.strftime('%m/%Y')}",
+              lambda m=m: baixar_focus_ipca(conn, m))
 
     for t in tickers:
         tenta(f'ACAO:{t}', lambda t=t: baixar_acao(conn, t, ini, fim))

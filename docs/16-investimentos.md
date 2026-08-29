@@ -205,6 +205,26 @@ o que dispensa reanualizar. `p` é o percentual contratado.
 — o primeiro termo é o VNA rendendo o IPCA pro-rata pelos dias do mês, o
 segundo é o juro real.
 
+> **`IPCA_mes` é o índice do mês corrente, e enquanto ele não fecha vale a
+> projeção — não o último índice fechado.** O IBGE só divulga o mês por volta do
+> dia 10 do mês seguinte, e o VNA da ANBIMA (que é o que o banco mostra) anda o
+> tempo todo pela projeção de mercado. Carregar o mês anterior erra o **sinal**
+> numa virada: em 28/08/2026 o banco embutia -0,205% ao mês, julho tinha fechado
+> a +0,07%, e a LIG IPCA+ 2035 de R$ 90 mil ficava R$ 23,99 acima. A mediana do
+> Focus para agosto (-0,18%) derruba o desvio para R$ 2,19.
+>
+> Testadas as três fontes livres, contra o mesmo gabarito:
+>
+> | fonte do IPCA do mês corrente | valor | desvio na LIG |
+> |---|---:|---:|
+> | julho fechado (SGS 433) | +0,07% | +R$ 23,99 |
+> | IPCA-15 de agosto (SGS 7478) | -0,40% | -R$ 17,03 |
+> | **mediana do Focus (Olinda)** | **-0,18%** | **+R$ 2,19** |
+>
+> O IPCA-15 acerta o sinal mas exagera a magnitude; o Focus é o que a ANBIMA
+> efetivamente projeta. Fica o Focus, com queda para o último índice fechado se a
+> API não responder — e o detalhe na tela diz qual dos dois foi usado.
+
 > **As duas bases convivem, e por isso a valorização caminha por dia corrido.**
 > Pós-DI rende só em dia útil (252); prefixado rende todo dia, inclusive fim de
 > semana (365). Caminhar só nos dias úteis perdia os sábados e domingos do
@@ -217,6 +237,54 @@ segundo é o juro real.
 > datas. Com 365, os desvios caem para R$ 0,47 e R$ 0,16.
 
 **DI + spread** (debênture, CRA): `fator_dia = (1 + DI_dia) * (1 + taxa/100)^(1/252)`
+
+## Conciliação desde o valor de aplicação
+
+Para descobrir a convenção sem chutar, foram usadas as duas pontas que o arquivo
+de posição oferece: `valor de aplicação` + `data da aplicação` de um lado,
+`saldo bruto atualizado` + `saldo atualizado até` do outro. Dado o fator
+observado, o número de dias implícito sai invertendo a fórmula:
+
+```
+n = ln(saldo / aplicacao) / ln(1 + taxa/100) * base
+```
+
+Comparar `n` com a contagem real de dias — corridos e úteis — diz qual base o
+banco usou, sem precisar adivinhar.
+
+**Janela curta (25/08 → 28/08) — decide a base.** Qualquer erro na data de
+início do rendimento se cancela na razão entre dois saldos, então esta janela
+isola a base. Na LCI prefixada 13,240%: `n` dá **2,978 em base 365** contra 3
+dias corridos reais, e 2,056 em base 252 contra 3 dias úteis reais. Base 365,
+dias corridos — e é o que está implementado.
+
+**Janela longa (aplicação → 25/08) — não fecha, e é esperado.** Com base 365 os
+quatro prefixados ficam entre R$ 0,72 e R$ 98,65 **acima** do banco, e a taxa
+implícita fica sempre um pouco abaixo da declarada:
+
+| papel | aplicação | dias | taxa declarada | taxa implícita |
+|---|---:|---:|---:|---:|
+| LCI-PRE | 03/12/24 | 630 | 13,240% | 13,136% |
+| LIG-PRE | 18/03/24 | 890 | 10,770% | 10,745% |
+| LIG-PRE | 19/03/24 | 889 | 10,850% | 10,820% |
+| LIG-PRE | 11/12/24 | 622 | 14,630% | 14,541% |
+
+A diferença **não** é um offset constante de dias (seria 4,7 / 2,0 / 2,3 / 3,5),
+então não é "conta começa em D+1". Também não é arredondamento da taxa — as
+implícitas não arredondam de volta para as declaradas. Sobra o histórico que o
+banco carrega e o arquivo não expõe (taxa contratada com mais casas, ou reset).
+
+**Isso não afeta o app**, e é a razão de a conciliação parar aqui: a valorização
+nunca recalcula o histórico — ela **parte do saldo importado** e só aplica o
+fator diário para a frente. O que precisa estar certo é o fator do dia, que é
+exatamente o que a janela curta mede.
+
+**O mesmo método validou o IPCA.** Na LIG IPCA+ 2035 (aplicada em 24/09/2020),
+descontando o juro real de 4,05% em base 365 sobre 2.161 dias corridos, o IPCA
+acumulado implícito no saldo do banco dá **+42,35% em 5,92 anos** — compatível
+com o IPCA realizado do período. Confirma juro real em base 365 e VNA por
+accrual, e foi o que permitiu isolar a projeção do mês corrente como a única
+peça que faltava.
 
 ## PU de partida
 
@@ -231,6 +299,7 @@ número que esta tela existe para conferir.
 |---|---|---|
 | CDI diário | Banco Central, SGS série 12 | público, sem autenticação |
 | IPCA mensal | Banco Central, SGS série 433 | mensal, sai com atraso |
+| projeção de IPCA | Banco Central, Focus (Olinda) | mediana; corrige o VNA do mês aberto |
 | fechamento de ação | Yahoo Finance | dia sem pregão simplesmente não vem |
 | PU de debênture | ANBIMA, mercado secundário | arquivo diário `db{ddmmaa}.txt`, campo 11 |
 
@@ -266,18 +335,17 @@ visível.
 
 ## Simplificações assumidas
 
-**VNA do IPCA.** A ANBIMA corrige o VNA por aniversário no dia 15 e usa
-projeção para o mês corrente; aqui usa-se o último IPCA divulgado, distribuído
-pro-rata pelos dias do mês.
+**VNA do IPCA.** A ANBIMA corrige o VNA por aniversário no dia 15 e distribui a
+projeção pro-rata por **dias úteis**; aqui a projeção usada é a mediana do Focus,
+distribuída pro-rata por **dias corridos**. As duas escolhas se compensam
+parcialmente e sobra R$ 2,19 na LIG IPCA+ de R$ 90 mil — a projeção da própria
+ANBIMA, que fecharia o resto, é paga.
 
-**Papel indexado a IPCA é acumulado, não marcado a mercado.** Uma LIG IPCA+ com
-vencimento em 2035 tem duration alta, e o banco a marca pela curva de juro real
-— conferindo em 28/08, o banco mostrava R$ 90.048,25 contra R$ 90.072,24 de
-accrual. Note que o valor do banco fica **abaixo** até do juro real puro sem
-inflação nenhuma (R$ 90.066,15), o que só se explica por marcação. Reproduzir
-isso exige uma fonte de preço para LIG, que não existe pública. O detalhe da
-linha diz "accrual, não marcação a mercado" para o desvio não passar por número
-exato.
+**Papel indexado a IPCA é acumulado, não marcado a mercado** — e a conciliação
+mostrou que **o banco também acrua**. A suspeita anterior de marcação vinha de o
+valor do banco ficar abaixo do juro real puro; a explicação é mais simples, o
+IPCA de agosto/2026 era **negativo**, e o VNA caiu. Não faz falta uma fonte de
+preço para LIG.
 
 **Sem IR/IOF.** A valorização é bruta. O líquido depende de prazo e de fato
 gerador, e entra quando a fase de resgate precisar comparar alternativas.
@@ -304,11 +372,22 @@ valorizada até 28/08 — 3 dias úteis):
 | LIG DI | 913.775,86 | 913.775,87 | **+0,01** |
 | LCI PRE | 61.933,25 | 61.933,72 | **+0,47** |
 | LIG PRE | 39.322,82 | 39.322,98 | **+0,16** |
-| LIG IPCA | 90.048,25 | 90.072,24 | +23,99 |
+| LIG IPCA | 90.048,25 | 90.050,44 | **+2,19** |
 
-Desvio absoluto total: **R$ 24,65** sobre R$ 1,75 milhão — e R$ 24,00 disso é o
-único papel marcado a mercado pelo banco. Antes da correção da base do
-prefixado, era R$ 86,06.
+Desvio absoluto total: **R$ 2,85** sobre R$ 1,75 milhão — 1,6 centavo por mil
+reais. A evolução mostra o que cada conciliação encontrou:
+
+| estado | desvio total |
+|---|---:|
+| base 252 para tudo | R$ 86,06 |
+| prefixado em base 365, dias corridos | R$ 24,65 |
+| VNA pela projeção Focus do mês corrente | **R$ 2,85** |
+
+O que sobra são R$ 2,19 na LIG IPCA+, que é a distância entre a mediana do Focus
+(-0,18%) e a projeção que a ANBIMA de fato usou (-0,205% implícito no extrato) —
+essa última não tem fonte pública gratuita. **A hipótese anterior de que esse
+papel era marcado a mercado estava errada:** o banco acrua, e o desvio era da
+projeção do índice, não da curva.
 
 **Conferência papel a papel.** Partindo da posição de 25/08 e
 valorizando 3 dias úteis a 94% do CDI:

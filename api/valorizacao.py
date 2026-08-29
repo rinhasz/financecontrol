@@ -128,12 +128,12 @@ def fator_do_dia(inv: dict, d: date, conn, util: bool) -> tuple:
         dias = mercado.dias_no_mes(d.year, d.month)
         fator_vna = (1 + ipca / 100) ** (1 / dias)
         taxa = inv.get('taxa') or 0
-        # accrual, não marcação a mercado: um IPCA+ longo tem duration alta e o
-        # banco marca a curva, então a divergência pode ser de dezenas de reais.
-        # Fica dito no detalhe em vez de passar por número exato.
+        # accrual do VNA, não marcação a mercado — mas a conciliação contra o
+        # extrato (doc 16) mostrou que, para estes papéis, o banco também
+        # acrua: com a projeção certa o desvio cai a R$ 2 em R$ 90 mil.
         return fator_vna * _potencia_365(taxa), 'ipca', \
-            (f'IPCA {ipca}% ({ref}) pro-rata em {dias} dias + {taxa}% a.a. em base 365'
-             ' · accrual, não marcação a mercado')
+            (f'IPCA {ipca}% ({ref}) pro-rata em {dias} dias corridos'
+             f' + {taxa}% a.a. em base 365 · accrual do VNA')
 
     if indexador == 'PRE' or (indexador == '' and inv.get('taxa')):
         taxa = inv.get('taxa')
@@ -153,12 +153,34 @@ def _cdi_vigente(conn, d: date) -> tuple:
 
 
 def _ipca_vigente(conn, d: date) -> tuple:
-    """Último IPCA divulgado até a data. A série do BCB é mensal e sai com
-    atraso, então o mês corrente costuma usar o índice do mês anterior."""
+    """IPCA que corrige o VNA no dia `d` — `(valor, referência)`.
+
+    O índice do próprio mês, quando já fechado. Enquanto não fechou (o IBGE
+    divulga por volta do dia 10 do mês seguinte), vale a **projeção** do mês, que
+    é o que a ANBIMA usa no VNA e o que o banco mostra no extrato. Carregar o
+    último índice fechado — o que se fazia aqui antes — erra o sinal em mês de
+    virada: em agosto/2026 o banco embutia -0,205% e julho tinha fechado a
+    +0,07%, uma diferença de R$ 23,99 numa LIG de R$ 90 mil.
+
+    Só se não houver nem um nem outro é que se carrega o último fechado.
+    """
+    mes = d.replace(day=1).isoformat()
+    fechado = conn.execute(
+        "SELECT valor FROM mercado_serie WHERE serie='IPCA' AND data=?",
+        (mes,)).fetchone()
+    if fechado:
+        return fechado['valor'], mes[:7]
+
+    proj = conn.execute(
+        "SELECT valor FROM mercado_serie WHERE serie='IPCA_PROJ' AND data=?",
+        (mes,)).fetchone()
+    if proj:
+        return proj['valor'], f'{mes[:7]}, projeção Focus'
+
     row = conn.execute(
         "SELECT data, valor FROM mercado_serie WHERE serie='IPCA' AND data<=? "
         'ORDER BY data DESC LIMIT 1', (d.isoformat(),)).fetchone()
-    return (row['valor'], row['data'][:7]) if row else (None, None)
+    return (row['valor'], f"{row['data'][:7]}, sem projeção") if row else (None, None)
 
 
 def _pu_de_mercado(conn, inv: dict, d: date) -> tuple:
