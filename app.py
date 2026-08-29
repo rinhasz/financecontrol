@@ -31,6 +31,11 @@ FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend', 'dist')
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
 app.config['JSON_SORT_KEYS'] = False
 
+# quando este processo subiu — o backend não recarrega sozinho, e saber disso
+# de olho evita depurar um sintoma que é só código velho ainda rodando
+from datetime import datetime as _dt
+INICIADO_EM = _dt.now()
+
 
 # ── static frontend ──────────────────────────────────────────────────────────
 @app.route('/', defaults={'path': ''})
@@ -38,8 +43,27 @@ app.config['JSON_SORT_KEYS'] = False
 def serve_frontend(path):
     full = os.path.join(FRONTEND_DIR, path)
     if path and os.path.exists(full):
+        # os assets levam hash no nome, então podem ser cacheados à vontade
         return send_from_directory(FRONTEND_DIR, path)
-    return send_from_directory(FRONTEND_DIR, 'index.html')
+    # o index não: ele é quem aponta para os assets novos. Em cache, o WebView
+    # continua carregando o build antigo mesmo depois de reabrir o app — foi o
+    # que fez uma tela "não mudar" depois de rebuildada.
+    resp = send_from_directory(FRONTEND_DIR, 'index.html')
+    resp.headers['Cache-Control'] = 'no-store, must-revalidate'
+    return resp
+
+
+@app.route('/api/versao')
+def versao():
+    """Identifica o build carregado. Serve para responder de olho a pergunta
+    "o app está rodando a versão nova?", que já custou idas e vindas."""
+    import glob
+    from datetime import datetime
+    js = sorted(glob.glob(os.path.join(FRONTEND_DIR, 'assets', '*.js')))
+    build = os.path.basename(js[-1]) if js else 'sem build'
+    quando = datetime.fromtimestamp(os.path.getmtime(js[-1])).strftime('%d/%m %H:%M') if js else '—'
+    return {'build': build, 'build_em': quando,
+            'backend_em': INICIADO_EM.strftime('%d/%m %H:%M')}
 
 
 # ── blueprints ────────────────────────────────────────────────────────────────

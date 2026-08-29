@@ -220,3 +220,21 @@ junto (foi o caso da memória de valorização, que é derivada e se reconstrói
 
 O sintoma é fácil de confundir com "o arquivo está com problema", porque a
 falha aparece na importação e não na criação da tabela.
+
+---
+
+## "Reabri o app e não mudou nada"
+
+Duas causas diferentes, e o sintoma é o mesmo:
+
+1. **O backend não recarrega.** Mudança em `api/*.py` só vale depois de fechar e
+   reabrir. Já fez uma importação rodar o código antigo e gravar saldo zerado.
+2. **O `index.html` fica em cache no WebView.** Os assets levam hash no nome, mas
+   o `index` é quem aponta para eles — em cache, o app continua carregando o
+   build anterior mesmo depois de reabrir. Agora ele é servido com
+   `Cache-Control: no-store`.
+
+Para não ter que deduzir qual das duas é: o rodapé da barra lateral mostra
+**`ui <data do build> · api <hora em que o backend subiu>`**, e `/api/versao`
+devolve o mesmo. Se a hora da api for velha, o app não foi reaberto; se a do ui
+for velha, é cache.

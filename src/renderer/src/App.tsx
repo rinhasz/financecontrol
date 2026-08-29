@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { MesAtual } from './pages/MesAtual'
 import { Catalogo } from './pages/Catalogo'
 import { Importacao } from './pages/Importacao'
@@ -53,7 +53,7 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="px-4 py-3 border-t border-zinc-800">
-          <p className="text-xs text-zinc-600">v1.0.0</p>
+          <Versao />
         </div>
       </aside>
 
@@ -83,6 +83,20 @@ export default function App(): JSX.Element {
         </div>
       </main>
     </div>
+  )
+}
+
+/** Carimbo do build e do processo. O backend não recarrega sozinho e o WebView
+ *  cacheia; sem isto, "reabri e não mudou" vira investigação em vez de olhada. */
+function Versao(): JSX.Element {
+  const [v, setV] = useState<{ build_em: string; backend_em: string } | null>(null)
+  useEffect(() => {
+    fetch('/api/versao').then(r => r.json()).then(setV).catch(() => setV(null))
+  }, [])
+  return (
+    <p className="text-xs text-zinc-600" title="Quando o frontend foi buildado e quando o backend subiu">
+      {v ? `ui ${v.build_em} · api ${v.backend_em}` : 'v1.0.0'}
+    </p>
   )
 }
 
