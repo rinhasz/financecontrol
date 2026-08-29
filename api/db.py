@@ -187,6 +187,11 @@ CREATE TABLE IF NOT EXISTS valorizacao (
   fator           REAL,
   pu              REAL,
   saldo           REAL,
+  -- quanto o papel rendeu em reais **naquele dia**: (pu - pu_anterior) * quantidade.
+  -- Guardado em vez de derivado porque é a base da rentabilidade: quando a fase
+  -- seguinte trouxer aplicações e resgates, o rendimento do dia é esta variação
+  -- menos o fluxo de caixa do dia, e sem ela um resgate viraria "prejuízo".
+  variacao        REAL,
   metodo          TEXT,
   detalhe         TEXT
 );
@@ -377,6 +382,13 @@ def init_db():
                              ('detalhe_valorizacao', 'TEXT')):
             if coluna not in cols_inv:
                 conn.execute(f'ALTER TABLE investimento ADD COLUMN {coluna} {tipo}')
+
+    # migração: variação diária em reais numa `valorizacao` já existente.
+    # As linhas antigas ficam com NULL até a próxima valorização, que reescreve
+    # a memória inteira — preencher com 0 aqui mentiria dizendo "não rendeu".
+    cols_val = [r[1] for r in conn.execute('PRAGMA table_info(valorizacao)').fetchall()]
+    if cols_val and 'variacao' not in cols_val:
+        conn.execute('ALTER TABLE valorizacao ADD COLUMN variacao REAL')
 
     conn.commit()
     _seed_regras_transacao(conn)

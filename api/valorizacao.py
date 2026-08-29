@@ -226,6 +226,26 @@ def _pu_base(inv: dict) -> float:
     return inv.get('pu') or 1.0
 
 
+def _passo(conn, inv_id: int, d: date, pu_ant: float, fator: float, pu_novo: float,
+           qtd: float, metodo: str, detalhe: str) -> None:
+    """Grava um dia da memória de cálculo.
+
+    Existe para que `variacao` saia sempre do mesmo lugar: são três caminhos que
+    gravam um passo (preço de mercado, accrual, e o dia parado), e derivar a
+    variação em cada um convidava a divergirem.
+
+    `variacao` é o rendimento do dia em reais. Hoje é exatamente a diferença de
+    saldo, porque não há aplicação nem resgate; quando houver, o rendimento passa
+    a ser esta variação líquida do fluxo do dia — e é por isso que ela fica
+    gravada por dia, e não recalculada a partir das pontas.
+    """
+    conn.execute(
+        'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
+        'saldo, variacao, metodo, detalhe) VALUES (?,?,?,?,?,?,?,?,?)',
+        (inv_id, d.isoformat(), pu_ant, fator, pu_novo, pu_novo * qtd,
+         (pu_novo - pu_ant) * qtd, metodo, detalhe))
+
+
 def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
     """Caminha da posição até hoje, gravando a memória de cálculo."""
     hoje = ate or date.today()
@@ -262,27 +282,18 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
             if metodo in ('mercado', 'anbima'):
                 if pu_mercado is None:
                     # sem preço no dia: o papel não some, mantém o último
-                    conn.execute(
-                        'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
-                        'saldo, metodo, detalhe) VALUES (?,?,?,?,?,?,?,?)',
-                        (inv['id'], d.isoformat(), pu, 1.0, pu, pu * qtd, metodo, detalhe))
+                    _passo(conn, inv['id'], d, pu, 1.0, pu, qtd, metodo, detalhe)
                     continue
                 fator = pu_mercado / pu if pu else 1.0
                 pu_novo = pu_mercado
             else:
                 fator, metodo, detalhe = fator_do_dia(inv, d, conn, util)
                 if fator is None:
-                    conn.execute(
-                        'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
-                        'saldo, metodo, detalhe) VALUES (?,?,?,?,?,?,?,?)',
-                        (inv['id'], d.isoformat(), pu, 1.0, pu, pu * qtd, 'parado', detalhe))
+                    _passo(conn, inv['id'], d, pu, 1.0, pu, qtd, 'parado', detalhe)
                     continue
                 pu_novo = pu * fator
 
-            conn.execute(
-                'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
-                'saldo, metodo, detalhe) VALUES (?,?,?,?,?,?,?,?)',
-                (inv['id'], d.isoformat(), pu, fator, pu_novo, pu_novo * qtd, metodo, detalhe))
+            _passo(conn, inv['id'], d, pu, fator, pu_novo, qtd, metodo, detalhe)
             pu, andou = pu_novo, True
             ultimo_metodo, ultimo_detalhe, ultima_data = metodo, detalhe, d.isoformat()
 

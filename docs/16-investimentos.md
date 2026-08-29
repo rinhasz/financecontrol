@@ -176,7 +176,39 @@ Na fase 2 você aprenderá a fazer a valorização diária dos investimentos. Ne
 | tabela | o que guarda | por quê |
 |---|---|---|
 | `mercado_serie` | `(série, data) -> valor`, com a fonte | permite **refazer** o cálculo sem depender de a fonte estar no ar |
-| `valorizacao` | um passo por papel por dia útil: PU anterior, fator, PU, saldo, método e detalhe | é a **memória de cálculo** — sem ela, "rendeu 0,10%" é um ato de fé |
+| `valorizacao` | um passo por papel por dia: PU anterior, fator, PU, saldo, **variação em R$**, método e detalhe | é a **memória de cálculo** — sem ela, "rendeu 0,10%" é um ato de fé |
+
+### A coluna `variacao`
+
+`variacao = (pu - pu_anterior) × quantidade` — quanto o papel rendeu **em reais
+naquele dia**. Fica gravada por dia, e não derivada das pontas, por três motivos:
+
+**1. É o que separa rendimento de fluxo de caixa.** Hoje as duas coisas
+coincidem, porque a fase não tem aplicação nem resgate. Quando tiver, o
+rendimento do dia passa a ser `variacao − fluxo do dia`; sem uma variação diária
+gravada, um resgate de R$ 50 mil entraria na conta como prejuízo de R$ 50 mil.
+
+**2. Rentabilidade só fecha se for encadeada por dia.** Comparar saldo inicial
+com saldo final só funciona enquanto não há aporte no meio. A partir do momento
+em que há, a rentabilidade correta é o produto dos fatores diários — e cada dia
+precisa do seu próprio numerador.
+
+**3. Distingue juro de oscilação.** Somando por produto, a renda fixa da carteira
+gerou R$ 1.009,43 / R$ 1.009,92 / R$ 1.010,42 nos três dias — quase uma reta,
+que é o que carrego é. As ações fizeram −2.536,38 / −8.995,95 / +1.703,59 no
+mesmo período. "Quantos reais os investimentos geraram de juros no mês" é uma
+pergunta sobre a primeira série, não sobre a soma das duas.
+
+**Verificação:** em todos os 10 grupos de produto × indexador, `Σ variacao`
+reproduz `saldo final − posição inicial` com erro nulo até a quarta casa.
+
+Um único helper (`_passo`) grava os três caminhos possíveis de um dia — preço de
+mercado, accrual, e o dia parado. A variação sai sempre do mesmo lugar, em vez de
+ser recalculada em cada ramo com chance de divergir.
+
+**O que isto habilita** (ainda não implementado): juros do mês em reais, e
+rentabilidade efetiva em % do CDI, IPCA+ e CDI+ — todas são agregações desta
+coluna contra as séries que já estão em `mercado_serie`.
 
 A tela deixa abrir a memória clicando no método de cada papel.
 
