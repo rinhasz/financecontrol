@@ -50,11 +50,22 @@ O primeiro termo é o VNA rendendo o IPCA do mês distribuído pro-rata pelos di
 |---|---|---|
 | ação / ETF | fechamento (Yahoo) | mantém o último fechamento conhecido |
 | debênture | PU indicativo ANBIMA | cai para accrual pelo indexador |
-| CRI / CRA | — não há fonte pública gratuita | accrual pelo indexador, marcado como aproximação |
+| CRI / CRA | accrual pelo indexador — **não** é como o banco marca (ver abaixo) | — |
 | LCI, LCA, LIG, CDB | accrual pelo indexador contratado | fica sem valorizar, com o motivo |
 
 Papel sem indexador reconhecido **não é valorizado** e diz por quê. Inventar um
 rendimento seria pior que mostrar a posição parada.
+
+## CRI/CRA: sabemos como o banco marca, e não é isto
+
+O Manual de Marcação a Mercado do Itaú Securities Services (p. 38) marca CRI/CRA
+IPCA+ com projeção de IPCA da ANBIMA + **cupom da curva de NTN-B** + spread de
+crédito do Comitê WMS. Conferido em 28/08: a curva caiu 4,6 bps e o banco moveu
+o CRA +0,190% além do carrego — coerente com duration de ~4,1 anos.
+
+Aqui é feito **accrual**, que captura só o carrego. Reproduzir a marcação exige
+por papel o cronograma de amortização (para a duration) e o spread implícito,
+e nenhum dos dois vem no arquivo de posição. Ver doc 16.
 """
 from datetime import date, datetime
 
