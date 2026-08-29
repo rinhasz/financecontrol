@@ -57,6 +57,13 @@ export const api = {
     resumo: (mes: string) => get(`/api/resumo?mes=${mes}`),
     consolidado: (mes: string) => get(`/api/consolidado?mes=${mes}`)
   },
+  projecao: {
+    /** Corrige a projeção de um item num mês. `valor: null` apaga a correção e
+     *  devolve o item para o cálculo automático — zero NÃO apaga, zero é a
+     *  correção que diz "não vai acontecer". */
+    manual: (natureza: 'despesa' | 'receita', itemId: number, mes: string, valor: number | null) =>
+      post('/api/projecao/manual', { natureza, item_id: itemId, mes_ref: mes, valor })
+  },
   config: {
     get: () => get('/api/config'),
     set: (data: Record<string, unknown>) => post('/api/config', data)

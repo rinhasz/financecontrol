@@ -17,6 +17,7 @@ interface Item {
   recorrencia: 'fixa' | 'esporadica'
   varios_por_mes: number
   tipo_projecao: string
+  valor_projecao?: number
   tipo?: string
   conta_como_renda?: boolean
 }
@@ -35,7 +36,10 @@ const TIPO_RECEITA_LABEL: Record<string, string> = {
 const PROJECAO_LABEL: Record<string, string> = {
   media_simples: 'Média simples (todo o histórico)',
   media_movel_6: 'Média móvel (6 últimos meses)',
-  media_sazonal: 'Média sazonal (mesmo mês de outros anos)'
+  media_sazonal: 'Média sazonal (mesmo mês de outros anos)',
+  // não olha o histórico: vale o número digitado, inclusive zero — para o item
+  // que existe no catálogo mas não se espera que aconteça
+  valor_fixo: 'Valor fixo (cravado, pode ser zero)'
 }
 
 const PADRAO_LABEL: Record<string, string> = {
@@ -51,6 +55,7 @@ interface FormState {
   recorrencia: string
   varios_por_mes: boolean
   tipo_projecao: string
+  valor_projecao: string
   tipo: string
   valor_padrao: string
   dia: string
@@ -84,6 +89,7 @@ function itemParaForm(d: Item): FormState {
     recorrencia: d.recorrencia ?? 'fixa',
     varios_por_mes: !!d.varios_por_mes,
     tipo_projecao: d.tipo_projecao ?? 'media_movel_6',
+    valor_projecao: d.valor_projecao != null ? String(d.valor_projecao) : '',
     tipo: d.tipo ?? 'outra',
     valor_padrao: String(d.valor_padrao ?? ''),
     dia: d.dia != null ? String(d.dia) : '',
@@ -140,7 +146,7 @@ export function Catalogo() {
     setErro('')
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo_projecao: 'media_movel_6', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo_projecao: 'media_movel_6', valor_projecao: '', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {
@@ -155,6 +161,7 @@ export function Catalogo() {
       recorrencia: form.recorrencia,
       varios_por_mes: form.varios_por_mes,
       tipo_projecao: form.tipo_projecao,
+      valor_projecao: form.valor_projecao ? parseFloat(form.valor_projecao.replace(',', '.')) : 0,
       valor_padrao: form.valor_padrao ? parseFloat(form.valor_padrao.replace(',', '.')) : 0,
       regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
     }
@@ -257,6 +264,16 @@ export function Catalogo() {
           {Object.entries(PROJECAO_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </Field>
+      {/* só faz sentido com 'valor fixo' escolhido — em qualquer outro método o
+          número seria ignorado, e um campo ignorado na tela engana */}
+      {form.tipo_projecao === 'valor_fixo' && (
+        <Field label="Valor projetado">
+          <input value={form.valor_projecao} placeholder="0,00"
+            onChange={e => setForm(f => f && { ...f, valor_projecao: e.target.value })}
+            title="Valor cravado para todo mês. Deixe zero para dizer que este item não deve entrar na previsão."
+            className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 tabular-nums outline-none focus:border-emerald-500" />
+        </Field>
+      )}
       <Field label="Repetições">
         <label className="flex items-center gap-1.5 text-sm text-zinc-300 h-[30px] cursor-pointer"
           title="Marque quando o mesmo item pode aparecer mais de uma vez no extrato do mesmo mês (ex: a escola cobra mensalidade e material). Assim ele continua disponível para associar depois do primeiro casamento.">

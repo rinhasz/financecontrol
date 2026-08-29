@@ -37,8 +37,10 @@ CREATE TABLE IF NOT EXISTS despesa (
   -- associação depois de já ter recebido uma transação.
   varios_por_mes       INTEGER NOT NULL DEFAULT 0,
   -- como estimar quanto vai custar no mês, a partir do histórico consolidado:
-  -- media_simples | media_movel_6 | media_sazonal (ver api/projecao.py)
+  -- media_simples | media_movel_6 | media_sazonal | valor_fixo (api/projecao.py)
   tipo_projecao        TEXT NOT NULL DEFAULT 'media_movel_6',
+  -- só vale com tipo_projecao='valor_fixo'; 0 significa "não espero que aconteça"
+  valor_projecao       REAL NOT NULL DEFAULT 0,
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -94,6 +96,7 @@ CREATE TABLE IF NOT EXISTS receita (
   recorrencia          TEXT NOT NULL DEFAULT 'fixa',
   varios_por_mes       INTEGER NOT NULL DEFAULT 0,
   tipo_projecao        TEXT NOT NULL DEFAULT 'media_movel_6',
+  valor_projecao       REAL NOT NULL DEFAULT 0,
   ativo                INTEGER NOT NULL DEFAULT 1
 );
 
@@ -107,6 +110,28 @@ CREATE TABLE IF NOT EXISTS lancamento_receita (
   valor_real       REAL,
   data_recebimento TEXT,
   UNIQUE(mes_ref, receita_id)
+);
+
+-- Correção manual da projeção, por item e por mês.
+--
+-- A projeção automática acerta na maioria, mas não em todas: uma despesa que
+-- este mês não vai acontecer, um valor já conhecido de antemão, um mês atípico.
+-- Sem poder corrigir, o único jeito de tirar um número errado do "a vencer"
+-- era desativar o item — o que apaga o histórico dele e estraga a projeção dos
+-- meses seguintes.
+--
+-- Tabela à parte, e não coluna em `lancamento`, porque a correção precisa
+-- existir para meses que ainda não têm lançamento aberto (projeção adiante).
+-- `valor` 0 é uma decisão legítima: "não espero que aconteça". Apagar a linha
+-- é o que devolve o item para a projeção automática.
+CREATE TABLE IF NOT EXISTS projecao_manual (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  natureza   TEXT NOT NULL,           -- despesa | receita
+  item_id    INTEGER NOT NULL,
+  mes_ref    TEXT NOT NULL,
+  valor      REAL NOT NULL,
+  criado_em  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(natureza, item_id, mes_ref)
 );
 
 CREATE TABLE IF NOT EXISTS transacao_receita_regra (
@@ -352,6 +377,12 @@ def init_db():
             for padrao, projecao in PADRAO_PARA_PROJECAO.items():
                 conn.execute(f'UPDATE {tabela} SET tipo_projecao=? WHERE padrao_variabilidade=?',
                              (projecao, padrao))
+
+        # migração: valor da projeção fixa. Default 0 e não NULL — quem escolhe
+        # `tipo_projecao = valor_fixo` sem digitar nada está justamente dizendo
+        # "não espero que aconteça".
+        if cols and 'valor_projecao' not in cols:
+            conn.execute(f'ALTER TABLE {tabela} ADD COLUMN valor_projecao REAL NOT NULL DEFAULT 0')
 
     # migração: lado da receita na transação (doc 14). Criadas já na fase 2,
     # junto com as tabelas, para a fase 3 não precisar de outra migração e não

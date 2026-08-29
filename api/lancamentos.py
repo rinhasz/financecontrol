@@ -95,10 +95,14 @@ def list_lancamentos():
     # que a calculadora usa.
     from . import projecao as pj
     proj = pj.projecoes_do_mes(conn, 'despesa', mes_ref)
+    # quais vieram de correção manual: a tela precisa marcá-las e oferecer o
+    # caminho de volta para o automático
+    manuais = pj.manuais_do_mes(conn, 'despesa', mes_ref)
 
     despesas = [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref, 'despesa')
     for d in despesas:
         d['projetado'] = proj.get(d['item_id'])
+        d['projecao_manual'] = d['item_id'] in manuais
         if d['status'] == 'nao_encontrado' and d['projetado'] is not None:
             d['valor_esperado'] = d['projetado']
     despesas.sort(key=lambda x: ((x['categoria_nome'] or '~').lower(), x['item_nome'].lower()))
@@ -125,11 +129,13 @@ def _receitas_do_mes(conn, mes_ref: str) -> list:
 
     from . import projecao as pj
     proj = pj.projecoes_do_mes(conn, 'receita', mes_ref)
+    manuais = pj.manuais_do_mes(conn, 'receita', mes_ref)
 
     itens = [{**dict(r), 'item_id': r['receita_id']} for r in rows]
     itens += _esporadicas_do_mes(conn, mes_ref, 'receita')
     for r in itens:
         r['projetado'] = proj.get(r['item_id'])
+        r['projecao_manual'] = r['item_id'] in manuais
         if r['status'] == 'nao_encontrado' and r['projetado'] is not None:
             r['valor_esperado'] = r['projetado']
     itens.sort(key=lambda x: (x['tipo'], x['item_nome'].lower()))
@@ -473,6 +479,42 @@ def resumo():
         # nomes antigos, mantidos para não quebrar quem ainda os leia
         'naoEncontrado': a_realizar, 'receitas': renda, 'resgate': resgate_necessario,
     })
+
+
+@bp.route('/projecao/manual', methods=['POST'])
+def projecao_manual():
+    """Corrige à mão a projeção de um item num mês.
+
+    `valor: null` **apaga** a correção e devolve o item para a projeção
+    automática. Zero não apaga — zero é a correção que diz "esta não vai
+    acontecer neste mês", e é justamente o caso que a projeção automática não
+    consegue expressar sozinha.
+    """
+    data = request.json or {}
+    natureza = data.get('natureza')
+    item_id = data.get('item_id')
+    mes_ref = data.get('mes_ref')
+    if natureza not in ('despesa', 'receita') or not item_id or not mes_ref:
+        return jsonify({'ok': False, 'msg': 'natureza, item_id e mes_ref são obrigatórios'}), 400
+
+    valor = data.get('valor')
+    conn = get_db()
+    if valor is None:
+        conn.execute('DELETE FROM projecao_manual WHERE natureza=? AND item_id=? AND mes_ref=?',
+                     (natureza, item_id, mes_ref))
+    else:
+        try:
+            valor = abs(float(valor))
+        except (TypeError, ValueError):
+            conn.close()
+            return jsonify({'ok': False, 'msg': f'Valor inválido: {data.get("valor")!r}'}), 400
+        conn.execute(
+            'INSERT INTO projecao_manual (natureza, item_id, mes_ref, valor) VALUES (?,?,?,?) '
+            'ON CONFLICT(natureza, item_id, mes_ref) DO UPDATE SET valor=excluded.valor',
+            (natureza, item_id, mes_ref, valor))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'valor': valor})
 
 
 @bp.route('/config', methods=['GET'])

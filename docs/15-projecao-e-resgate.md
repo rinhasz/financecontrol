@@ -36,9 +36,22 @@ gasto muda o que é uma boa estimativa.
 | `media_simples` | média de todos os meses do histórico |
 | `media_movel_6` | média dos **6 últimos meses presentes** no histórico |
 | `media_sazonal` | média dos meses **iguais** ao projetado (todo março, para projetar março) |
+| `valor_fixo` | não olha o histórico: vale `valor_projecao` do catálogo, **zero incluído** |
 
 A sazonal **cai para média simples** quando não há nenhum mês correspondente no
 histórico — projetar sobre zero amostras seria pior que uma média larga.
+
+`valor_fixo` existe para o item cujo histórico não diz nada útil sobre o futuro:
+a despesa que acabou, a que passou a ser cobrada em outro lugar, a que só existe
+no catálogo para receber lançamento eventual. Antes, a única forma de tirar um
+número errado do "a vencer" era **desativar o item** — o que apaga o histórico
+dele e estraga a projeção dos meses seguintes. Zero como valor de projeção diz
+"não espero que aconteça" sem perder nada.
+
+Por isso `valor_projecao` é `NOT NULL DEFAULT 0`: quem escolhe valor fixo e não
+digita nada está justamente dizendo zero. E o campo só aparece na tela quando
+`valor_fixo` está selecionado — em qualquer outro método ele seria ignorado, e
+um campo ignorado engana.
 
 A base é sempre a **visão consolidada** do mês: ocorrências somadas e estornos
 abatidos. Projetar sobre lançamento cru contaria duas vezes uma despesa cobrada
@@ -78,6 +91,44 @@ como sazonais no cadastro). É ponto de partida, não verdade — o campo é edi
 item a item.
 
 ---
+
+## Correção manual da projeção
+
+A projeção automática acerta na maioria, mas não em todas. `projecao_manual`
+`(natureza, item_id, mes_ref, valor)` guarda a correção de **um item num mês**,
+e tem precedência sobre tudo:
+
+| ordem | origem | escopo |
+|---|---|---|
+| 1 | `projecao_manual` | aquele item, **naquele mês** |
+| 2 | `valor_projecao` com `tipo_projecao = valor_fixo` | aquele item, todo mês |
+| 3 | histórico, pelo método cadastrado | aquele item, todo mês |
+
+Aplicada dentro de `projecoes_do_mes()`, que é **ponto único**: lista do mês,
+consolidado, resumo e calculadora de resgate passam todos por lá, então a
+correção vale nos quatro de uma vez, sem risco de a tela dizer um número e a
+calculadora usar outro.
+
+**Tabela à parte, não coluna em `lancamento`**, por dois motivos: a correção
+precisa existir para meses que ainda não têm lançamento aberto (projeção
+adiante); e `lancamento.valor_esperado` é **sobrescrito pela projeção a cada
+carregamento** para as linhas em aberto — era exatamente por isso que editar o
+valor de uma linha em aberto na tela não colava. A edição inline do Mês Atual
+agora roteia por status: linha em aberto grava em `projecao_manual`, linha paga
+ou agendada continua editando o lançamento.
+
+`valor: null` **apaga** a correção e devolve o item ao cálculo automático. Zero
+não apaga — zero é a correção que diz "não vai acontecer neste mês", e é
+justamente o caso que o cálculo automático não consegue expressar. É a mesma
+distinção do `valor_fixo`, um mês por vez.
+
+Na tela, o selo muda de origem junto com o número: **PREVISTO** (âmbar) para
+projeção automática, **AJUSTADO** (azul) para corrigida à mão — e o AJUSTADO é
+clicável, devolvendo a linha ao automático.
+
+**Verificado:** numa despesa em aberto projetada em R$ 12.737,86, corrigir para
+zero derruba o "a vencer" do mês em exatamente R$ 12.737,86; corrigir para
+R$ 50 sobe R$ 50; desfazer devolve ao valor original ao centavo.
 
 ## O que NÃO é projetado
 

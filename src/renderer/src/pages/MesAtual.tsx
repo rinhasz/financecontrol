@@ -18,6 +18,8 @@ interface Lancamento {
   // negativo e o valor não é editável — quem manda é o extrato
   recorrencia: 'fixa' | 'esporadica'
   descricao_transacao?: string
+  // a previsão desta linha foi corrigida à mão neste mês (api/projecao.py)
+  projecao_manual?: boolean
 }
 
 interface Receita {
@@ -32,6 +34,7 @@ interface Receita {
   data_recebimento: string | null
   descricao_transacao?: string
   objetivo?: string | null
+  projecao_manual?: boolean
 }
 
 interface Resumo {
@@ -66,11 +69,23 @@ const STATUS_RECEITA_LABEL: Record<string, string> = {
 /** Item que não aconteceu ainda: o valor exibido não veio do extrato, veio da
  *  projeção. Sem dizer isso, um previsto se confunde com um realizado — e a
  *  diferença é justamente o que separa "já saiu da conta" de "estimativa". */
-function SeloPrevisto() {
+function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () => void }) {
+  if (manual) {
+    // cor diferente porque a origem é diferente: este número foi decidido, não
+    // estimado, e clicar devolve a linha para o cálculo automático
+    return (
+      <button onClick={onLimpar}
+        className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide
+          text-sky-400 bg-sky-950/40 border border-sky-800/40 hover:border-sky-600 transition-colors"
+        title="Você corrigiu esta previsão à mão. Clique para voltar ao cálculo automático.">
+        AJUSTADO
+      </button>
+    )
+  }
   return (
     <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide
       text-amber-400 bg-amber-950/40 border border-amber-800/40"
-      title="Valor estimado pelo método de projeção cadastrado, não lido do extrato">
+      title="Valor estimado pelo método de projeção cadastrado, não lido do extrato. Clique no valor para corrigir.">
       PREVISTO
     </span>
   )
@@ -160,10 +175,29 @@ export function MesAtual() {
 
   useEffect(() => { load() }, [load])
 
+  /** Editar o valor de uma linha.
+   *
+   *  Em aberto, o número na tela **é a projeção** — gravá-lo em
+   *  `lancamento.valor_esperado` não colava, porque a projeção sobrescreve esse
+   *  campo a cada carregamento. Por isso a correção de uma linha em aberto vai
+   *  para `projecao_manual`, que tem precedência sobre o cálculo automático.
+   *  Já pago ou agendado continua sendo edição do lançamento. */
   async function saveValor(l: Lancamento) {
     const val = parseFloat(editVal.replace(',', '.'))
-    if (!isNaN(val)) await api.lancamentos.update(l.id, { valor_esperado: val })
+    if (!isNaN(val)) {
+      if (l.status === 'nao_encontrado') {
+        await api.projecao.manual('despesa', l.item_id, mesRef, val)
+      } else {
+        await api.lancamentos.update(l.id, { valor_esperado: val })
+      }
+    }
     setEditId(null)
+    load()
+  }
+
+  /** Devolve a linha para a projeção automática. */
+  async function limparProjecao(natureza: 'despesa' | 'receita', itemId: number) {
+    await api.projecao.manual(natureza, itemId, mesRef, null)
     load()
   }
 
@@ -373,12 +407,13 @@ export function MesAtual() {
                 Renda e movimentação ficam separadas porque resgate e estorno
                 chegam na conta sem serem renda nova (doc 14). */}
             {renda.length > 0 && (
-              <BlocoReceitas titulo="Receitas" itens={renda} total={resumo?.renda ?? 0} />
+              <BlocoReceitas titulo="Receitas" itens={renda} total={resumo?.renda ?? 0}
+                onLimparProjecao={id => limparProjecao('receita', id)} />
             )}
             {movimentacao.length > 0 && (
               <BlocoReceitas titulo="Movimentação — não é renda" itens={movimentacao}
                 total={movimentacao.reduce((acc, r) => acc + (r.valor_real ?? r.valor_esperado), 0)}
-                esmaecido />
+                onLimparProjecao={id => limparProjecao('receita', id)} esmaecido />
             )}
 
             {Object.entries(byCategory).map(([cat, items]) => (
@@ -430,7 +465,10 @@ export function MesAtual() {
                             <span className={cn('inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border', STATUS_STYLE[l.status])}>
                               {STATUS_LABEL[l.status]}
                             </span>
-                            {l.status === 'nao_encontrado' && <SeloPrevisto />}
+                            {l.status === 'nao_encontrado' && (
+                              <SeloPrevisto manual={l.projecao_manual}
+                                onLimpar={() => limparProjecao('despesa', l.item_id)} />
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-right">
                             {l.linha_digitavel && (
@@ -664,8 +702,9 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
 }
 
 
-function BlocoReceitas({ titulo, itens, total, esmaecido }: {
+function BlocoReceitas({ titulo, itens, total, esmaecido, onLimparProjecao }: {
   titulo: string; itens: Receita[]; total: number; esmaecido?: boolean
+  onLimparProjecao: (itemId: number) => void
 }) {
   return (
     <div>
@@ -706,7 +745,10 @@ function BlocoReceitas({ titulo, itens, total, esmaecido }: {
                       : 'bg-zinc-800/30 text-zinc-500 border-zinc-700/30')}>
                     {STATUS_RECEITA_LABEL[r.status] ?? r.status}
                   </span>
-                  {r.status === 'nao_encontrado' && <SeloPrevisto />}
+                  {r.status === 'nao_encontrado' && (
+                    <SeloPrevisto manual={r.projecao_manual}
+                      onLimpar={() => onLimparProjecao(r.item_id)} />
+                  )}
                 </td>
               </tr>
             ))}

@@ -20,8 +20,13 @@ from .db import get_config_value, periodo_competencia, dia_util_anterior
 MEDIA_SIMPLES = 'media_simples'
 MEDIA_MOVEL_6 = 'media_movel_6'
 MEDIA_SAZONAL = 'media_sazonal'
+# Não olha o histórico: vale o número cadastrado em `valor_projecao`, inclusive
+# **zero**. É o caso da despesa que existe no catálogo mas não se espera que
+# aconteça — uma média de meses antigos ficaria inflando o "a vencer" para
+# sempre, e desativar o item apagaria o histórico dele.
+VALOR_FIXO = 'valor_fixo'
 
-TIPOS = [MEDIA_SIMPLES, MEDIA_MOVEL_6, MEDIA_SAZONAL]
+TIPOS = [MEDIA_SIMPLES, MEDIA_MOVEL_6, MEDIA_SAZONAL, VALOR_FIXO]
 
 # Como cada padrão de variabilidade já cadastrado se traduz numa projeção. É
 # um ponto de partida razoável, não uma verdade: o usuário troca item a item.
@@ -101,8 +106,13 @@ def mes_corrente(conn) -> str:
                       int(get_config_value(conn, 'dia_recebimento_salario', '26')))
 
 
-def projetar(serie: dict, mes_ref: str, tipo: str, corrente: str = None) -> float:
+def projetar(serie: dict, mes_ref: str, tipo: str, corrente: str = None,
+             valor_fixo: float = None) -> float:
     """Valor projetado de um item para `mes_ref`, a partir da sua série.
+
+    Com `tipo = VALOR_FIXO` o histórico não é consultado: vale `valor_fixo`,
+    zero incluído. É a única forma de dizer "esta não vai acontecer" sem
+    desativar o item e perder o histórico dele.
 
     Fora da conta ficam:
 
@@ -116,6 +126,9 @@ def projetar(serie: dict, mes_ref: str, tipo: str, corrente: str = None) -> floa
     sem isso a projeção seria zero, o que é pior que uma amostra imperfeita. É a
     mesma lógica do fallback da média sazonal.
     """
+    if tipo == VALOR_FIXO:
+        return float(valor_fixo or 0.0)
+
     passado = {m: v for m, v in serie.items() if m < mes_ref}
     if corrente:
         sem_corrente = {m: v for m, v in passado.items() if m != corrente}
@@ -139,8 +152,25 @@ def projetar(serie: dict, mes_ref: str, tipo: str, corrente: str = None) -> floa
     return sum(passado.values()) / len(passado)
 
 
+def manuais_do_mes(conn, natureza: str, mes_ref: str) -> dict:
+    """`{item_id: valor}` corrigido à mão para este mês. Pode ser 0,00."""
+    return {r['item_id']: r['valor'] for r in conn.execute(
+        'SELECT item_id, valor FROM projecao_manual WHERE natureza=? AND mes_ref=?',
+        (natureza, mes_ref))}
+
+
 def projecoes_do_mes(conn, natureza: str, mes_ref: str) -> dict:
-    """`{item_id: valor_projetado}` para os itens ativos do catálogo."""
+    """`{item_id: valor_projetado}` para os itens ativos do catálogo.
+
+    Precedência, do mais específico para o mais genérico:
+
+    1. **correção manual** daquele item naquele mês (`projecao_manual`);
+    2. **valor fixo** do catálogo, quando `tipo_projecao = valor_fixo`;
+    3. o **histórico**, pelo método cadastrado.
+
+    Ponto único: resumo, consolidado, lista do mês e calculadora de resgate
+    passam todos por aqui, então a correção manual vale em todos de uma vez.
+    """
     from .motor_batimento import cfg
     c = cfg(natureza)
 
@@ -149,13 +179,22 @@ def projecoes_do_mes(conn, natureza: str, mes_ref: str) -> dict:
     # média dos meses em que ele apareceu não diz nada sobre este mês, e somá-la
     # ao "a vencer" inflaria a necessidade de resgate com um gasto imaginário.
     itens = conn.execute(
-        f"SELECT id, tipo_projecao FROM {c['catalogo']} "
+        f"SELECT id, tipo_projecao, valor_projecao FROM {c['catalogo']} "
         "WHERE ativo = 1 AND recorrencia = 'fixa'").fetchall()
 
     corrente = mes_corrente(conn)
-    return {i['id']: round(projetar(series.get(i['id'], {}), mes_ref,
-                                    i['tipo_projecao'] or MEDIA_MOVEL_6, corrente), 2)
-            for i in itens}
+    manuais = manuais_do_mes(conn, natureza, mes_ref)
+    out = {}
+    for i in itens:
+        # `is not None` e não `or`: uma correção de 0,00 é uma decisão do
+        # usuário ("não vai acontecer"), não um valor ausente.
+        if i['id'] in manuais:
+            out[i['id']] = round(manuais[i['id']], 2)
+        else:
+            out[i['id']] = round(projetar(series.get(i['id'], {}), mes_ref,
+                                          i['tipo_projecao'] or MEDIA_MOVEL_6,
+                                          corrente, i['valor_projecao']), 2)
+    return out
 
 
 def realizado_do_mes(conn, natureza: str, mes_ref: str) -> dict:
