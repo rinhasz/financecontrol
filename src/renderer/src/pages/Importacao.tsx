@@ -234,6 +234,34 @@ export function Importacao({ active }: { active: boolean }) {
     }
   }
 
+  /** Volta ao início da jornada, largando tudo que está só na tela. */
+  function reiniciar() {
+    setStep('selecionar')
+    setFile(null)
+    setMsg('')
+    setTransacoes([])
+    setResultado(null)
+    setConfirmado(null)
+    setErroConfirmar('')
+    setCorrigindo(null)
+    setAssociando(null)
+    setBuscandoTx(null)
+    setDefinindoEstorno(null)
+  }
+
+  /** Sair da revisão sem gravar.
+   *
+   *  Só descarta o que está pendente na tela. As transações do extrato já
+   *  entraram na base no momento da importação — cancelar aqui não desfaz
+   *  isso, e o texto do botão não promete que desfaça. Para trocar o que foi
+   *  importado, é importar de novo: a importação substitui o período. */
+  function cancelar() {
+    if (totalPendente > 0 && !window.confirm(
+      `Descartar ${totalPendente} ${totalPendente === 1 ? 'associação revisada' : 'associações revisadas'}?\n\n` +
+      'Os lançamentos do extrato continuam na base — só o que você revisou aqui se perde.')) return
+    reiniciar()
+  }
+
   function abrirCorrecao(transacaoId: number) {
     setCorrigindo(corrigindo === transacaoId ? null : transacaoId)
     setSelecionada('')
@@ -623,10 +651,16 @@ export function Importacao({ active }: { active: boolean }) {
                   {transacoes.filter(x => x.valor > 0).length} entradas
                 </p>
               </div>
-              <button onClick={rodarBatimento} disabled={loading}
-                className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-                {loading ? 'Batendo...' : 'Rodar Batimento Automático'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={cancelar} disabled={loading}
+                  className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-400 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-200 transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={rodarBatimento} disabled={loading}
+                  className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+                  {loading ? 'Batendo...' : 'Rodar Batimento Automático'}
+                </button>
+              </div>
             </div>
             <div className="rounded-lg overflow-hidden border border-zinc-800/60 max-h-[500px] overflow-y-auto">
               <table className="w-full text-sm">
@@ -1000,6 +1034,10 @@ export function Importacao({ active }: { active: boolean }) {
                   className="px-5 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                   {confirmando ? 'Gravando...' : `Confirmar tudo (${totalPendente})`}
                 </button>
+                <button onClick={cancelar} disabled={confirmando}
+                  className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-400 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-200 transition-colors">
+                  Cancelar
+                </button>
                 {erroConfirmar ? (
                   <p className="text-sm text-red-400">{erroConfirmar}</p>
                 ) : estornosIncompletos.length > 0 ? (
@@ -1022,7 +1060,7 @@ export function Importacao({ active }: { active: boolean }) {
                     className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                     {loading ? 'Batendo...' : 'Rebater de novo'}
                   </button>
-                  <button onClick={() => { setStep('selecionar'); setFile(null); setMsg(''); setTransacoes([]); setResultado(null); setConfirmado(null) }}
+                  <button onClick={reiniciar}
                     className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-zinc-500 transition-colors">
                     Nova importação
                   </button>
