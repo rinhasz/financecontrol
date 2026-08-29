@@ -93,6 +93,7 @@ export function Investimentos({ active }: { active: boolean }) {
   const [msg, setMsg] = useState('')
   const [erro, setErro] = useState('')
   const [memoria, setMemoria] = useState<{ id: number; passos: PassoMemoria[] } | null>(null)
+  const [grupoAberto, setGrupoAberto] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (d?: string) => {
@@ -149,6 +150,29 @@ export function Investimentos({ active }: { active: boolean }) {
   async function verMemoria(id: number) {
     if (memoria?.id === id) { setMemoria(null); return }
     setMemoria({ id, passos: await api.investimentos.memoria(id) })
+  }
+
+  // A quebra de cada grupo é por indexador — a pergunta natural sobre um
+  // produto é "quanto disso é DI, quanto é IPCA". Quando já se está agrupando
+  // por indexador, quebrar por indexador não diria nada, então quebra por
+  // produto: a dimensão complementar.
+  const subDimensao: Agrupamento = agrupamento === 'indexador' ? 'produto' : 'indexador'
+
+  /** Mesma regra de rótulo do backend, para as chaves baterem. */
+  const chaveDe = (i: Investimento, dim: Agrupamento) =>
+    (i[dim] as string | null) || 'Não informado'
+
+  function quebrar(chave: string) {
+    const dentro = (pos?.itens ?? []).filter(i => chaveDe(i, agrupamento) === chave)
+    const acc = new Map<string, { chave: string; total: number; itens: number }>()
+    for (const i of dentro) {
+      const k = chaveDe(i, subDimensao)
+      const g = acc.get(k) ?? { chave: k, total: 0, itens: 0 }
+      g.total += i.saldo ?? 0
+      g.itens += 1
+      acc.set(k, g)
+    }
+    return [...acc.values()].sort((a, b) => b.total - a.total)
   }
 
   const grupos = pos?.consolidado[agrupamento] ?? []
@@ -263,11 +287,20 @@ export function Investimentos({ active }: { active: boolean }) {
               <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                 <table className="w-full text-sm">
                   <tbody>
-                    {grupos.map((g, i) => (
-                      <tr key={g.chave} className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
+                    {grupos.map((g, i) => {
+                      const aberto = grupoAberto === g.chave
+                      const sub = aberto ? quebrar(g.chave) : []
+                      return (
+                      <Fragment key={g.chave}>
+                      <tr className={cn('hover:bg-zinc-800/40', i > 0 && 'border-t border-zinc-800/40')}>
                         <td className="px-4 py-2.5 text-zinc-300 font-medium">
-                          {agrupamento === 'origem' ? (ORIGEM_LABEL[g.chave] ?? g.chave) : g.chave}
-                          <span className="ml-2 text-[10px] text-zinc-600">{g.itens} {g.itens === 1 ? 'papel' : 'papéis'}</span>
+                          <button onClick={() => setGrupoAberto(aberto ? null : g.chave)}
+                            className="hover:text-emerald-400 transition-colors"
+                            title={`Quebrar por ${subDimensao}`}>
+                            <span className="inline-block w-4 text-zinc-500">{aberto ? '−' : '+'}</span>
+                            {agrupamento === 'origem' ? (ORIGEM_LABEL[g.chave] ?? g.chave) : g.chave}
+                            <span className="ml-2 text-[10px] text-zinc-600">{g.itens} {g.itens === 1 ? 'papel' : 'papéis'}</span>
+                          </button>
                         </td>
                         {/* a participação de cada grupo é o que mostra a concentração —
                             e concentração é o que decide realocação, nas próximas fases */}
@@ -278,7 +311,25 @@ export function Investimentos({ active }: { active: boolean }) {
                           {formatBRL(g.total)}
                         </td>
                       </tr>
-                    ))}
+                      {aberto && sub.map(sg => (
+                        <tr key={sg.chave} className="bg-zinc-900/60 border-t border-zinc-800/30 text-xs">
+                          <td className="pl-12 pr-4 py-1.5 text-zinc-400">
+                            {sg.chave}
+                            <span className="ml-2 text-[10px] text-zinc-600">
+                              {sg.itens} {sg.itens === 1 ? 'papel' : 'papéis'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-1.5 text-right text-zinc-600 tabular-nums">
+                            {g.total ? `${(sg.total / g.total * 100).toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="px-4 py-1.5 text-right text-zinc-400 tabular-nums">
+                            {formatBRL(sg.total)}
+                          </td>
+                        </tr>
+                      ))}
+                      </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

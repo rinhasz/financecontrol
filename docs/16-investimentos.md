@@ -126,6 +126,16 @@ Aba **Investimentos** com posição total, consolidado alternável por
 **produto / indexador / emissor / origem** (com participação %, que é o que
 mostra concentração) e a tabela detalhada com todos os campos.
 
+Cada linha do consolidado abre num **`+`** e quebra por **indexador** — a
+pergunta natural sobre um produto é "quanto disso é DI, quanto é IPCA". Quando
+já se agrupa por indexador, a quebra vira por **produto**, que é a dimensão
+complementar; quebrar por indexador dentro de indexador não diria nada.
+
+> A soma da quebra é exatamente o total do grupo. Isso obrigou a corrigir o
+> agrupamento, que arredondava a cada parcela: a diferença era de frações de
+> centavo, invisível em reais, mas suficiente para a quebra não fechar com o
+> grupo que a contém.
+
 O `saldo` de cada linha é MTM quando existe e accrual quando não — o valor que o
 internet banking mostra, que é o número que esta tela existe para conferir.
 

@@ -430,12 +430,18 @@ def listar():
     conn.close()
 
     def agrupar(chave):
+        """Soma cru e arredonda uma vez só. Arredondar a cada parcela fazia o
+        total do grupo divergir da soma das suas linhas por frações de centavo —
+        invisível em reais, mas suficiente para a quebra por indexador não
+        fechar com o grupo que a contém."""
         out = {}
         for i in itens:
             k = i.get(chave) or 'Não informado'
             g = out.setdefault(k, {'chave': k, 'total': 0.0, 'itens': 0})
-            g['total'] = round(g['total'] + (i['saldo'] or 0), 2)
+            g['total'] += i['saldo'] or 0
             g['itens'] += 1
+        for g in out.values():
+            g['total'] = round(g['total'], 2)
         return sorted(out.values(), key=lambda g: -g['total'])
 
     datas_val = {i['data_valorizacao'] for i in itens if i['data_valorizacao']}
