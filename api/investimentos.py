@@ -327,6 +327,21 @@ def importar():
     if not total:
         return jsonify({'ok': False, 'msg': 'Arquivo reconhecido, mas sem linhas de posição'}), 400
 
+    try:
+        _gravar_posicao(blocos, data_posicao, nome, origens)
+    except Exception as e:
+        # erro de gravação vira mensagem na tela: um 500 sem corpo deixava o
+        # usuário sem saber o que houve
+        return jsonify({'ok': False, 'msg': f'Não consegui gravar a posição: {e}'}), 500
+
+    rotulos = {'emissao_itau': 'emissão Itaú', 'acoes': 'ações',
+               'rf_corretora': 'RF corretora'}
+    detalhe = ', '.join(f'{len(i)} de {rotulos[o]}' for o, i in blocos if i)
+    return jsonify({'ok': True, 'data_posicao': data_posicao, 'total': total,
+                    'msg': f'Posição de {data_posicao}: {detalhe}'})
+
+
+def _gravar_posicao(blocos, data_posicao, nome, origens):
     with db() as conn:
         cur = conn.execute(
             'INSERT INTO carga_investimento (data_posicao, arquivo, origens) VALUES (?,?,?)',
@@ -339,6 +354,14 @@ def importar():
         for origem, itens in blocos:
             if not itens:
                 continue
+            # A memória de valorização aponta para estas linhas; sem apagá-la
+            # antes, o DELETE falha por chave estrangeira. Ela é descartável de
+            # propósito: é derivada da posição, e a posição acabou de mudar —
+            # "Atualizar Posições" a reconstrói do dado de mercado guardado.
+            conn.execute(
+                'DELETE FROM valorizacao WHERE investimento_id IN '
+                '(SELECT id FROM investimento WHERE data_posicao=? AND origem=?)',
+                (data_posicao, origem))
             conn.execute('DELETE FROM investimento WHERE data_posicao=? AND origem=?',
                          (data_posicao, origem))
             conn.executemany(
@@ -351,12 +374,6 @@ def importar():
                 ':pu,:quantidade,:valor_aplicacao,:saldo_bruto_accrual,'
                 ':saldo_liquido_accrual,:saldo_bruto_mtm,:saldo_liquido_mtm,:carga_id)',
                 [{**i, 'carga_id': carga_id} for i in itens])
-
-    rotulos = {'emissao_itau': 'emissão Itaú', 'acoes': 'ações',
-               'rf_corretora': 'RF corretora'}
-    detalhe = ', '.join(f'{len(i)} de {rotulos[o]}' for o, i in blocos if i)
-    return jsonify({'ok': True, 'data_posicao': data_posicao, 'total': total,
-                    'msg': f'Posição de {data_posicao}: {detalhe}'})
 
 
 @bp.route('/investimentos/atualizar', methods=['POST'])

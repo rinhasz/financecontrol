@@ -271,3 +271,14 @@ fase 1; e o resto do app intacto.
 Recomendação de resgate e simulação de realocação — que são o objetivo final do
 doc, e agora têm a base de que precisam: PU diário por papel, memória auditável
 e dado de mercado guardado.
+
+## Reimportar descarta a memória de valorização
+
+A posição é substituída por data e origem, e a memória de valorização aponta
+para as linhas substituídas — então ela é apagada junto. É derivada de
+propósito: "Atualizar Posições" a reconstrói a partir do dado de mercado, que
+fica guardado e **não** é rebaixado.
+
+Sem isso o `DELETE` falhava por chave estrangeira e a importação devolvia um 500
+mudo. Ver a armadilha registrada no doc 12 — é a segunda vez que uma tabela nova
+apontando para outra quebra uma importação que substitui.

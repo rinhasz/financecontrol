@@ -196,3 +196,27 @@ não falha de sistema.
 
 As rotas de escrita de catálogo (despesa e receita) já foram convertidas; as
 demais ainda usam o padrão antigo.
+
+---
+
+## Tabela nova apontando para outra quebra a importação que substitui
+
+Duas importações do app apagam e reinserem um bloco: o extrato substitui o
+período, e a posição de investimentos substitui a data. Toda vez que uma tabela
+**nova** ganha uma FK para a tabela substituída, o `DELETE` passa a falhar com
+`FOREIGN KEY constraint failed` — e só na hora em que o usuário reimporta.
+
+Aconteceu duas vezes:
+
+| tabela nova | referenciava | quebrou |
+|---|---|---|
+| `transacao.estorna_transacao_id` | `transacao` | reimportar o extrato |
+| `valorizacao.investimento_id` | `investimento` | reimportar a posição |
+
+**Ao criar tabela que referencia `transacao` ou `investimento`, procure o
+`DELETE` correspondente e decida o que fazer com o dependente** — soltar a
+referência (foi o caso do estorno, cujo vínculo real é com a despesa) ou apagar
+junto (foi o caso da memória de valorização, que é derivada e se reconstrói).
+
+O sintoma é fácil de confundir com "o arquivo está com problema", porque a
+falha aparece na importação e não na criação da tabela.
