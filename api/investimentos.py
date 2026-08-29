@@ -267,8 +267,13 @@ PARSERS = {'emissao_itau': parse_emissao_itau, 'acoes': parse_acoes,
 
 
 def _data_da_planilha(linhas: list) -> str:
-    """Data da foto, se a planilha disser. O extrato de emissão traz
-    'Saldo atualizado até'; os de corretora não trazem nada."""
+    """Data que a planilha declara em 'Saldo atualizado até'.
+
+    **Não é confiável.** O arquivo baixado em 28/08/2026 traz os saldos de 28/08
+    (a LIG prefixada soma 39.322,82, exatamente o que o site mostrava naquele
+    dia) e mesmo assim carimba 25/08/2026 em todas as linhas — o Itaú não
+    atualiza essa coluna. Fica como último recurso, atrás do nome do arquivo.
+    """
     for r in linhas[1:]:
         if len(r) > 3:
             d = _data(r[3])
@@ -277,10 +282,30 @@ def _data_da_planilha(linhas: list) -> str:
     return None
 
 
+def _data_do_nome(nome: str) -> str:
+    """Data no nome do arquivo — `POSICAO_CONSOLIDADA_RF_28082026.xlsx`.
+
+    É a fonte mais confiável que existe aqui: o internet banking carimba o nome
+    com o dia do download, que é a data real da foto, enquanto a coluna interna
+    fica para trás. Sem isso, importar a posição de 28/08 a gravaria como 25/08 e
+    **substituiria** a posição anterior, que é a chave de substituição por
+    `(data_posicao, origem)`.
+    """
+    from datetime import date as _d
+    for dd, mm, aaaa in re.findall(r'(\d{2})(\d{2})(\d{4})', nome):
+        try:
+            return _d(int(aaaa), int(mm), int(dd)).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 def ler_arquivo(nome: str, conteudo: bytes, data_informada: str = None) -> tuple:
     """`(itens, data_posicao)` a partir de um arquivo de carga."""
     ext = nome.rsplit('.', 1)[-1].lower()
-    itens, data = [], data_informada
+    # o que o usuário digitou vence tudo; depois o nome do arquivo; a coluna da
+    # planilha só entra se as duas faltarem, porque ela atrasa (ver acima)
+    itens, data = [], data_informada or _data_do_nome(nome)
 
     if ext in ('xlsx', 'xlsm'):
         abas = _linhas_xlsx(conteudo)
