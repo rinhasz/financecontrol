@@ -135,7 +135,8 @@ export function Investimentos({ active }: { active: boolean }) {
       if (!r.ok) { setErro(r.msg || 'Não consegui atualizar'); return }
       const erros = Object.entries(r.fontes?.erros ?? {})
       setMsg(`Valorizado até ${new Date(r.data_valorizacao + 'T00:00:00').toLocaleDateString('pt-BR')}`
-        + ` · ${r.dias_uteis} ${r.dias_uteis === 1 ? 'dia útil' : 'dias úteis'}`
+        + ` · ${r.dias_corridos} ${r.dias_corridos === 1 ? 'dia' : 'dias'}`
+        + ` (${r.dias_uteis_reais} ${r.dias_uteis_reais === 1 ? 'útil' : 'úteis'})`
         + (erros.length ? ` · fontes indisponíveis: ${erros.map(([k]) => k).join(', ')}` : ''))
       await load(dataSel || undefined)
     } catch (e) {

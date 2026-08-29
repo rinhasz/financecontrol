@@ -36,12 +36,27 @@ def dia_util(d: date) -> bool:
 
 def dias_uteis(ini: date, fim: date) -> list:
     """Dias úteis em (ini, fim] — o dia da posição já está valorizado nela."""
+    return [d for d in dias_corridos(ini, fim) if dia_util(d)]
+
+
+def dias_corridos(ini: date, fim: date) -> list:
+    """Todos os dias em (ini, fim].
+
+    A valorização caminha por dia corrido, não por dia útil, porque os dois
+    regimes convivem: pós-DI rende só em dia útil (base 252) e prefixado rende
+    todo dia (base 365). Caminhar só nos úteis perdia os fins de semana do
+    prefixado.
+    """
     out, d = [], ini + timedelta(days=1)
     while d <= fim:
-        if dia_util(d):
-            out.append(d)
+        out.append(d)
         d += timedelta(days=1)
     return out
+
+
+def dias_no_mes(ano: int, mes: int) -> int:
+    import calendar
+    return calendar.monthrange(ano, mes)[1]
 
 
 def dias_uteis_no_mes(ano: int, mes: int) -> int:

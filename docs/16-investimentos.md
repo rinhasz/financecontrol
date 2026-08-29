@@ -199,11 +199,22 @@ fator_dia = 1 + DI_dia * (p / 100)
 (SGS série 12) — é exatamente o `(1 + DI_anual)^(1/252) - 1` da fórmula CETIP,
 o que dispensa reanualizar. `p` é o percentual contratado.
 
-**Prefixado:** `fator_dia = (1 + taxa/100)^(1/252)`
+**Prefixado — base 365, dias corridos:** `fator_dia = (1 + taxa/100)^(1/365)`
 
-**IPCA + taxa:** `fator_dia = (1 + IPCA_mes/100)^(1/du_mes) * (1 + taxa/100)^(1/252)`
-— o primeiro termo é o VNA rendendo o IPCA pro-rata pelos dias úteis do mês, o
+**IPCA + taxa:** `fator_dia = (1 + IPCA_mes/100)^(1/dias_mes) * (1 + taxa/100)^(1/365)`
+— o primeiro termo é o VNA rendendo o IPCA pro-rata pelos dias do mês, o
 segundo é o juro real.
+
+> **As duas bases convivem, e por isso a valorização caminha por dia corrido.**
+> Pós-DI rende só em dia útil (252); prefixado rende todo dia, inclusive fim de
+> semana (365). Caminhar só nos dias úteis perdia os sábados e domingos do
+> prefixado.
+>
+> A base 365 do prefixado foi **descoberta conferindo com o extrato**, não
+> assumida: com 252, uma LCI de R$ 61,9 mil ficava R$ 28,86 acima do banco e uma
+> LIG de R$ 39,3 mil, R$ 17,09 acima. Os fatores implícitos do banco davam
+> exatamente 2,98 dias em base 365 — ou seja, os 3 dias corridos entre as duas
+> datas. Com 365, os desvios caem para R$ 0,47 e R$ 0,16.
 
 **DI + spread** (debênture, CRA): `fator_dia = (1 + DI_dia) * (1 + taxa/100)^(1/252)`
 
@@ -257,8 +268,16 @@ visível.
 
 **VNA do IPCA.** A ANBIMA corrige o VNA por aniversário no dia 15 e usa
 projeção para o mês corrente; aqui usa-se o último IPCA divulgado, distribuído
-pro-rata pelos dias úteis. Para janelas de poucos dias — o caso desta tela — a
-diferença é de centavos; para janelas longas, degrada.
+pro-rata pelos dias do mês.
+
+**Papel indexado a IPCA é acumulado, não marcado a mercado.** Uma LIG IPCA+ com
+vencimento em 2035 tem duration alta, e o banco a marca pela curva de juro real
+— conferindo em 28/08, o banco mostrava R$ 90.048,25 contra R$ 90.072,24 de
+accrual. Note que o valor do banco fica **abaixo** até do juro real puro sem
+inflação nenhuma (R$ 90.066,15), o que só se explica por marcação. Reproduzir
+isso exige uma fonte de preço para LIG, que não existe pública. O detalhe da
+linha diz "accrual, não marcação a mercado" para o desvio não passar por número
+exato.
 
 **Sem IR/IOF.** A valorização é bruta. O líquido depende de prazo e de fato
 gerador, e entra quando a fase de resgate precisar comparar alternativas.
@@ -277,7 +296,21 @@ valorizada até 28/08 — 3 dias úteis):
 | LIG IPCA | +0,06% | `ipca` |
 | ações | movimento real de mercado | `mercado` |
 
-**Conferência contra o extrato do banco.** Partindo da posição de 25/08 e
+**Conferência por grupo, contra o site do banco em 28/08:**
+
+| grupo | banco | calculado | desvio |
+|---|---:|---:|---:|
+| LCI DI | 647.071,19 | 647.071,21 | **+0,02** |
+| LIG DI | 913.775,86 | 913.775,87 | **+0,01** |
+| LCI PRE | 61.933,25 | 61.933,72 | **+0,47** |
+| LIG PRE | 39.322,82 | 39.322,98 | **+0,16** |
+| LIG IPCA | 90.048,25 | 90.072,24 | +23,99 |
+
+Desvio absoluto total: **R$ 24,65** sobre R$ 1,75 milhão — e R$ 24,00 disso é o
+único papel marcado a mercado pelo banco. Antes da correção da base do
+prefixado, era R$ 86,06.
+
+**Conferência papel a papel.** Partindo da posição de 25/08 e
 valorizando 3 dias úteis a 94% do CDI:
 
 | papel | posição 25/08 | calculado | banco |

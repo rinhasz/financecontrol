@@ -72,11 +72,27 @@ METODO_LABEL = {
 
 
 def _potencia_252(taxa_aa: float) -> float:
+    """Fator de um dia útil, base 252 — convenção dos pós-fixados em CDI."""
     return (1 + taxa_aa / 100) ** (1 / 252)
 
 
-def fator_do_dia(inv: dict, d: date, conn) -> tuple:
-    """`(fator, metodo, detalhe)` de um papel num dia útil.
+def _potencia_365(taxa_aa: float) -> float:
+    """Fator de um dia corrido, base 365 — convenção dos prefixados e do juro
+    real dos indexados a IPCA nestes produtos.
+
+    Conferido contra o extrato: LCI e LIG prefixadas rendem exatamente
+    `(1 + taxa)^(dias_corridos/365)`. Com base 252 o cálculo ficava R$ 28,86
+    acima do banco numa LCI de R$ 61,9 mil; com 365, R$ 0,47.
+    """
+    return (1 + taxa_aa / 100) ** (1 / 365)
+
+
+def fator_do_dia(inv: dict, d: date, conn, util: bool) -> tuple:
+    """`(fator, metodo, detalhe)` de um papel num dia.
+
+    `util` diz se é dia útil: o pós-DI só rende em dia útil (base 252), o
+    prefixado rende todo dia (base 365). É a razão de a valorização caminhar
+    por dia corrido e decidir aqui.
 
     `fator = None` significa "não deu para valorizar hoje" — e o detalhe diz o
     motivo, que é o que a tela mostra em vez de um número inventado.
@@ -85,6 +101,8 @@ def fator_do_dia(inv: dict, d: date, conn) -> tuple:
     indexador = (inv.get('indexador') or '').upper()
 
     if indexador == 'DI':
+        if not util:
+            return 1.0, 'di', 'fim de semana ou feriado — CDI não rende'
         di, ref = _cdi_vigente(conn, d)
         if di is None:
             return None, 'parado', f'sem CDI publicado até {iso}'
@@ -107,17 +125,21 @@ def fator_do_dia(inv: dict, d: date, conn) -> tuple:
         ipca, ref = _ipca_vigente(conn, d)
         if ipca is None:
             return None, 'parado', 'sem IPCA divulgado'
-        du = mercado.dias_uteis_no_mes(d.year, d.month) or 21
-        fator_vna = (1 + ipca / 100) ** (1 / du)
+        dias = mercado.dias_no_mes(d.year, d.month)
+        fator_vna = (1 + ipca / 100) ** (1 / dias)
         taxa = inv.get('taxa') or 0
-        return fator_vna * _potencia_252(taxa), 'ipca', \
-            f'IPCA {ipca}% ({ref}) pro-rata em {du} du + {taxa}% a.a.'
+        # accrual, não marcação a mercado: um IPCA+ longo tem duration alta e o
+        # banco marca a curva, então a divergência pode ser de dezenas de reais.
+        # Fica dito no detalhe em vez de passar por número exato.
+        return fator_vna * _potencia_365(taxa), 'ipca', \
+            (f'IPCA {ipca}% ({ref}) pro-rata em {dias} dias + {taxa}% a.a. em base 365'
+             ' · accrual, não marcação a mercado')
 
     if indexador == 'PRE' or (indexador == '' and inv.get('taxa')):
         taxa = inv.get('taxa')
         if not taxa:
             return None, 'parado', 'prefixado sem taxa cadastrada'
-        return _potencia_252(taxa), 'pre', f'{taxa}% a.a. em base 252'
+        return _potencia_365(taxa), 'pre', f'{taxa}% a.a. em base 365 (dias corridos)'
 
     return None, 'parado', 'sem indexador cadastrado'
 
@@ -175,7 +197,7 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
     """Caminha da posição até hoje, gravando a memória de cálculo."""
     hoje = ate or date.today()
     d0 = datetime.strptime(data_posicao, '%Y-%m-%d').date()
-    dias = mercado.dias_uteis(d0, hoje)
+    dias = mercado.dias_corridos(d0, hoje)
 
     itens = [dict(r) for r in conn.execute(
         'SELECT * FROM investimento WHERE data_posicao=?', (data_posicao,))]
@@ -202,6 +224,7 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
         andou = False
 
         for d in dias:
+            util = mercado.dia_util(d)
             pu_mercado, metodo, detalhe = _pu_de_mercado(conn, inv, d)
             if metodo in ('mercado', 'anbima'):
                 if pu_mercado is None:
@@ -214,7 +237,7 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
                 fator = pu_mercado / pu if pu else 1.0
                 pu_novo = pu_mercado
             else:
-                fator, metodo, detalhe = fator_do_dia(inv, d, conn)
+                fator, metodo, detalhe = fator_do_dia(inv, d, conn, util)
                 if fator is None:
                     conn.execute(
                         'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
@@ -245,6 +268,8 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
         (data_posicao,)).fetchone()['d']
     return {'ok': True, 'data_posicao': data_posicao, 'data_valorizacao': ultima,
             'ate': hoje.isoformat(), 'dias_uteis': len(dias),
+            'dias_corridos': len(dias),
+            'dias_uteis_reais': sum(1 for d in dias if mercado.dia_util(d)),
             'valorizados': valorizados, 'parados': parados, 'fontes': fontes}
 
 
