@@ -571,6 +571,31 @@ def periodo_competencia(mes_ref: str, dia_corte: int):
     return ini.isoformat(), fim.isoformat()
 
 
+def competencia_da_data(data: str, dia_corte: int) -> str:
+    """Em que mês de competência cai uma data do extrato — o inverso de
+    `periodo_competencia`.
+
+    Existe para a importação não precisar perguntar o mês: a data de cada
+    lançamento já diz a que competência ele pertence, e um mesmo extrato
+    costuma cobrir mais de uma — sobretudo porque os **lançamentos futuros**
+    entram junto e caem, por definição, na competência seguinte.
+
+    A regra é a mesma dos dois lados: a competência do mês seguinte abre no
+    primeiro dia útil <= dia 26. Uma data a partir daí já é do mês que vem.
+    """
+    import calendar
+    from datetime import date
+
+    d = date.fromisoformat(data)
+    abertura = dia_util_anterior(
+        date(d.year, d.month, min(dia_corte, calendar.monthrange(d.year, d.month)[1])))
+    if d >= abertura:
+        ano, mes = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+    else:
+        ano, mes = d.year, d.month
+    return f'{ano}-{mes:02d}'
+
+
 def parse_number(s: str) -> float:
     """Parse both US (1,234.56) and BR (1.234,56) number formats."""
     if not s:

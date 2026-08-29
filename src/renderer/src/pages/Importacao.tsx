@@ -1,11 +1,14 @@
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { api } from '../lib/api'
-import { cn, formatBRL } from '../lib/utils'
+import { cn, formatBRL, mesRefLabel } from '../lib/utils'
 import { DespesaPicker } from '../components/DespesaPicker'
 
 type Step = 'selecionar' | 'revisar' | 'concluido'
 
 interface ParsedTx { data: string; descricao: string; valor: number }
+
+/** Uma competência tocada pelo extrato, com quanto dela é lançamento futuro. */
+interface MesCoberto { mes: string; total: number; agendados: number }
 
 type Natureza = 'despesa' | 'receita'
 
@@ -121,6 +124,35 @@ const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
 /** Cabeçalho das três partes da revisão. A ordem é fixa e numerada de
  *  propósito: casadas, depois o que faltou de cada lado. */
+/** As competências que o extrato tocou, para bater uma de cada vez.
+ *
+ *  Não é um seletor de mês: só aparecem os meses que o arquivo realmente cobre,
+ *  deduzidos da data de cada lançamento. Vêm mais de um quase sempre, porque os
+ *  lançamentos futuros do extrato caem na competência seguinte — e sem
+ *  mostrá-los aqui esses agendamentos ficariam por associar sem ninguém notar. */
+function MesesCobertos({ meses, atual, onEscolher, disabled }: {
+  meses: MesCoberto[]; atual: string; onEscolher: (m: string) => void; disabled: boolean
+}) {
+  if (meses.length < 2) return null
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs text-zinc-500">O extrato cobre:</span>
+      {meses.map(m => (
+        <button key={m.mes} onClick={() => onEscolher(m.mes)} disabled={disabled}
+          className={cn('px-2.5 py-1 rounded-md text-xs border transition-colors disabled:opacity-40',
+            m.mes === atual
+              ? 'bg-emerald-600/10 border-emerald-600 text-emerald-400'
+              : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+          {mesRefLabel(m.mes)}
+          <span className="text-zinc-500 ml-1 tabular-nums">
+            {m.total}{m.agendados > 0 ? ` · ${m.agendados} agendados` : ''}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function Secao({ n, titulo, qtd, ajuda }: { n: number; titulo: string; qtd: number; ajuda: string }) {
   return (
     <div className="mb-2">
@@ -139,10 +171,13 @@ export function Importacao({ active }: { active: boolean }) {
   const [banco, setBanco] = useState('Itaú')
   const [file, setFile] = useState<File | null>(null)
   const [transacoes, setTransacoes] = useState<ParsedTx[]>([])
-  const [mesRef, setMesRef] = useState(() => {
-    const n = new Date()
-    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
-  })
+  // O mês não é escolhido, é deduzido: a data de cada lançamento já diz em que
+  // competência ele cai (regra do dia 26, no servidor). Vazio significa "decida
+  // você" — o batimento devolve qual mês usou, e é esse que fica aqui.
+  const [mesRef, setMesRef] = useState('')
+  // Competências que o extrato importado cobre. São quase sempre mais de uma:
+  // os lançamentos futuros vêm junto e caem no mês seguinte.
+  const [meses, setMeses] = useState<MesCoberto[]>([])
   // O batimento devolve os dois lados de uma vez; a tela mostra um por vez.
   const [resultado, setResultado] = useState<Record<Natureza, LadoBatimento> | null>(null)
   const [natureza, setNatureza] = useState<Natureza>('despesa')
@@ -207,9 +242,17 @@ export function Importacao({ active }: { active: boolean }) {
     setLoading(true)
     setMsg('')
     try {
-      const res = await api.importacao.enviar(file, banco, mesRef)
+      const res = await api.importacao.enviar(file, banco)
       if (res.ok) {
         setTransacoes(res.transacoes)
+        const cobertos: MesCoberto[] = res.meses ?? []
+        setMeses(cobertos)
+        // Começa pelo mês com mais lançamentos já efetivados — é o mês que o
+        // extrato veio fechar. Os outros quase sempre são só os agendados,
+        // e ficam ao lado para bater depois.
+        const principal = [...cobertos].sort(
+          (a, b) => (b.total - b.agendados) - (a.total - a.agendados))[0]
+        setMesRef(principal?.mes ?? '')
         setMsg(res.msg)
         setStep('revisar')
       } else {
@@ -222,11 +265,14 @@ export function Importacao({ active }: { active: boolean }) {
     }
   }
 
-  async function rodarBatimento() {
+  /** `mes` vazio deixa o servidor decidir pela competência de hoje. Ele sempre
+   *  devolve qual usou, e é esse que passa a valer na tela. */
+  async function rodarBatimento(mes = mesRef) {
     setLoading(true)
     try {
-      const [res] = await Promise.all([api.batimento.rodar(mesRef), carregarCatalogos()])
+      const [res] = await Promise.all([api.batimento.rodar(mes), carregarCatalogos()])
       setResultado(res)
+      if (res.mes_ref) setMesRef(res.mes_ref)
       setConfirmado(null)
       setStep('concluido')
     } finally {
@@ -240,6 +286,8 @@ export function Importacao({ active }: { active: boolean }) {
     setFile(null)
     setMsg('')
     setTransacoes([])
+    setMeses([])
+    setMesRef('')
     setResultado(null)
     setConfirmado(null)
     setErroConfirmar('')
@@ -255,6 +303,18 @@ export function Importacao({ active }: { active: boolean }) {
    *  entraram na base no momento da importação — cancelar aqui não desfaz
    *  isso, e o texto do botão não promete que desfaça. Para trocar o que foi
    *  importado, é importar de novo: a importação substitui o período. */
+  /** Trocar a competência revisada. Re-roda o batimento, então o que está
+   *  pendente na tela — que é sempre do mês visível — se perde. */
+  function trocarMes(m: string) {
+    if (m === mesRef) return
+    if (totalPendente > 0 && !window.confirm(
+      `Ir para ${mesRefLabel(m)} descarta ${totalPendente} ` +
+      `${totalPendente === 1 ? 'associação revisada' : 'associações revisadas'} de ${mesRefLabel(mesRef)}.\n\n` +
+      'Confirme antes de trocar, se quiser guardá-las.')) return
+    setMesRef(m)
+    rodarBatimento(m)
+  }
+
   function cancelar() {
     if (totalPendente > 0 && !window.confirm(
       `Descartar ${totalPendente} ${totalPendente === 1 ? 'associação revisada' : 'associações revisadas'}?\n\n` +
@@ -598,12 +658,6 @@ export function Importacao({ active }: { active: boolean }) {
             </div>
 
             <div>
-              <label className="text-sm text-zinc-400 block mb-2">Mês de referência</label>
-              <input type="month" value={mesRef} onChange={e => setMesRef(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
-            </div>
-
-            <div>
               <label className="text-sm text-zinc-400 block mb-2">Arquivo (.ofx, .csv, .xls ou .xlsx)</label>
               <input ref={fileRef} type="file" accept=".ofx,.csv,.txt,.xls,.xlsx,.xlsm" className="hidden"
                 onChange={e => setFile(e.target.files?.[0] ?? null)} />
@@ -630,9 +684,9 @@ export function Importacao({ active }: { active: boolean }) {
               <p className="text-sm text-zinc-500 mb-2">
                 Já importou o extrato e só quer revisar as associações?
               </p>
-              <button onClick={rodarBatimento} disabled={loading}
+              <button onClick={() => rodarBatimento('')} disabled={loading}
                 className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-100 transition-colors">
-                {loading ? 'Batendo...' : `Rebater ${mesRef} sem importar`}
+                {loading ? 'Batendo...' : 'Rebater o mês atual sem importar'}
               </button>
             </div>
           </div>
@@ -649,14 +703,18 @@ export function Importacao({ active }: { active: boolean }) {
                 <p className="text-xs text-zinc-500 mt-0.5">
                   {transacoes.filter(x => x.valor < 0).length} saídas ·{' '}
                   {transacoes.filter(x => x.valor > 0).length} entradas
+                  {mesRef && <> · vai bater <strong className="text-zinc-300">{mesRefLabel(mesRef)}</strong></>}
                 </p>
+                <div className="mt-2">
+                  <MesesCobertos meses={meses} atual={mesRef} onEscolher={setMesRef} disabled={loading} />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={cancelar} disabled={loading}
                   className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-400 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-200 transition-colors">
                   Cancelar
                 </button>
-                <button onClick={rodarBatimento} disabled={loading}
+                <button onClick={() => rodarBatimento()} disabled={loading}
                   className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                   {loading ? 'Batendo...' : 'Rodar Batimento Automático'}
                 </button>
@@ -692,6 +750,16 @@ export function Importacao({ active }: { active: boolean }) {
         {/* Step 3 — concluído */}
         {step === 'concluido' && resultado && lado && (
           <div className="space-y-6 max-w-4xl">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="text-sm font-semibold text-zinc-200">
+                Batimento de {mesRefLabel(mesRef)}
+              </h2>
+              {/* trocar de mês re-roda o batimento: os pares pendentes são do
+                  mês que está na tela e não sobrevivem à troca */}
+              <MesesCobertos meses={meses} atual={mesRef} onEscolher={trocarMes}
+                disabled={loading || confirmando} />
+            </div>
+
             {/* Saídas e entradas são revisadas na mesma tela, uma de cada vez.
                 O contador de pendências fica no botão, que grava as duas. */}
             <div className="flex rounded-md border border-zinc-700 overflow-hidden w-fit">
@@ -1056,7 +1124,7 @@ export function Importacao({ active }: { active: boolean }) {
                   Depois, vá para <strong className="text-zinc-300">Mês Atual</strong> para revisar o que ficou em aberto.
                 </p>
                 <div className="flex items-center gap-3">
-                  <button onClick={rodarBatimento} disabled={loading}
+                  <button onClick={() => rodarBatimento()} disabled={loading}
                     className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
                     {loading ? 'Batendo...' : 'Rebater de novo'}
                   </button>

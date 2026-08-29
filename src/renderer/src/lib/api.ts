@@ -105,15 +105,17 @@ export const api = {
     list: () => get('/api/categorias')
   },
   importacao: {
-    enviar: (file: File, banco: string, mesRef: string) => {
+    // sem mês: a competência de cada lançamento sai da data dele, no servidor,
+    // e a resposta traz em `meses` quais o extrato cobriu
+    enviar: (file: File, banco: string) => {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('banco', banco)
-      fd.append('mes_ref', mesRef)
       return fetch('/api/importacao', { method: 'POST', body: fd }).then(r => r.json())
     }
   },
   batimento: {
+    // mesRef vazio deixa o servidor usar a competência de hoje pela regra do corte
     rodar: (mesRef: string) => post('/api/batimento', { mes_ref: mesRef }),
     confirmar: (mesRef: string, pares: {
       natureza: 'despesa' | 'receita'; transacao_id: number

@@ -5,7 +5,7 @@ import os
 from datetime import date
 from flask import Blueprint, jsonify, request
 from .db import (get_db, get_config_value, periodo_competencia,
-                 padrao_descricao, registrar_regra)
+                 competencia_da_data, padrao_descricao, registrar_regra)
 from . import motor_batimento as motor
 
 DICIONARIO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', '07-dicionario-despesas.md')
@@ -314,7 +314,8 @@ def parse_csv_content(content: str):
 def importar():
     file = request.files.get('file')
     banco = request.form.get('banco', 'Desconhecido')
-    mes_ref = request.form.get('mes_ref', '')
+    # não se pergunta o mês: a data de cada lançamento já diz a competência
+    # dele (`competencia_da_data`), e um extrato costuma cobrir mais de uma.
     if not file:
         return jsonify({'ok': False, 'msg': 'Nenhum arquivo enviado'}), 400
 
@@ -489,8 +490,22 @@ def importar():
     depois = Counter((t['data'], t['descricao'], t['valor']) for _, t in novos)
     removidas = sum((antes - depois).values())
 
+    # Em que competências este extrato cai. Quase sempre são duas ou mais: os
+    # lançamentos futuros vêm junto e, por definição, são do mês seguinte.
+    # Quem revisa precisa saber quais, para não deixar um mês por bater.
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
+
     conn.commit()
     conn.close()
+
+    contagem = {}
+    for t in txs:
+        m = competencia_da_data(t['data'], dia_corte)
+        agendada = _situacao(t) == 'agendada'
+        c = contagem.setdefault(m, {'mes': m, 'total': 0, 'agendados': 0})
+        c['total'] += 1
+        c['agendados'] += 1 if agendada else 0
+    meses = [contagem[m] for m in sorted(contagem)]
 
     msg = f'{len(txs)} lançamentos do extrato ({ini} a {fim})'
     if saldo_valor is not None:
@@ -502,7 +517,8 @@ def importar():
     if orfaos:
         msg += f', {orfaos} lançamento(s) voltaram a ficar em aberto'
 
-    return jsonify({'ok': True, 'msg': msg, 'transacoes': txs, 'import_id': import_id})
+    return jsonify({'ok': True, 'msg': msg, 'transacoes': txs, 'import_id': import_id,
+                    'meses': meses})
 
 
 @bp.route('/batimento', methods=['POST'])
@@ -520,6 +536,11 @@ def rodar_batimento():
 
     conn = get_db()
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
+    # Sem mês pedido, vale a competência de hoje — calculada pela mesma regra do
+    # corte, e não pelo mês do calendário. Nos dias 26 em diante os dois
+    # divergem, e é justamente aí que errar o mês faz o batimento vir vazio.
+    if not mes_ref:
+        mes_ref = competencia_da_data(date.today().isoformat(), dia_corte)
     ini, fim = periodo_competencia(mes_ref, dia_corte)
 
     # Abre o mês antes de casar, para a seção "não encontrei" ficar completa
@@ -534,6 +555,7 @@ def rodar_batimento():
 
     return jsonify({
         'ok': True,
+        'mes_ref': mes_ref,          # o mês efetivamente batido, que pode ter sido deduzido aqui
         'periodo': {'ini': ini, 'fim': fim},
         **resultado,
     })

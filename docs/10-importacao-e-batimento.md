@@ -41,6 +41,38 @@ ingenuamente produziria uma data com dia 0.
 A tela Mês Atual **mostra o intervalo calculado** ao lado do dia do salário: a
 regra de antecipação é invisível demais para ficar só no código.
 
+### A competência é deduzida da data, nunca perguntada
+
+`competencia_da_data(data, dia_corte)` é a inversa de `periodo_competencia`: dada
+uma data do extrato, diz em que competência ela cai. A regra é a mesma dos dois
+lados — a competência do mês seguinte abre no primeiro dia útil ≤ dia 26, e uma
+data a partir daí já pertence ao mês que vem.
+
+**Verificada por exaustão:** para todos os dias de 2024 a 2028, a competência que
+esta função devolve contém a data dentro da janela que `periodo_competencia`
+calcula para ela. Zero inconsistências — nenhum dia fica de fora nem em duas
+competências.
+
+Por causa dela, a importação **não pergunta o mês**. Não deveria mesmo: o
+parâmetro `mes_ref` que o endpoint recebia era lido e nunca usado, porque a
+substituição de período sempre trabalhou pelas datas do próprio arquivo. Pior,
+um extrato **cobre mais de uma competência quase sempre** — os lançamentos
+futuros vêm junto e caem, por definição, no mês seguinte. Um extrato de agosto
+com agendamentos até outubro toca quatro competências; escolher uma no combo
+deixava as outras por bater, em silêncio.
+
+A importação agora devolve `meses`: as competências que o arquivo tocou, cada
+uma com o total de lançamentos e quantos são agendados. A tela mostra essas
+competências como opções — **não um seletor de mês livre**, só os meses que o
+arquivo realmente cobre — e começa pela que tem mais lançamentos já efetivados,
+que é o mês que o extrato veio fechar.
+
+O `/api/batimento` sem `mes_ref` também deduz: usa a competência de **hoje** por
+esta regra, e devolve qual usou. Isso importa mais do que parece — em 29/08/2026
+a competência corrente é **setembro** (26/08 a 24/09), enquanto o mês do
+calendário diria agosto. Do dia 26 em diante os dois divergem, e é exatamente aí
+que bater o mês errado devolve uma tela vazia.
+
 ---
 
 ## Formatos de extrato
