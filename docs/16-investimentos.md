@@ -372,34 +372,55 @@ valor do banco ficar abaixo do juro real puro; a explicação é mais simples, o
 IPCA de agosto/2026 era **negativo**, e o VNA caiu. Não faz falta uma fonte de
 preço para LIG.
 
-## O CRA de R$ 188 que continua sem explicação
+## De onde vem o PU do CRA: curva de NTN-B, não mercado de CRA
 
-Único desvio grande que sobra na conferência de 28/08: o CRA Dexco IPCA+6,05%
-2033 fez **+0,221% em 3 dias** (R$ 98.819,46 → R$ 99.037,66) contra **+0,031%**
-de carrego. R$ 218,20 de movimento onde caberiam R$ 30,49.
+Único desvio grande na conferência de 28/08: o CRA Dexco IPCA+6,05% 2033 fez
+**+0,221% em 3 dias** (R$ 98.819,46 → R$ 99.037,66) contra **+0,031%** de
+carrego. R$ 218,20 onde caberiam R$ 30,49.
 
-Chamar isso de "marcação a mercado" foi uma inferência por exclusão, e ela **não
-resiste ao teste**. Puxando os 145 CRA IPCA+ que a ANBIMA precificou nas duas
-datas, a variação de PU de 25/08 para 28/08 foi:
+O **Manual de Marcação a Mercado do Itaú Securities Services** (público, exigência
+do código ANBIMA de administração fiduciária) diz exatamente como o papel é
+marcado — p. 38, "CRI / CRA / ... – Pós-fixado em IPCA":
 
-| medida | variação de PU |
-|---|---:|
-| mediana geral | +0,027% |
-| mediana com duration 1.200–1.800 du | -0,176% |
-| **Itaú, no nosso CRA** | **+0,221%** |
+> "Os títulos pós fixados em IPCA são títulos marcados a mercado considerando-se
+> três componentes principais para a taxa de Marcação a Mercado: projeção de taxa
+> IPCA, Taxa de Mercado e Spread de Crédito.
+> A fonte primária para a projeção da taxa IPCA é a ANBIMA;
+> **A fonte primária para o Cupom de IPCA é a curva proveniente das NTN-Bs**;
+> A fonte do spread de crédito [...] é o Comitê de Precificação da WMS."
 
-Ou seja: o setor andou o carrego, e este papel andou sete vezes isso. Não é
-movimento de curva. As hipóteses que sobram, nenhuma verificável de fora:
+A taxa de mercado é a **curva de NTN-B**, não o mercado secundário de CRA. Com o
+spread de crédito fixo entre revisões do Comitê, o PU segue a NTN-B diariamente.
 
-- **preço interno do Itaú** — papel ilíquido fora da cobertura ANBIMA, marcado
-  pela curva de crédito do próprio banco;
-- **o valor de 25/08 é que estava defasado**, e o de 28/08 recompõe — coerente
-  com a coluna "PREÇO UNITÁRIO" congelada (ver doc 12), mas sem terceiro ponto
-  no tempo não dá para separar de uma reprecificação real.
+**A conta fecha.** A curva de juro real caiu de 25/08 para 28/08 (Tesouro Direto,
+Taxa Compra):
 
-Fica registrado como **não explicado**, e não como marcação. O desvio zera na
-próxima importação de qualquer forma, porque a valorização parte do saldo
-importado.
+| vencimento | 25/08 | 28/08 | Δ |
+|---|---:|---:|---:|
+| 15/08/2032 | 7,97% | 7,93% | −4,0 bps |
+| 15/05/2035 | 7,82% | 7,76% | −6,0 bps |
+| interpolado p/ 17/10/2033 | | | **−4,6 bps** |
+
+Decompondo o movimento do Itaú: +0,221% total − 0,031% de carrego = **+0,190% de
+preço puro**. Contra −4,6 bps, isso implica **duration de 4,13 anos** — plausível
+para um CRA de 2033 com amortização (o CRA da JBS vencendo 15/09/2033, o mais
+parecido na base ANBIMA, tem duration de 1.216 du ≈ 4,8 anos). Refazendo:
+`98.819,46 × carrego × (1 + 4,13 × 0,00046)` = **R$ 99.037,75**, contra
+R$ 99.037,66 do banco — R$ 0,09.
+
+**Por que o teste contra o mercado de CRA deu errado.** Antes eu havia medido os
+145 CRA IPCA+ precificados pela ANBIMA e achado mediana de +0,027%, concluindo que
+"não é movimento de curva". O erro foi a referência: os preços de CRA da ANBIMA
+saem de **taxas indicativas de negócios observados**, não da curva. No mesmo
+período o CRA da JBS teve a taxa indicativa **subindo** 10,8 bps (8,5061% →
+8,6145%) enquanto a NTN-B **caía** 4 a 6 bps — os dois mercados andaram em
+direções opostas nesses três dias. Comparar contra o setor de CRA testava a
+hipótese errada.
+
+**O que falta para reproduzir.** Ligar isso exigiria, por papel, o cronograma de
+amortização (para calcular duration) e o spread de crédito implícito na
+importação. Nenhum dos dois vem no arquivo de posição. Enquanto isso o papel
+segue valorizado por accrual, com o desvio zerando na importação seguinte.
 
 **Sem IR/IOF.** A valorização é bruta. O líquido depende de prazo e de fato
 gerador, e entra quando a fase de resgate precisar comparar alternativas.
