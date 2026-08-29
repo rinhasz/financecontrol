@@ -359,6 +359,21 @@ def importar():
                     'msg': f'Posição de {data_posicao}: {detalhe}'})
 
 
+@bp.route('/investimentos/atualizar', methods=['POST'])
+def atualizar_posicoes():
+    """Valoriza a última posição até hoje, dia útil a dia útil (doc 16 §fase 2)."""
+    from . import valorizacao
+    res = valorizacao.atualizar()
+    return jsonify(res), (200 if res.get('ok') else 400)
+
+
+@bp.route('/investimentos/<int:iid>/memoria')
+def memoria_calculo(iid):
+    """Passo a passo de como o saldo daquele papel chegou onde chegou."""
+    from . import valorizacao
+    return jsonify(valorizacao.memoria(iid))
+
+
 @bp.route('/investimentos/datas')
 def datas():
     conn = get_db()
@@ -386,8 +401,12 @@ def listar():
         conn.close()
         return jsonify({'data_posicao': None, 'itens': [], 'consolidado': {}, 'total': 0})
 
+    # `saldo` é o valorizado quando existe: é a posição de hoje, que é o que a
+    # tela deve mostrar. `saldo_posicao` fica ao lado para dar para comparar com
+    # o que o banco informou na data da foto.
     rows = conn.execute(
-        'SELECT *, COALESCE(saldo_bruto_mtm, saldo_bruto_accrual) as saldo '
+        'SELECT *, COALESCE(saldo_bruto_mtm, saldo_bruto_accrual) as saldo_posicao, '
+        'COALESCE(saldo_valorizado, saldo_bruto_mtm, saldo_bruto_accrual) as saldo '
         'FROM investimento WHERE data_posicao=? ORDER BY origem, produto, ativo',
         (data,)).fetchall()
     itens = [dict(r) for r in rows]
@@ -402,10 +421,13 @@ def listar():
             g['itens'] += 1
         return sorted(out.values(), key=lambda g: -g['total'])
 
+    datas_val = {i['data_valorizacao'] for i in itens if i['data_valorizacao']}
     return jsonify({
         'data_posicao': data,
+        'data_valorizacao': max(datas_val) if datas_val else None,
         'itens': itens,
         'total': round(sum(i['saldo'] or 0 for i in itens), 2),
+        'total_posicao': round(sum(i['saldo_posicao'] or 0 for i in itens), 2),
         'consolidado': {
             'produto': agrupar('produto'),
             'indexador': agrupar('indexador'),

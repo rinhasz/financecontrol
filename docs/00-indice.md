@@ -32,7 +32,7 @@ batimento contra o extrato bancário.
 | 13 | [Histórico de pedidos](13-historico-de-pedidos.md) | O que foi pedido, o que foi feito e por quê |
 | 14 | [Receitas e esporádicas](14-receitas-e-esporadicas.md) | Entradas, fixa vs esporádica, resgates e estorno |
 | 15 | [Projeção e resgate](15-projecao-e-resgate.md) | pago/agendado/projetado, tipos de projeção, calculadora |
-| 16 | [Investimentos](16-investimentos.md) | Posição consolidada e detalhada (fase 1) |
+| 16 | [Investimentos](16-investimentos.md) | Posição (fase 1) e valorização diária (fase 2) |
 
 Os docs 07 e 09 são **escritos pelo próprio app** conforme o usuário corrige
 batimentos e associa remetentes — não editar à mão.

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, Fragment } from 'react'
 import { api } from '../lib/api'
 import { cn, formatBRL } from '../lib/utils'
 
@@ -24,14 +24,38 @@ interface Investimento {
   saldo_bruto_mtm: number | null
   saldo_liquido_mtm: number | null
   saldo: number | null
+  // fase 2: o que a valorização diária produziu
+  saldo_posicao: number | null
+  data_valorizacao: string | null
+  pu_valorizado: number | null
+  metodo_valorizacao: string | null
+  detalhe_valorizacao: string | null
+}
+
+/** Um passo da valorização: como o PU andou naquele dia útil. */
+interface PassoMemoria {
+  data: string
+  pu_anterior: number
+  fator: number
+  pu: number
+  saldo: number
+  metodo: string
+  detalhe: string
+}
+
+const METODO_LABEL: Record<string, string> = {
+  di: '% do CDI', pre: 'prefixado', ipca: 'IPCA + juro real',
+  mercado: 'fechamento', anbima: 'PU ANBIMA', parado: 'sem valorizar'
 }
 
 interface Grupo { chave: string; total: number; itens: number }
 
 interface Posicao {
   data_posicao: string | null
+  data_valorizacao: string | null
   itens: Investimento[]
   total: number
+  total_posicao: number
   consolidado: Record<Agrupamento, Grupo[]>
 }
 
@@ -65,8 +89,10 @@ export function Investimentos({ active }: { active: boolean }) {
   const [dataSel, setDataSel] = useState('')
   const [agrupamento, setAgrupamento] = useState<Agrupamento>('produto')
   const [loading, setLoading] = useState(false)
+  const [atualizando, setAtualizando] = useState(false)
   const [msg, setMsg] = useState('')
   const [erro, setErro] = useState('')
+  const [memoria, setMemoria] = useState<{ id: number; passos: PassoMemoria[] } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (d?: string) => {
@@ -101,8 +127,34 @@ export function Investimentos({ active }: { active: boolean }) {
     }
   }
 
+  async function atualizarPosicoes() {
+    setErro(''); setMsg(''); setAtualizando(true)
+    try {
+      const r = await api.investimentos.atualizar()
+      if (!r.ok) { setErro(r.msg || 'Não consegui atualizar'); return }
+      const erros = Object.entries(r.fontes?.erros ?? {})
+      setMsg(`Valorizado até ${new Date(r.data_valorizacao + 'T00:00:00').toLocaleDateString('pt-BR')}`
+        + ` · ${r.dias_uteis} ${r.dias_uteis === 1 ? 'dia útil' : 'dias úteis'}`
+        + (erros.length ? ` · fontes indisponíveis: ${erros.map(([k]) => k).join(', ')}` : ''))
+      await load(dataSel || undefined)
+    } catch (e) {
+      setErro(String(e))
+    } finally {
+      setAtualizando(false)
+    }
+  }
+
+  /** A memória é o que torna o número auditável — sem ela, "rendeu 0,10%" é
+   *  um ato de fé. Buscada sob demanda: são N papéis × N dias. */
+  async function verMemoria(id: number) {
+    if (memoria?.id === id) { setMemoria(null); return }
+    setMemoria({ id, passos: await api.investimentos.memoria(id) })
+  }
+
   const grupos = pos?.consolidado[agrupamento] ?? []
   const total = pos?.total ?? 0
+  const totalPosicao = pos?.total_posicao ?? 0
+  const variacao = totalPosicao ? total - totalPosicao : 0
 
   return (
     <div className="flex flex-col h-full pt-3">
@@ -127,10 +179,16 @@ export function Investimentos({ active }: { active: boolean }) {
           )}
           <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.xls" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) importar(f) }} />
-          <button onClick={() => fileRef.current?.click()} disabled={loading}
-            className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+          <button onClick={() => fileRef.current?.click()} disabled={loading || atualizando}
+            className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-100 transition-colors">
             {loading ? 'Lendo...' : 'Importar posição'}
           </button>
+          {!!pos?.itens.length && (
+            <button onClick={atualizarPosicoes} disabled={loading || atualizando}
+              className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
+              {atualizando ? 'Atualizando...' : 'Atualizar Posições'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -153,9 +211,31 @@ export function Investimentos({ active }: { active: boolean }) {
           </div>
         ) : (
           <div className="space-y-5">
-            <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-6">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Posição total</p>
-              <p className="text-3xl font-bold text-emerald-400 tabular-nums">{formatBRL(total)}</p>
+            <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/60 p-6 flex items-end gap-10">
+              <div>
+                <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                  {pos.data_valorizacao ? `Posição em ${data(pos.data_valorizacao)}` : 'Posição total'}
+                </p>
+                <p className="text-3xl font-bold text-emerald-400 tabular-nums">{formatBRL(total)}</p>
+              </div>
+              {pos.data_valorizacao && pos.data_valorizacao !== pos.data_posicao && (
+                <>
+                  <div>
+                    <p className="text-xs text-zinc-500 mb-1">Importada em {data(pos.data_posicao)}</p>
+                    <p className="text-lg text-zinc-400 tabular-nums">{formatBRL(totalPosicao)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500 mb-1">Variação</p>
+                    <p className={cn('text-lg font-medium tabular-nums',
+                      variacao >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                      {variacao >= 0 ? '+' : ''}{formatBRL(variacao)}
+                      <span className="ml-2 text-xs opacity-70">
+                        {totalPosicao ? `${(variacao / totalPosicao * 100).toFixed(2)}%` : ''}
+                      </span>
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
 
             <div>
@@ -215,13 +295,15 @@ export function Investimentos({ active }: { active: boolean }) {
                       <th className="px-3 py-2 text-center font-medium">Liquidez</th>
                       <th className="px-3 py-2 text-right font-medium">PU</th>
                       <th className="px-3 py-2 text-right font-medium">Qtde</th>
-                      <th className="px-3 py-2 text-right font-medium">Aplicado</th>
-                      <th className="px-3 py-2 text-right font-medium">Saldo</th>
+                      <th className="px-3 py-2 text-right font-medium">Na posição</th>
+                      <th className="px-3 py-2 text-right font-medium">Valorizado</th>
+                      <th className="px-3 py-2 text-left font-medium">Método</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pos.itens.map((i, k) => (
-                      <tr key={i.id} className={cn('hover:bg-zinc-800/40', k > 0 && 'border-t border-zinc-800/40')}>
+                      <Fragment key={i.id}>
+                      <tr className={cn('hover:bg-zinc-800/40', k > 0 && 'border-t border-zinc-800/40')}>
                         <td className="px-3 py-2 text-zinc-300 font-medium">{i.produto}</td>
                         <td className="px-3 py-2 text-zinc-400">{i.ativo || '—'}</td>
                         <td className="px-3 py-2 text-zinc-500 text-xs">{i.emissor || '—'}</td>
@@ -236,19 +318,62 @@ export function Investimentos({ active }: { active: boolean }) {
                           {i.quantidade?.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) ?? '—'}
                         </td>
                         <td className="px-3 py-2 text-right text-zinc-500 tabular-nums text-xs">
-                          {i.valor_aplicacao != null ? formatBRL(i.valor_aplicacao) : '—'}
+                          {i.saldo_posicao != null ? formatBRL(i.saldo_posicao) : '—'}
                         </td>
                         <td className="px-3 py-2 text-right text-zinc-200 tabular-nums font-medium">
                           {i.saldo != null ? formatBRL(i.saldo) : '—'}
                         </td>
+                        <td className="px-3 py-2 text-xs">
+                          {i.metodo_valorizacao ? (
+                            <button onClick={() => verMemoria(i.id)}
+                              className={cn('hover:text-emerald-400 transition-colors',
+                                i.metodo_valorizacao === 'parado' ? 'text-amber-400' : 'text-zinc-500')}
+                              title={i.detalhe_valorizacao ?? 'Ver a memória de cálculo'}>
+                              <span className="inline-block w-3 text-zinc-600">
+                                {memoria?.id === i.id ? '−' : '+'}
+                              </span>
+                              {METODO_LABEL[i.metodo_valorizacao] ?? i.metodo_valorizacao}
+                            </button>
+                          ) : <span className="text-zinc-700">—</span>}
+                        </td>
                       </tr>
+                      {memoria?.id === i.id && (
+                        <tr className="bg-zinc-900/70">
+                          <td colSpan={11} className="px-3 py-2">
+                            <table className="text-xs">
+                              <tbody>
+                                {memoria.passos.map(p => (
+                                  <tr key={p.data}>
+                                    <td className="pr-4 py-0.5 text-zinc-500">{data(p.data)}</td>
+                                    <td className="pr-4 py-0.5 text-zinc-500 tabular-nums">
+                                      PU {p.pu_anterior?.toFixed(6)} → {p.pu?.toFixed(6)}
+                                    </td>
+                                    <td className="pr-4 py-0.5 text-zinc-500 tabular-nums">
+                                      × {p.fator?.toFixed(8)}
+                                    </td>
+                                    <td className="pr-4 py-0.5 text-zinc-300 tabular-nums">{formatBRL(p.saldo)}</td>
+                                    <td className="py-0.5 text-zinc-600">{p.detalhe}</td>
+                                  </tr>
+                                ))}
+                                {!memoria.passos.length && (
+                                  <tr><td className="py-0.5 text-zinc-600">
+                                    Nenhum dia útil entre a posição e hoje.
+                                  </td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                     ))}
                   </tbody>
                 </table>
               </div>
               <p className="text-xs text-zinc-600 mt-1.5">
-                Saldo é o valor de mercado quando o produto tem cotação, e o saldo
-                acumulado quando é de emissão — é o número que o internet banking mostra.
+                <strong className="text-zinc-500">Valorizado</strong> é a posição trazida até
+                hoje dia útil a dia útil; clique no método para ver a memória de cálculo passo a
+                passo. Papel em âmbar não pôde ser valorizado — passe o mouse para saber por quê.
               </p>
             </div>
           </div>

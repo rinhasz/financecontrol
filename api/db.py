@@ -154,7 +154,41 @@ CREATE TABLE IF NOT EXISTS investimento (
   saldo_liquido_accrual REAL,
   saldo_bruto_mtm       REAL,
   saldo_liquido_mtm     REAL,
+  -- resultado da valorização diária (fase 2): até quando foi atualizado, com
+  -- que método, e o porquê quando não deu para atualizar
+  data_valorizacao      TEXT,
+  pu_valorizado         REAL,
+  saldo_valorizado      REAL,
+  metodo_valorizacao    TEXT,
+  detalhe_valorizacao   TEXT,
   carga_id              INTEGER REFERENCES carga_investimento(id)
+);
+
+-- Dados de mercado, apartados do cálculo de propósito (doc 16 fase 2): com o
+-- dado bruto de cada dia guardado, a valorização pode ser refeita sem depender
+-- de a fonte estar no ar, e o número da tela pode ser auditado.
+CREATE TABLE IF NOT EXISTS mercado_serie (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  serie     TEXT NOT NULL,   -- DI | IPCA | ACAO:<ticker> | DEB:<codigo>
+  data      TEXT NOT NULL,
+  valor     REAL NOT NULL,
+  fonte     TEXT,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(serie, data)
+);
+
+-- Memória de cálculo: uma linha por papel por dia útil. É o que permite
+-- reconstruir como se chegou ao saldo de hoje.
+CREATE TABLE IF NOT EXISTS valorizacao (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  investimento_id INTEGER NOT NULL REFERENCES investimento(id),
+  data            TEXT NOT NULL,
+  pu_anterior     REAL,
+  fator           REAL,
+  pu              REAL,
+  saldo           REAL,
+  metodo          TEXT,
+  detalhe         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS posicao_investimento (
@@ -333,6 +367,16 @@ def init_db():
         # curto quando ela ainda não foi classificada; assim que for, este campo
         # é preenchido por propagação e passa a ser a fonte de verdade.
         conn.execute('ALTER TABLE transacao ADD COLUMN estorna_despesa_id INTEGER REFERENCES despesa(id)')
+
+    # migração: valorização diária (doc 16 fase 2) numa tabela `investimento`
+    # criada na fase 1 — CREATE TABLE IF NOT EXISTS não acrescenta coluna
+    cols_inv = [r[1] for r in conn.execute('PRAGMA table_info(investimento)').fetchall()]
+    if cols_inv:
+        for coluna, tipo in (('data_valorizacao', 'TEXT'), ('pu_valorizado', 'REAL'),
+                             ('saldo_valorizado', 'REAL'), ('metodo_valorizacao', 'TEXT'),
+                             ('detalhe_valorizacao', 'TEXT')):
+            if coluna not in cols_inv:
+                conn.execute(f'ALTER TABLE investimento ADD COLUMN {coluna} {tipo}')
 
     conn.commit()
     _seed_regras_transacao(conn)

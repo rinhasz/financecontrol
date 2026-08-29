@@ -92,6 +92,9 @@ export const api = {
   investimentos: {
     listar: (data?: string) => get('/api/investimentos' + (data ? `?data=${data}` : '')),
     datas: () => get('/api/investimentos/datas'),
+    // a valorização vai à rede buscar CDI, IPCA e cotações: sem timeout curto
+    atualizar: () => post('/api/investimentos/atualizar', undefined, 120_000),
+    memoria: (id: number) => get(`/api/investimentos/${id}/memoria`),
     importar: (file: File) => {
       const fd = new FormData()
       fd.append('file', file)
