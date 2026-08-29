@@ -122,8 +122,6 @@ interface Despesa {
 
 const BANCOS = ['Itaú', 'Bradesco', 'Nubank', 'BTG', 'XP', 'Outro']
 
-/** Cabeçalho das três partes da revisão. A ordem é fixa e numerada de
- *  propósito: casadas, depois o que faltou de cada lado. */
 /** As competências que o extrato tocou, para bater uma de cada vez.
  *
  *  Não é um seletor de mês: só aparecem os meses que o arquivo realmente cobre,
@@ -153,6 +151,8 @@ function MesesCobertos({ meses, atual, onEscolher, disabled }: {
   )
 }
 
+/** Cabeçalho das três partes da revisão. A ordem é fixa e numerada de
+ *  propósito: casadas, depois o que faltou de cada lado. */
 function Secao({ n, titulo, qtd, ajuda }: { n: number; titulo: string; qtd: number; ajuda: string }) {
   return (
     <div className="mb-2">
@@ -801,6 +801,7 @@ export function Importacao({ active }: { active: boolean }) {
                     <thead>
                       <tr className="border-b border-zinc-800 bg-zinc-900/40">
                         <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Despesa</th>
+                        <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Data</th>
                         <th className="px-4 py-2 text-left text-xs text-zinc-500 font-medium">Transação no extrato</th>
                         <th className="px-4 py-2 text-right text-xs text-zinc-500 font-medium">Valor</th>
                         <th className="px-4 py-2 text-center text-xs text-zinc-500 font-medium">Status</th>
@@ -816,6 +817,12 @@ export function Importacao({ active }: { active: boolean }) {
                               {d.ja_gravado && d.item_id === d.item_id_sugerido && (
                                 <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-600">gravado</span>
                               )}
+                            </td>
+                            {/* dd/mm basta: a competência não atravessa o ano, e
+                                atravessar dois meses é exatamente o que a data
+                                precisa deixar visível (26/08 a 24/09) */}
+                            <td className="px-4 py-2 text-zinc-500 tabular-nums whitespace-nowrap">
+                              {dataCurta(d.data)}
                             </td>
                             <td className="px-4 py-2 text-zinc-400">{d.descricao_transacao}</td>
                             <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{formatBRL(d.valor)}</td>
@@ -856,7 +863,7 @@ export function Importacao({ active }: { active: boolean }) {
                           </tr>
                           {definindoEstorno === d.transacao_id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
-                              <td colSpan={5} className="px-4 py-3">
+                              <td colSpan={6} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-xs text-zinc-500">O que este crédito estorna?</span>
                                   {/* dois caminhos para o mesmo vínculo: pela despesa,
@@ -890,7 +897,7 @@ export function Importacao({ active }: { active: boolean }) {
                           )}
                           {corrigindo === d.transacao_id && (
                             <tr className="bg-zinc-900/60 border-t border-zinc-800/40">
-                              <td colSpan={5} className="px-4 py-3">
+                              <td colSpan={6} className="px-4 py-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <DespesaPicker despesas={catalogo} value={selecionada} onChange={setSelecionada}
                                     placeholder={`Digite pra buscar a ${t.item} certa...`} allowNova
