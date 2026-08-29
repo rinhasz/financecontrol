@@ -225,14 +225,23 @@ Nada é inventado. Cada caso tem um comportamento explícito e visível na tela:
 
 | situação | comportamento |
 |---|---|
-| CDI do dia ainda não divulgado | o papel para naquele dia; `data_valorizacao` recua para o último dia efetivo |
+| CDI do dia ainda não divulgado | **repete o último CDI conhecido**, dizendo no detalhe qual dia foi repetido |
 | dia sem pregão | mantém o último fechamento |
 | sem PU ANBIMA | cai para accrual pelo indexador |
 | sem indexador cadastrado | não valoriza, e o motivo aparece em âmbar |
 
-O CDI de um dia só sai no dia seguinte, então **"valorizado até" costuma ser
-D-1** e a tela diz isso em vez de fingir que está em dia — mesma decisão do saldo
-do extrato (doc 15).
+### Por que o CDI do dia é repetido, e não ignorado
+
+O CDI de um dia só é divulgado no dia seguinte, mas **o banco já credita no
+próprio dia**. A primeira versão parava de valorizar no último dia divulgado, e
+isso produzia um número **errado**, não conservador: uma LCA de R$ 233.292,90 a
+94% do CDI ficava em R$ 233.519,53 quando o extrato mostrava R$ 233.632,93 — R$
+340 atrás, por faltar um dia.
+
+Repetir o último CDI conhecido é a prática correta: o CDI só muda em reunião do
+Copom, e mesmo no dia da mudança a diferença de um dia é de centésimos. O
+detalhe da memória diz sempre qual dia foi repetido, então a premissa fica
+visível.
 
 ## Simplificações assumidas
 
@@ -258,9 +267,19 @@ valorizada até 28/08 — 3 dias úteis):
 | LIG IPCA | +0,06% | `ipca` |
 | ações | movimento real de mercado | `mercado` |
 
-Um caso conferido à mão: LCA de R$ 382,43 com 94% do CDI, PU base
-`382,43 / 303,71 = 1,259188`; fator `1 + 0,0005166 * 0,94 = 1,00048560`; após dois
-dias, R$ 382,80. Bate com a memória gravada.
+**Conferência contra o extrato do banco.** Partindo da posição de 25/08 e
+valorizando 3 dias úteis a 94% do CDI:
+
+| papel | posição 25/08 | calculado | banco |
+|---|---:|---:|---:|
+| LCA | 233.292,90 | **233.632,93** | 233.632,93 |
+| LCA | 27.600,83 | **27.641,06** | 27.641,06 |
+| LCI | 7.182,36 | **7.192,83** | 7.192,83 |
+| LCI | 63.784,91 | **63.877,88** | 63.877,88 |
+| LCI | 222.012,11 | **222.335,70** | 222.335,70 |
+
+Bate ao centavo (um caso difere em R$ 0,01, por arredondamento). O fator é
+`1 + 0,0005166 × 0,94 = 1,00048560`, que em 3 dias dá +0,1458%.
 
 Também testados: atualizar duas vezes não empilha (132 linhas de memória = 44
 papéis x 3 dias, idempotente); migração das colunas novas numa tabela criada na

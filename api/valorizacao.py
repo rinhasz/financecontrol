@@ -85,17 +85,23 @@ def fator_do_dia(inv: dict, d: date, conn) -> tuple:
     indexador = (inv.get('indexador') or '').upper()
 
     if indexador == 'DI':
-        di = mercado.ler(conn, 'DI', iso)
+        di, ref = _cdi_vigente(conn, d)
         if di is None:
-            return None, 'parado', f'sem CDI publicado para {iso}'
+            return None, 'parado', f'sem CDI publicado até {iso}'
+        # O CDI de um dia só é divulgado no dia seguinte, mas o banco já credita
+        # no próprio dia. Repetir o último conhecido é a prática correta: o CDI
+        # só muda em reunião do Copom, e mesmo aí a diferença de um dia é de
+        # centésimos. Parar sem valorizar é que produzia um número **errado** —
+        # foi o que deixava uma LCA 340 reais atrás do extrato.
+        estimado = '' if ref == iso else f' (CDI de {ref} repetido, {iso} ainda não divulgado)'
         p = inv.get('perc_indexador')
         if p is None:
             # DI + spread (típico de debênture/CRA): juro real sobre o CDI
             taxa = inv.get('taxa') or 0
             fator = (1 + di / 100) * _potencia_252(taxa)
-            return fator, 'di', f'CDI {di:.6f}%/dia + {taxa}% a.a.'
+            return fator, 'di', f'CDI {di:.6f}%/dia + {taxa}% a.a.{estimado}'
         fator = 1 + (di / 100) * (p / 100)
-        return fator, 'di', f'CDI {di:.6f}%/dia × {p}%'
+        return fator, 'di', f'CDI {di:.6f}%/dia × {p}%{estimado}'
 
     if indexador == 'IPCA':
         ipca, ref = _ipca_vigente(conn, d)
@@ -114,6 +120,14 @@ def fator_do_dia(inv: dict, d: date, conn) -> tuple:
         return _potencia_252(taxa), 'pre', f'{taxa}% a.a. em base 252'
 
     return None, 'parado', 'sem indexador cadastrado'
+
+
+def _cdi_vigente(conn, d: date) -> tuple:
+    """`(taxa, data_da_taxa)` — o CDI do dia, ou o último conhecido antes dele."""
+    row = conn.execute(
+        "SELECT data, valor FROM mercado_serie WHERE serie='DI' AND data<=? "
+        'ORDER BY data DESC LIMIT 1', (d.isoformat(),)).fetchone()
+    return (row['valor'], row['data']) if row else (None, None)
 
 
 def _ipca_vigente(conn, d: date) -> tuple:

@@ -161,10 +161,17 @@ export function Investimentos({ active }: { active: boolean }) {
       <div className="px-6 pb-4 flex items-start justify-between flex-none">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Investimentos</h1>
+          {/* a data que importa é a da VALORIZAÇÃO — é a dela que são os
+              números da tela. A da importação vira referência secundária, senão
+              o cabeçalho diz 25/08 enquanto a tabela mostra o valor de 28/08. */}
           <p className="text-sm text-zinc-500 mt-0.5">
-            {pos?.data_posicao
-              ? <>Posição de <strong className="text-zinc-300">{data(pos.data_posicao)}</strong> · {pos.itens.length} papéis</>
-              : 'Nenhuma posição importada ainda.'}
+            {!pos?.data_posicao ? 'Nenhuma posição importada ainda.'
+              : pos.data_valorizacao && pos.data_valorizacao !== pos.data_posicao
+                ? <>Valores em <strong className="text-zinc-300">{data(pos.data_valorizacao)}</strong>
+                    {' · '}{pos.itens.length} papéis · importada em {data(pos.data_posicao)}</>
+                : <>Posição de <strong className="text-zinc-300">{data(pos.data_posicao)}</strong>
+                    {' · '}{pos.itens.length} papéis · <span className="text-amber-500/80">
+                    ainda não valorizada</span></>}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -295,8 +302,13 @@ export function Investimentos({ active }: { active: boolean }) {
                       <th className="px-3 py-2 text-center font-medium">Liquidez</th>
                       <th className="px-3 py-2 text-right font-medium">PU</th>
                       <th className="px-3 py-2 text-right font-medium">Qtde</th>
-                      <th className="px-3 py-2 text-right font-medium">Na posição</th>
-                      <th className="px-3 py-2 text-right font-medium">Valorizado</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        {pos.data_posicao ? data(pos.data_posicao) : 'Na posição'}
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        {pos.data_valorizacao && pos.data_valorizacao !== pos.data_posicao
+                          ? data(pos.data_valorizacao) : 'Valorizado'}
+                      </th>
                       <th className="px-3 py-2 text-left font-medium">Método</th>
                     </tr>
                   </thead>
