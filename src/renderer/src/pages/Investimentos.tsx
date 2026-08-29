@@ -323,8 +323,16 @@ export function Investimentos({ active }: { active: boolean }) {
                         <td className="px-3 py-2 text-center text-zinc-500 text-xs">{data(i.data_aplicacao)}</td>
                         <td className="px-3 py-2 text-center text-zinc-500 text-xs">{data(i.data_vencimento)}</td>
                         <td className="px-3 py-2 text-center text-zinc-500 text-xs">{data(i.data_liquidez)}</td>
-                        <td className="px-3 py-2 text-right text-zinc-500 tabular-nums text-xs">
-                          {i.pu?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {/* o PU exibido é o valorizado: a regra do doc 16 é
+                            "valor = PU x quantidade", e mostrar o PU da
+                            importação ao lado do valor de hoje faz a conta não
+                            fechar na tela */}
+                        <td className="px-3 py-2 text-right text-zinc-500 tabular-nums text-xs"
+                          title={i.pu_valorizado != null && i.pu != null && i.pu_valorizado !== i.pu
+                            ? `PU na importação: ${i.pu.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+                            : undefined}>
+                          {(i.pu_valorizado ?? i.pu)?.toLocaleString('pt-BR',
+                            { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                         </td>
                         <td className="px-3 py-2 text-right text-zinc-500 tabular-nums text-xs">
                           {i.quantidade?.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) ?? '—'}
