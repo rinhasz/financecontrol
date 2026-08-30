@@ -280,15 +280,40 @@ def _extrair_pdf(conteudo_base64: str, senha: str = None) -> str:
 #
 # Editável sem mexer no código: `config.senhas_fatura`, um JSON
 # `{"remetente": "senha"}`, sobrepõe este padrão.
-SENHAS_FATURA_PADRAO = {'sulamerica': '5551'}
+# A chave é `sousulamerica`, não `sulamerica`: o boleto vem de
+# `grp-sousulamerica@sulamerica.com.br`, e casar o domínio inteiro liberaria
+# também `mkt@marketing.sulamerica.com.br` — que é propaganda, e cujos links o
+# app passaria a abrir sozinho sem nenhum motivo.
+SENHAS_FATURA_PADRAO = {'sousulamerica': '5551'}
 
 RE_ANCORA = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
+RE_ALT = re.compile(r'\balt=["\']([^"\']*)["\']', re.I)
 
 # texto da âncora que indica "a fatura está do outro lado deste link"
 TEXTO_DE_FATURA = ('baixar a fatura', 'baixar fatura', 'segunda via', 'ver fatura',
-                   'clique aqui', 'visualizar boleto', 'baixar boleto')
+                   'visualizar boleto', 'baixar boleto', 'ver boleto', 'segunda-via',
+                   '2a via', 'clique aqui')
 
 MAX_PDF_BYTES = 12 * 1024 * 1024
+# teto de links tentados por email quando nenhum rótulo casa (ver _links_de_fatura)
+MAX_LINKS_CEGOS = 18
+
+
+def _desembrulhar_safelink(url: str) -> str:
+    """`safelinks.protection.outlook.com/?url=<encoded>` -> URL real.
+
+    O Outlook reescreve todo link recebido. Sem desembrulhar, o log fica
+    ilegível e a deduplicação não funciona — dois wrappers diferentes podem
+    apontar para o mesmo destino.
+    """
+    if 'safelinks.protection.outlook.com' not in url:
+        return url
+    from urllib.parse import urlparse, parse_qs, unquote
+    try:
+        alvo = parse_qs(urlparse(url).query).get('url', [None])[0]
+        return unquote(alvo) if alvo else url
+    except Exception:
+        return url
 
 
 _SENHAS_CACHE = None
@@ -326,17 +351,41 @@ def _senha_do_remetente(remetente: str):
     return None
 
 
-def _links_de_fatura(html: str) -> list:
-    """URLs de âncoras cujo texto anuncia a fatura. Ordem preservada."""
-    achados = []
+def _rotulo_da_ancora(interno: str) -> str:
+    """O que a âncora 'diz' — texto visível **mais o alt das imagens**.
+
+    Na SulAmérica o botão da fatura é uma **imagem**, não texto: olhando só o
+    texto, o rótulo vem vazio e nenhum link é reconhecido. Era esse o motivo de
+    o boleto nunca ser buscado, mesmo com a guarda corrigida.
+    """
+    alts = ' '.join(RE_ALT.findall(interno or ''))
+    visivel = re.sub(r'<[^>]+>', ' ', interno or '')
+    return normalize_text(f'{visivel} {alts}')
+
+
+def _links_de_fatura(html: str, cegos: bool = False) -> list:
+    """URLs candidatas a ter a fatura do outro lado, em ordem de preferência.
+
+    Primeiro as âncoras cujo rótulo anuncia a fatura. Se `cegos` e nenhuma
+    casar, devolve **todos** os links do email (deduplicados, limitados): num
+    email de remetente já liberado, gastar alguns GETs é melhor que não achar o
+    boleto — e é o único caminho quando o botão é uma imagem sem `alt` útil.
+    """
+    rotuladas, todas = [], []
     for href, interno in RE_ANCORA.findall(html or ''):
-        rotulo = normalize_text(re.sub(r'<[^>]+>', ' ', interno))
         if not href.lower().startswith(('http://', 'https://')):
             continue
-        if any(k in rotulo for k in TEXTO_DE_FATURA) or href.lower().endswith('.pdf'):
-            if href not in achados:
-                achados.append(href)
-    return achados
+        real = _desembrulhar_safelink(href)
+        if real not in todas:
+            todas.append(real)
+        rotulo = _rotulo_da_ancora(interno)
+        if any(k in rotulo for k in TEXTO_DE_FATURA) or real.lower().endswith('.pdf'):
+            if real not in rotuladas:
+                rotuladas.append(real)
+
+    if rotuladas or not cegos:
+        return rotuladas
+    return todas[:MAX_LINKS_CEGOS]
 
 
 def _texto_da_fatura_linkada(url: str, senha: str, saltos: int = 1) -> str:
@@ -461,8 +510,8 @@ def _texto_completo(token: str, m: dict) -> str:
     # é justamente onde mora o boleto. Pix no corpo não é motivo para desistir
     # do boleto; boleto já encontrado, sim.
     if senha and not RE_LINHA_DIGITAVEL.search(texto):
-        links = _links_de_fatura(html)
-        print(f'[email_busca] {remetente}: sem boleto no corpo, {len(links)} link(s) de fatura')
+        links = _links_de_fatura(html, cegos=True)
+        print(f'[email_busca] {remetente}: sem boleto no corpo, tentando {len(links)} link(s)')
         for url in links:
             baixado = _texto_da_fatura_linkada(url, senha)
             if baixado:
@@ -789,15 +838,18 @@ def diagnostico():
 
         # TODAS as âncoras, não só as que casam — é isso que diz se o rótulo
         # esperado ("Clique aqui para baixar a fatura") está sendo reconhecido
-        todas = [{'texto': re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', t)).strip()[:70],
-                  'href': h[:110]}
+        todas = [{'rotulo': _rotulo_da_ancora(t)[:70],
+                  'href': _desembrulhar_safelink(h)[:110]}
                  for h, t in RE_ANCORA.findall(html or '')]
         item['ancoras_no_email'] = todas[:25]
-        item['ancoras_reconhecidas'] = _links_de_fatura(html)
+        item['ancoras_rotuladas'] = _links_de_fatura(html)
+        alvos = _links_de_fatura(html, cegos=True)
+        item['modo'] = 'rotulo' if item['ancoras_rotuladas'] else 'cego'
+        item['alvos'] = len(alvos)
 
         if senha:
             item['downloads'] = []
-            for url in item['ancoras_reconhecidas'][:3]:
+            for url in alvos:
                 d = {'url': url[:110]}
                 try:
                     resp = requests.get(url, timeout=40, allow_redirects=True,
@@ -820,6 +872,11 @@ def diagnostico():
                 except Exception as e:
                     d['erro'] = str(e)[:200]
                 item['downloads'].append(d)
+                if d.get('tem_boleto'):
+                    # achou: mostra o codigo e para de tentar
+                    achado = RE_LINHA_DIGITAVEL.search(_texto_de_pdf(resp.content, senha))
+                    item['BOLETO'] = re.sub(r'\s+', ' ', achado.group()).strip()
+                    break
 
         saida.append(item)
 
