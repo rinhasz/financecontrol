@@ -112,8 +112,35 @@ substring no endereço (`sulamerica` casa `faturas@sulamerica.com.br`).
 para acrescentar emissor sem mexer no código, e para a senha não morar no
 repositório. Fica em cache durante a busca e é relido a cada nova.
 
-**Só baixa quando precisa** (passo 2): email cujo boleto já veio no corpo ou no
-anexo não gasta um download.
+**Só baixa quando precisa** (passo 2): email cujo **boleto** já veio no corpo ou
+no anexo não gasta um download.
+
+> A primeira versão desta guarda perguntava "já tem **algum** código?" e quebrou
+> exatamente o caso que a funcionalidade existe para resolver. O email da
+> SulAmérica traz um **Pix no corpo**: a guarda achava esse Pix, concluía que
+> estava resolvido e nunca seguia o link — o boleto ficava do outro lado, sem
+> ninguém buscar. A pergunta certa é "já tem **boleto**?"; Pix no corpo não é
+> motivo para desistir do boleto.
+
+### Quando os dois existem, o boleto ganha
+
+Para remetente com senha cadastrada, o boleto tem precedência sobre o Pix. O
+texto final concatena corpo + PDF, e o Pix aparece primeiro — o Gemini lê os dois
+e costuma devolver o Pix. Ir atrás do PDF e ainda assim mostrar o Pix
+desperdiça exatamente o trabalho que este caminho existe para fazer.
+
+### `/api/email/diagnostico`
+
+`GET /api/email/diagnostico?termo=sulamerica` abre no navegador e mostra, por
+mensagem: se o remetente está liberado, se o corpo já tem Pix/boleto, **todas**
+as âncoras do email (não só as reconhecidas), e para cada download o
+status HTTP, o content-type, se é PDF, se abriu com e sem senha, e se saiu
+boleto. Quando a página não é PDF, mostra os links de dentro dela e se há
+`<input type="password">`.
+
+Existe porque diagnosticar isso adivinhando custou uma rodada: separa em um
+olhar se o problema é a âncora que não casa, o download que falha ou a senha que
+não abre. Não grava nem associa nada.
 
 ### Verificação
 

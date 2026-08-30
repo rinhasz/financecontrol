@@ -453,14 +453,24 @@ def _texto_completo(token: str, m: dict) -> str:
             print(f'[email_busca] falha ao buscar anexos de {m["id"]}: {e}')
 
     # Fatura atrás de link (SulAmérica): só quando o remetente está liberado e
-    # o que já se tem não contém código nenhum — não vale gastar um download
-    # por email cujo boleto já veio no corpo ou no anexo.
-    if senha and not _extrair_codigo_regex(texto)[0]:
-        for url in _links_de_fatura(html):
+    # ainda **não há boleto**.
+    #
+    # A condição olha especificamente a linha digitável, e não "qualquer código".
+    # O email da SulAmérica traz um Pix no corpo: checar "já tem algum código"
+    # achava esse Pix, concluía que estava resolvido e nunca seguia o link — que
+    # é justamente onde mora o boleto. Pix no corpo não é motivo para desistir
+    # do boleto; boleto já encontrado, sim.
+    if senha and not RE_LINHA_DIGITAVEL.search(texto):
+        links = _links_de_fatura(html)
+        print(f'[email_busca] {remetente}: sem boleto no corpo, {len(links)} link(s) de fatura')
+        for url in links:
             baixado = _texto_da_fatura_linkada(url, senha)
             if baixado:
+                achou = bool(RE_LINHA_DIGITAVEL.search(baixado))
+                print(f'[email_busca]   {url[:70]} -> {len(baixado)} chars, boleto={achou}')
                 texto += '\n' + baixado
-                break
+                if achou:
+                    break
 
     return texto
 
@@ -636,6 +646,17 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
                 # extração quebra linha em lugar estranho. Já que o download foi
                 # feito, vale tentar a estrutura fixa antes de desistir.
                 linha_digitavel, tipo_codigo, _ = _extrair_codigo_regex(texto)
+
+            # Remetente cujo boleto foi buscado atrás de link: o boleto ganha.
+            # A SulAmérica põe um Pix no corpo e o boleto só dentro do PDF; o
+            # Gemini lê os dois no mesmo texto e costuma devolver o Pix, que
+            # aparece primeiro. Ir atrás do PDF e ainda assim mostrar o Pix
+            # desperdiça exatamente o trabalho que este caminho existe para fazer.
+            if _senha_do_remetente(remetente) and tipo_codigo != 'boleto':
+                achado_boleto = RE_LINHA_DIGITAVEL.search(texto)
+                if achado_boleto:
+                    linha_digitavel = re.sub(r'\s+', ' ', achado_boleto.group()).strip()
+                    tipo_codigo = 'boleto'
         else:
             sugerida = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
             origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida else None)
@@ -715,6 +736,94 @@ def _rodar_busca(token, dias):
         _busca_job['rodando'] = False
         _busca_job['concluido'] = True
         _busca_job['dia_atual'] = None
+
+
+@bp.route('/email/diagnostico')
+def diagnostico():
+    """Por que o boleto de um remetente não saiu — passo a passo, sem adivinhar.
+
+    Abra no navegador: `/api/email/diagnostico?termo=sulamerica`
+
+    Não grava nada e não associa nada: só mostra o que cada etapa enxergou, para
+    dizer se o problema é a âncora que não casa, o download que falha ou a senha
+    que não abre o PDF.
+    """
+    termo = request.args.get('termo', 'sulamerica')
+    limite = min(int(request.args.get('limite', 3)), 10)
+
+    token = _token_valido()
+    if not token:
+        return jsonify({'ok': False, 'msg': 'Conecte a conta de email primeiro'}), 400
+
+    headers = {'Authorization': f'Bearer {token}'}
+    r = requests.get(f'{GRAPH}/me/messages', headers=headers, timeout=40, params={
+        '$search': f'"{termo}"', '$top': limite,
+        '$select': 'id,subject,from,receivedDateTime,hasAttachments'})
+    if r.status_code != 200:
+        return jsonify({'ok': False, 'msg': f'Graph respondeu {r.status_code}', 'corpo': r.text[:400]}), 502
+
+    saida = []
+    for m in r.json().get('value', []):
+        remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
+        senha = _senha_do_remetente(remetente)
+        item = {
+            'assunto': m.get('subject'), 'de': remetente,
+            'recebido': (m.get('receivedDateTime') or '')[:10],
+            'remetente_liberado': bool(senha),
+            'senha_usada': ('*' * len(senha)) if senha else None,
+        }
+
+        html = ''
+        try:
+            b = requests.get(f'{GRAPH}/me/messages/{m["id"]}', headers=headers,
+                             params={'$select': 'body'}, timeout=30)
+            html = b.json().get('body', {}).get('content', '')
+        except Exception as e:
+            item['erro_corpo'] = str(e)[:200]
+
+        texto_corpo = _extrair_texto_html(html)
+        item['corpo'] = {
+            'tem_boleto': bool(RE_LINHA_DIGITAVEL.search(texto_corpo)),
+            'tem_pix': bool(RE_PIX.search(texto_corpo)),
+        }
+
+        # TODAS as âncoras, não só as que casam — é isso que diz se o rótulo
+        # esperado ("Clique aqui para baixar a fatura") está sendo reconhecido
+        todas = [{'texto': re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', t)).strip()[:70],
+                  'href': h[:110]}
+                 for h, t in RE_ANCORA.findall(html or '')]
+        item['ancoras_no_email'] = todas[:25]
+        item['ancoras_reconhecidas'] = _links_de_fatura(html)
+
+        if senha:
+            item['downloads'] = []
+            for url in item['ancoras_reconhecidas'][:3]:
+                d = {'url': url[:110]}
+                try:
+                    resp = requests.get(url, timeout=40, allow_redirects=True,
+                                        headers={'User-Agent': 'Mozilla/5.0'})
+                    d['status'] = resp.status_code
+                    d['content_type'] = resp.headers.get('Content-Type', '')[:60]
+                    d['bytes'] = len(resp.content)
+                    d['e_pdf'] = resp.content[:5] == b'%PDF-'
+                    if d['e_pdf']:
+                        d['abriu_sem_senha'] = bool(_texto_de_pdf(resp.content))
+                        txt = _texto_de_pdf(resp.content, senha)
+                        d['abriu_com_senha'] = bool(txt)
+                        d['tem_boleto'] = bool(RE_LINHA_DIGITAVEL.search(txt))
+                    else:
+                        # página intermediária: mostra o que há dentro dela
+                        dentro = resp.content[:400000].decode('utf-8', errors='replace')
+                        d['links_dentro'] = _links_de_fatura(dentro)[:6]
+                        d['tem_form_senha'] = bool(
+                            re.search(r'<input[^>]+type=["\']password', dentro, re.I))
+                except Exception as e:
+                    d['erro'] = str(e)[:200]
+                item['downloads'].append(d)
+
+        saida.append(item)
+
+    return jsonify({'ok': True, 'termo': termo, 'mensagens': saida})
 
 
 @bp.route('/email/buscar/iniciar', methods=['POST'])
