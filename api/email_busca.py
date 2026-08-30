@@ -243,17 +243,135 @@ def _extrair_texto_html(html: str) -> str:
     return re.sub(r'<[^>]+>', ' ', html or '')
 
 
-def _extrair_pdf(conteudo_base64: str) -> str:
+def _texto_de_pdf(payload: bytes, senha: str = None) -> str:
+    """Texto de um PDF, tentando abrir com senha quando ele vem cifrado.
+
+    Tenta primeiro sem senha: um PDF aberto não aceita `password` errado de
+    graça em toda versão do pdfminer, e a maioria das faturas não é cifrada.
+    """
+    import pdfplumber
+    for tentativa in ([None, senha] if senha else [None]):
+        try:
+            with pdfplumber.open(io.BytesIO(payload),
+                                 **({'password': tentativa} if tentativa else {})) as pdf:
+                return '\n'.join(p.extract_text() or '' for p in pdf.pages)
+        except Exception:
+            continue
+    return ''
+
+
+def _extrair_pdf(conteudo_base64: str, senha: str = None) -> str:
     try:
-        import pdfplumber
-        payload = base64.b64decode(conteudo_base64)
-        textos = []
-        with pdfplumber.open(io.BytesIO(payload)) as pdf:
-            for page in pdf.pages:
-                textos.append(page.extract_text() or '')
-        return '\n'.join(textos)
+        return _texto_de_pdf(base64.b64decode(conteudo_base64), senha)
     except Exception:
         return ''
+
+
+# ------------------------------------------------- fatura atrás de um link ---
+#
+# Alguns emissores não anexam a fatura: mandam um link ("Clique aqui para
+# baixar a fatura") que devolve um PDF **cifrado**, cuja senha o cliente já
+# conhece. Sem seguir o link, o email não tem código nenhum para extrair.
+#
+# Só se segue link de remetente que esteja neste mapa. Buscar URL de email
+# arbitrário transformaria o app num clicador automático de qualquer coisa que
+# chegue na caixa de entrada — que é exatamente o vetor de phishing. A chave
+# casa por substring no endereço do remetente.
+#
+# Editável sem mexer no código: `config.senhas_fatura`, um JSON
+# `{"remetente": "senha"}`, sobrepõe este padrão.
+SENHAS_FATURA_PADRAO = {'sulamerica': '5551'}
+
+RE_ANCORA = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
+
+# texto da âncora que indica "a fatura está do outro lado deste link"
+TEXTO_DE_FATURA = ('baixar a fatura', 'baixar fatura', 'segunda via', 'ver fatura',
+                   'clique aqui', 'visualizar boleto', 'baixar boleto')
+
+MAX_PDF_BYTES = 12 * 1024 * 1024
+
+
+_SENHAS_CACHE = None
+
+
+def _senhas_fatura() -> dict:
+    """Lida uma vez por busca: `_texto_completo` roda por email, e abrir conexão
+    com o banco a cada um seria desperdício. `_rodar_busca` limpa o cache."""
+    global _SENHAS_CACHE
+    if _SENHAS_CACHE is not None:
+        return _SENHAS_CACHE
+
+    conn = get_db()
+    try:
+        from .db import get_config_value
+        bruto = get_config_value(conn, 'senhas_fatura', '')
+    finally:
+        conn.close()
+    senhas = dict(SENHAS_FATURA_PADRAO)
+    if bruto:
+        try:
+            senhas.update(json.loads(bruto))
+        except (ValueError, TypeError):
+            print('[email_busca] config.senhas_fatura não é JSON válido — usando o padrão')
+    _SENHAS_CACHE = senhas
+    return senhas
+
+
+def _senha_do_remetente(remetente: str):
+    """Senha da fatura linkada, ou `None` se o remetente não está liberado."""
+    alvo = (remetente or '').lower()
+    for chave, senha in _senhas_fatura().items():
+        if chave.lower() in alvo:
+            return senha
+    return None
+
+
+def _links_de_fatura(html: str) -> list:
+    """URLs de âncoras cujo texto anuncia a fatura. Ordem preservada."""
+    achados = []
+    for href, interno in RE_ANCORA.findall(html or ''):
+        rotulo = normalize_text(re.sub(r'<[^>]+>', ' ', interno))
+        if not href.lower().startswith(('http://', 'https://')):
+            continue
+        if any(k in rotulo for k in TEXTO_DE_FATURA) or href.lower().endswith('.pdf'):
+            if href not in achados:
+                achados.append(href)
+    return achados
+
+
+def _texto_da_fatura_linkada(url: str, senha: str, saltos: int = 1) -> str:
+    """Baixa o que está atrás do link e devolve o texto do PDF.
+
+    Se o link levar a uma página em vez do arquivo, procura ali dentro um link
+    de PDF e segue **uma** vez — o suficiente para o padrão "página intermediária
+    com o botão de download", sem virar um crawler.
+    """
+    try:
+        r = requests.get(url, timeout=40, allow_redirects=True,
+                         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        r.raise_for_status()
+    except Exception as e:
+        print(f'[email_busca] falha ao baixar fatura de {url[:80]}: {e}')
+        return ''
+
+    conteudo = r.content[:MAX_PDF_BYTES]
+    if conteudo[:5] == b'%PDF-' or 'pdf' in r.headers.get('Content-Type', '').lower():
+        texto = _texto_de_pdf(conteudo, senha)
+        if not texto:
+            print(f'[email_busca] PDF baixado mas não abriu (senha errada?): {url[:80]}')
+        return texto
+
+    if saltos > 0:
+        try:
+            html = conteudo.decode('utf-8', errors='replace')
+        except Exception:
+            return ''
+        for prox in _links_de_fatura(html):
+            if prox != url:
+                texto = _texto_da_fatura_linkada(prox, senha, saltos - 1)
+                if texto:
+                    return texto
+    return ''
 
 
 def _mensagens_no_periodo(token: str, ini: str, fim: str):
@@ -309,12 +427,18 @@ def _texto_completo(token: str, m: dict) -> str:
     """Texto do corpo + PDFs anexados de uma mensagem — busca o corpo sob
     demanda (só é chamada pra quem já passou na classificação/filtro)."""
     headers = {'Authorization': f'Bearer {token}'}
-    texto = ''
+    remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
+    # a senha só existe para remetente liberado; ela é também a permissão para
+    # seguir link deste email
+    senha = _senha_do_remetente(remetente)
+
+    texto, html = '', ''
     try:
         body_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}', headers=headers,
                                   params={'$select': 'body'}, timeout=30)
         body_resp.raise_for_status()
-        texto = _extrair_texto_html(body_resp.json().get('body', {}).get('content', ''))
+        html = body_resp.json().get('body', {}).get('content', '')
+        texto = _extrair_texto_html(html)
     except Exception as e:
         print(f'[email_busca] falha ao buscar corpo de {m["id"]}: {e}')
 
@@ -324,9 +448,19 @@ def _texto_completo(token: str, m: dict) -> str:
             att_resp.raise_for_status()
             for att in att_resp.json().get('value', []):
                 if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
-                    texto += '\n' + _extrair_pdf(att['contentBytes'])
+                    texto += '\n' + _extrair_pdf(att['contentBytes'], senha)
         except Exception as e:
             print(f'[email_busca] falha ao buscar anexos de {m["id"]}: {e}')
+
+    # Fatura atrás de link (SulAmérica): só quando o remetente está liberado e
+    # o que já se tem não contém código nenhum — não vale gastar um download
+    # por email cujo boleto já veio no corpo ou no anexo.
+    if senha and not _extrair_codigo_regex(texto)[0]:
+        for url in _links_de_fatura(html):
+            baixado = _texto_da_fatura_linkada(url, senha)
+            if baixado:
+                texto += '\n' + baixado
+                break
 
     return texto
 
@@ -497,7 +631,11 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
                 if not achado:
                     valido = False
             if not valido:
-                linha_digitavel, tipo_codigo = None, None
+                # O Gemini pode não achar o que a regex acha — mais provável
+                # agora que o texto pode vir de um PDF baixado por link, cuja
+                # extração quebra linha em lugar estranho. Já que o download foi
+                # feito, vale tentar a estrutura fixa antes de desistir.
+                linha_digitavel, tipo_codigo, _ = _extrair_codigo_regex(texto)
         else:
             sugerida = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
             origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida else None)
@@ -530,6 +668,8 @@ def _rodar_busca(token, dias):
     em _busca_job a cada dia concluído para o frontend fazer polling. Verifica
     o pedido de cancelamento entre dias — se cancelada, para ali e mantém tudo
     que já foi encontrado (nada é descartado)."""
+    global _SENHAS_CACHE
+    _SENHAS_CACHE = None      # relê config.senhas_fatura a cada busca
     conn = get_db()
     despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
     regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}

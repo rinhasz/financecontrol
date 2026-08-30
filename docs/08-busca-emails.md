@@ -81,6 +81,61 @@ Mesmo assim, a tela mostra um aviso pra sempre conferir contra o email
 original antes de pagar. Isso não é garantia absoluta, só reduz bastante o
 risco de um número inventado passar despercebido.
 
+## Fatura atrás de link protegido por senha
+
+Nem todo emissor anexa a fatura. A **SulAmérica** manda um link ("Clique aqui
+para baixar a fatura") que devolve um PDF **cifrado**, cuja senha o cliente já
+conhece. Sem seguir o link, esse email não tem código nenhum para extrair — o
+corpo é só o convite para baixar.
+
+O fluxo, dentro de `_texto_completo`:
+
+1. o remetente tem senha cadastrada? Se não, **para aqui**;
+2. o que já se tem (corpo + anexos) contém algum código? Se sim, para aqui;
+3. procura no HTML âncoras cujo texto anuncie a fatura (`_links_de_fatura`);
+4. baixa; se vier uma página em vez do arquivo, procura ali dentro um link de
+   PDF e segue **uma** vez — o padrão "página intermediária com o botão";
+5. abre o PDF com a senha e joga o texto no mesmo caminho de sempre.
+
+Daí para frente nada muda: o código sai por Gemini ou regex, passa pela mesma
+validação anti-alucinação, e chega em Mês Atual como "Copiar boleto" igual a
+qualquer outro.
+
+### Só se segue link de remetente liberado
+
+A senha cadastrada **é** a permissão. Seguir URL de email arbitrário
+transformaria o app num clicador automático de qualquer coisa que chegue na
+caixa de entrada — que é exatamente o vetor do phishing. A chave casa por
+substring no endereço (`sulamerica` casa `faturas@sulamerica.com.br`).
+
+`config.senhas_fatura`, um JSON `{"remetente": "senha"}`, sobrepõe o padrão —
+para acrescentar emissor sem mexer no código, e para a senha não morar no
+repositório. Fica em cache durante a busca e é relido a cada nova.
+
+**Só baixa quando precisa** (passo 2): email cujo boleto já veio no corpo ou no
+anexo não gasta um download.
+
+### Verificação
+
+Testado ponta a ponta contra um servidor HTTP local servindo uma página que
+aponta para um PDF cifrado com `5551`:
+
+| passo | resultado |
+|---|---|
+| `faturas@sulamerica.com.br` | senha `5551` |
+| `noreply@bancoqualquer.com` | `None` — não segue link |
+| âncoras do corpo | acha a da fatura, ignora a de "Ajuda" |
+| página → PDF → texto | linha digitável extraída |
+| código final | 47 dígitos, `tipo_codigo='boleto'`, idêntico ao original |
+| senha errada (`9999`) | texto vazio, com aviso no log |
+
+**Pendente de confirmação com email real:** os testes usam um PDF cifrado
+sintético. O que ainda não foi verificado contra a SulAmérica de verdade é se a
+senha `5551` é do **PDF** (é o que o código assume) ou de um **formulário web**
+na página intermediária. Se for formulário, o passo 4 precisa aprender a
+postá-lo. O token do Graph estava expirado durante a implementação, então não
+deu para inspecionar uma mensagem real.
+
 ## Regras aprendidas (remetente → despesa)
 
 Toda vez que o usuário associa um boleto a uma despesa, o remetente do
