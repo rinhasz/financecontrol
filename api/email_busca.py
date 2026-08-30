@@ -308,10 +308,15 @@ def _desembrulhar_safelink(url: str) -> str:
     """
     if 'safelinks.protection.outlook.com' not in url:
         return url
-    from urllib.parse import urlparse, parse_qs, unquote
+    from urllib.parse import urlparse, parse_qs
     try:
+        # `parse_qs` JÁ desfaz o percent-encoding. Chamar `unquote` no
+        # resultado decodifica duas vezes, e isso quebra o link: o token do
+        # rastreador da SulAmérica contém `%2B`, que vira `+` literal — e o
+        # servidor relê `+` como espaço, devolvendo 404. Com o decode simples,
+        # o mesmo link responde 200 com o PDF de 208 KB.
         alvo = parse_qs(urlparse(url).query).get('url', [None])[0]
-        return unquote(alvo) if alvo else url
+        return alvo or url
     except Exception:
         return url
 
@@ -383,9 +388,12 @@ def _links_de_fatura(html: str, cegos: bool = False) -> list:
             if real not in rotuladas:
                 rotuladas.append(real)
 
-    if rotuladas or not cegos:
+    if not cegos:
         return rotuladas
-    return todas[:MAX_LINKS_CEGOS]
+    # Rotuladas primeiro, o resto como rede de segurança: o link certo pode
+    # falhar (rastreador que expira, 404) e não é motivo para desistir do email.
+    resto = [u for u in todas if u not in rotuladas]
+    return (rotuladas + resto)[:MAX_LINKS_CEGOS]
 
 
 def _texto_da_fatura_linkada(url: str, senha: str, saltos: int = 1) -> str:

@@ -129,6 +129,28 @@ texto final concatena corpo + PDF, e o Pix aparece primeiro — o Gemini lê os 
 e costuma devolver o Pix. Ir atrás do PDF e ainda assim mostrar o Pix
 desperdiça exatamente o trabalho que este caminho existe para fazer.
 
+### Duas armadilhas que só o email real revelou
+
+**O botão da fatura é uma imagem.** Das 14 âncoras do email "📬 Seu boleto
+SulAmérica Saúde Chegou!", todas são imagens sem texto visível. Casando só pelo
+texto da âncora, o rótulo vinha vazio e **nenhum link era reconhecido**. O
+`alt` da imagem tem exatamente `"Clique aqui para baixar a fatura"` — é dele que
+o rótulo precisa sair. Como rede de segurança, se nenhum rótulo casar o app
+tenta todos os links do email (máx. 18), o que cobre o caso do `alt` vazio.
+
+**`parse_qs` já decodifica — decodificar de novo quebra o link.** Todo link
+recebido vem embrulhado em `safelinks.protection.outlook.com/?url=...`. O
+desembrulho fazia `unquote(parse_qs(...)['url'][0])`, e esse decode duplo
+transformava o `%2B` do token do rastreador em `+` literal. O servidor relê `+`
+como espaço:
+
+| forma do token | resposta |
+|---|---|
+| `...II+S7...` (decode duplo) | **404**, 1.245 bytes de HTML |
+| `...II%2BS7...` (decode simples) | **200**, `application/pdf`, 208.019 bytes |
+
+`parse_qs` já desfaz o percent-encoding; o `unquote` extra é que sobrava.
+
 ### `/api/email/diagnostico`
 
 `GET /api/email/diagnostico?termo=sulamerica` abre no navegador e mostra, por
@@ -156,12 +178,11 @@ aponta para um PDF cifrado com `5551`:
 | código final | 47 dígitos, `tipo_codigo='boleto'`, idêntico ao original |
 | senha errada (`9999`) | texto vazio, com aviso no log |
 
-**Pendente de confirmação com email real:** os testes usam um PDF cifrado
-sintético. O que ainda não foi verificado contra a SulAmérica de verdade é se a
-senha `5551` é do **PDF** (é o que o código assume) ou de um **formulário web**
-na página intermediária. Se for formulário, o passo 4 precisa aprender a
-postá-lo. O token do Graph estava expirado durante a implementação, então não
-deu para inspecionar uma mensagem real.
+**Confirmado com email real** (boleto de 20/08/2026, vencimento 08/09): o link
+responde 302 para `informe-documento.paas.sulamerica.com.br`, entrega um PDF de
+208 KB que **não abre sem senha** e abre com `5551`, de onde sai a linha
+digitável de 47 dígitos e o valor de R$ 5.278,79. A senha é mesmo do **PDF** —
+não há formulário web no caminho.
 
 ## Regras aprendidas (remetente → despesa)
 
