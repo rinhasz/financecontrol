@@ -103,24 +103,27 @@ function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () =>
  *  igual. As cores repetem os selos de status das linhas — azul agendado,
  *  âmbar previsto, verde pago.
  */
-function TotaisDoGrupo({ agendado, previsto, pago, total }: {
+function TotaisDoGrupo({ agendado, previsto, pago, total, entrada }: {
   agendado: number; previsto: number; pago: number; total: number
+  /** lado da entrada: troca "a vencer"/"pago" por "a receber"/"recebido" */
+  entrada?: boolean
 }) {
+  const dir = entrada ? 'entrar na' : 'sair da'
   return (
     <span className="flex items-baseline gap-2.5 text-xs tabular-nums whitespace-nowrap">
-      <span className="text-blue-400/70" title="Tem data marcada e ainda não saiu da conta">
+      <span className="text-blue-400/70" title={`Tem data marcada e ainda não foi ${entrada ? 'creditado' : 'debitado'}`}>
         agendado <span className="font-medium">{formatBRL(agendado)}</span>
       </span>
       <span className="text-amber-400/70" title="Em aberto: estimado pela projeção, ainda não confirmado">
         previsto <span className="font-medium">{formatBRL(previsto)}</span>
       </span>
-      <span className="text-zinc-400" title="Agendado + previsto: tudo que ainda vai sair da conta">
-        a vencer <span className="font-medium text-zinc-300">{formatBRL(agendado + previsto)}</span>
+      <span className="text-zinc-400" title={`Agendado + previsto: tudo que ainda vai ${dir} conta`}>
+        {entrada ? 'a receber' : 'a vencer'} <span className="font-medium text-zinc-300">{formatBRL(agendado + previsto)}</span>
       </span>
-      <span className="text-emerald-400/70" title="Já saiu da conta">
-        pago <span className="font-medium">{formatBRL(pago)}</span>
+      <span className="text-emerald-400/70" title={`Já ${entrada ? 'entrou na' : 'saiu da'} conta`}>
+        {entrada ? 'recebido' : 'pago'} <span className="font-medium">{formatBRL(pago)}</span>
       </span>
-      <span className="text-zinc-500" title="Tudo do grupo: pago + a vencer">
+      <span className="text-zinc-500" title={`Tudo do grupo: ${entrada ? 'recebido + a receber' : 'pago + a vencer'}`}>
         total <span className="font-medium text-zinc-300">{formatBRL(total)}</span>
       </span>
     </span>
@@ -447,12 +450,11 @@ export function MesAtual() {
                 Renda e movimentação ficam separadas porque resgate e estorno
                 chegam na conta sem serem renda nova (doc 14). */}
             {renda.length > 0 && (
-              <BlocoReceitas titulo="Receitas" itens={renda} total={resumo?.renda ?? 0}
+              <BlocoReceitas titulo="Receitas" itens={renda}
                 onLimparProjecao={id => limparProjecao('receita', id)} />
             )}
             {movimentacao.length > 0 && (
               <BlocoReceitas titulo="Movimentação — não é renda" itens={movimentacao}
-                total={movimentacao.reduce((acc, r) => acc + (r.valor_real ?? r.valor_esperado), 0)}
                 onLimparProjecao={id => limparProjecao('receita', id)} esmaecido />
             )}
 
@@ -759,17 +761,28 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
 }
 
 
-function BlocoReceitas({ titulo, itens, total, esmaecido, onLimparProjecao }: {
-  titulo: string; itens: Receita[]; total: number; esmaecido?: boolean
+function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
+  titulo: string; itens: Receita[]; esmaecido?: boolean
   onLimparProjecao: (itemId: number) => void
 }) {
+  // Calculado das próprias linhas, e não recebido pronto: o total que vinha do
+  // resumo era `renda`, que é só o **recebido** — o cabeçalho dizia "total"
+  // mostrando 47 mil enquanto as linhas somavam 65 mil. Somando aqui, as cinco
+  // parcelas fecham entre si e ainda reproduzem `aReceber` e `renda` do resumo.
+  const valor = (r: Receita) => r.valor_real ?? r.valor_esperado
+  const soma = (st: Receita['status']) =>
+    itens.filter(r => r.status === st).reduce((s, r) => s + valor(r), 0)
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
         <span className={cn('text-xs font-medium uppercase tracking-wider',
           esmaecido ? 'text-zinc-600' : 'text-emerald-500/80')}>{titulo}</span>
         <div className="flex-1 h-px bg-zinc-800" />
-        <span className="text-xs text-zinc-600">{formatBRL(total)}</span>
+        <TotaisDoGrupo entrada
+          agendado={soma('previsto')}
+          previsto={soma('nao_encontrado')}
+          pago={soma('recebido')}
+          total={itens.reduce((s, r) => s + valor(r), 0)} />
       </div>
       <div className="rounded-lg overflow-hidden border border-zinc-800/60">
         <table className="w-full text-sm">
