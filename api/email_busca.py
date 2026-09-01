@@ -284,7 +284,10 @@ def _extrair_pdf(conteudo_base64: str, senha: str = None) -> str:
 # `grp-sousulamerica@sulamerica.com.br`, e casar o domínio inteiro liberaria
 # também `mkt@marketing.sulamerica.com.br` — que é propaganda, e cujos links o
 # app passaria a abrir sozinho sem nenhum motivo.
-SENHAS_FATURA_PADRAO = {'sousulamerica': '5551'}
+SENHAS_FATURA_PADRAO = {
+    'sousulamerica': '5551',        # grp-sousulamerica@sulamerica.com.br
+    'faturaporto': '289702730',     # cartaoportoseguro@faturaporto.com.br
+}
 
 RE_ANCORA = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
 RE_ALT = re.compile(r'\balt=["\']([^"\']*)["\']', re.I)
@@ -839,10 +842,37 @@ def diagnostico():
             item['erro_corpo'] = str(e)[:200]
 
         texto_corpo = _extrair_texto_html(html)
+        achado_corpo = RE_LINHA_DIGITAVEL.search(texto_corpo)
         item['corpo'] = {
-            'tem_boleto': bool(RE_LINHA_DIGITAVEL.search(texto_corpo)),
+            'tem_boleto': bool(achado_corpo),
+            'boleto': re.sub(r'\s+', ' ', achado_corpo.group()).strip() if achado_corpo else None,
             'tem_pix': bool(RE_PIX.search(texto_corpo)),
         }
+
+        # Anexos: a Porto manda a fatura como PDF anexado e cifrado, sem link
+        # nenhum no corpo. Sem enxergar o anexo aqui, o diagnostico nao
+        # distinguiria "nao achei o link" de "o link nao existe".
+        item['anexos'] = []
+        if m.get('hasAttachments'):
+            try:
+                ar = requests.get(f'{GRAPH}/me/messages/{m["id"]}/attachments',
+                                  headers=headers, timeout=60)
+                for att in ar.json().get('value', []):
+                    a_item = {'nome': att.get('name'), 'tipo': att.get('contentType'),
+                              'bytes': att.get('size')}
+                    if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
+                        bruto = base64.b64decode(att['contentBytes'])
+                        a_item['abriu_sem_senha'] = bool(_texto_de_pdf(bruto))
+                        if senha:
+                            txt = _texto_de_pdf(bruto, senha)
+                            a_item['abriu_com_senha'] = bool(txt)
+                            ach = RE_LINHA_DIGITAVEL.search(txt)
+                            a_item['tem_boleto'] = bool(ach)
+                            if ach:
+                                item['BOLETO'] = re.sub(r'\s+', ' ', ach.group()).strip()
+                    item['anexos'].append(a_item)
+            except Exception as e:
+                item['erro_anexos'] = str(e)[:200]
 
         # TODAS as âncoras, não só as que casam — é isso que diz se o rótulo
         # esperado ("Clique aqui para baixar a fatura") está sendo reconhecido
