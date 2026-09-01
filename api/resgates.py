@@ -24,7 +24,8 @@ from datetime import date, timedelta
 
 from flask import Blueprint, jsonify, request
 
-from .db import get_db, get_config_value, periodo_competencia, competencia_da_data
+from .db import (get_db, get_config_value, periodo_competencia, competencia_da_data,
+                 data_no_periodo)
 
 bp = Blueprint('resgates', __name__)
 
@@ -38,27 +39,6 @@ def _num(conn, chave, padrao):
         return float(get_config_value(conn, chave, str(padrao)))
     except (TypeError, ValueError):
         return float(padrao)
-
-
-def _data_do_dia(dia: int, ini: str, fim: str):
-    """A data dentro da janela de competência que cai no dia `dia` do mês.
-
-    A competência atravessa dois meses do calendário (26/08 a 24/09), então o
-    dia 10 é do mês de trás e o dia 28 é do da frente. Devolve `None` quando o
-    dia não existe na janela — fevereiro com vencimento no dia 30, por exemplo.
-    """
-    if not dia:
-        return None
-    d0 = date.fromisoformat(ini)
-    d1 = date.fromisoformat(fim)
-    for ano, mes in ((d0.year, d0.month), (d1.year, d1.month)):
-        try:
-            cand = date(ano, mes, int(dia))
-        except ValueError:
-            continue
-        if d0 <= cand <= d1:
-            return cand
-    return None
 
 
 def _eventos(conn, mes_ref: str, ini: str, fim: str, corte: date):
@@ -94,7 +74,7 @@ def _eventos(conn, mes_ref: str, ini: str, fim: str, corte: date):
         else:
             valor = proj_d.get(l['item_id'], 0) or 0
             if valor > 0:
-                d = _data_do_dia(l['dia_vencimento'], ini, fim)
+                d = data_no_periodo(l['dia_vencimento'], ini, fim)
                 por(d.isoformat() if d else fim, -abs(valor), l['nome'], 'previsto')
 
     proj_r = pj.projecoes_do_mes(conn, 'receita', mes_ref)
@@ -112,7 +92,7 @@ def _eventos(conn, mes_ref: str, ini: str, fim: str, corte: date):
         else:
             valor = proj_r.get(l['item_id'], 0) or 0
             if valor > 0:
-                d = _data_do_dia(l['dia_recebimento'], ini, fim)
+                d = data_no_periodo(l['dia_recebimento'], ini, fim)
                 por(d.isoformat() if d else ini, abs(valor), l['nome'], 'previsto')
 
     return eventos

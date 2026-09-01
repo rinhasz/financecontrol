@@ -606,6 +606,31 @@ def periodo_competencia(mes_ref: str, dia_corte: int):
     return ini.isoformat(), fim.isoformat()
 
 
+def data_no_periodo(dia, ini: str, fim: str):
+    """A data dentro da janela de competência que cai no dia `dia` do mês.
+
+    A competência atravessa dois meses do calendário (26/08 a 24/09), então o
+    dia 10 é do mês da frente e o dia 28 é do de trás — não dá para montar a
+    data só com o mês do `mes_ref`. Devolve `None` quando o dia não existe na
+    janela: vencimento no dia 30 numa competência que passa por fevereiro, ou
+    dia fora do intervalo.
+    """
+    from datetime import date
+
+    if not dia:
+        return None
+    d0 = date.fromisoformat(ini)
+    d1 = date.fromisoformat(fim)
+    for ano, mes in ((d0.year, d0.month), (d1.year, d1.month)):
+        try:
+            cand = date(ano, mes, int(dia))
+        except ValueError:
+            continue
+        if d0 <= cand <= d1:
+            return cand
+    return None
+
+
 def competencia_da_data(data: str, dia_corte: int) -> str:
     """Em que mês de competência cai uma data do extrato — o inverso de
     `periodo_competencia`.

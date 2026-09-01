@@ -356,3 +356,59 @@ ousa tocar.
 O **saldo não fica lá**, de propósito: ele é lido do extrato a cada importação, e
 digitá-lo à mão é a exceção — feita no Mês Atual, onde dá para ver a data a que
 ele se refere.
+
+
+---
+
+# Alerta de vencimento e filtro de pendências
+
+Uma despesa **agendada** que vence amanhã não é problema: o dinheiro está
+comprometido e a ordem foi dada. O problema é a que ninguém tocou ainda — é
+essa que gera multa e juros. O alerta existe só para ela.
+
+```
+urgência(l):
+  se status != nao_encontrado          -> nada (agendada ou paga: sem risco)
+  se não há dia de vencimento          -> nada (não dá para saber)
+  se dias_para_vencer < 0              -> vencida  (vermelho)
+  se dias_para_vencer <= 3             -> urgente  (laranja)
+```
+
+Três dias é o que sobra para agendar e ainda cair na data; abaixo disso já é
+corrida contra o relógio do banco.
+
+## A data vem do servidor, não do frontend
+
+`data_prevista` e `dias_para_vencer` são calculados em `_marcar_vencimento`
+(`api/lancamentos.py`). Montar a data a partir do `dia_vencimento` exige saber
+que **a competência atravessa dois meses do calendário** — o dia 10 é do mês da
+frente, o dia 28 é do de trás — e essa regra já mora no servidor
+(`data_no_periodo`, em `api/db.py`, compartilhada com o plano de resgates).
+Reimplementá-la em TypeScript seria uma segunda cópia para divergir.
+
+A contagem é contra **hoje**, não contra o mês exibido: abrir um mês passado não
+deve pintar tudo de vermelho.
+
+## Pendência é mais amplo que alerta
+
+O filtro **"Só pendências"** mostra tudo que ainda não está nem agendado,
+com data de vencimento ou sem — é a lista de trabalho. O alerta é o subconjunto
+urgente dela. Em setembro/2026: 17 pendências, das quais 12 com alerta.
+
+O filtro vale na visão analítica, onde a linha tem status. Clicá-lo estando na
+consolidada troca a visão junto, em vez de não fazer nada.
+
+## Verificado com a carteira real
+
+Em 31/08/2026, o alerta pega exatamente o caso que motivou o pedido:
+
+| despesa | vence | |
+|---|---|---|
+| escola maju / escola malu | 01/09 | vence amanhã |
+| material maju / material malu | 01/09 | vence amanhã |
+| red balloon maju / malu, Teatro Maju | 01/09 | vence amanhã |
+| condomínio sogra, conta luz apto | 03/09 | vence em 3 dias |
+| escola música maju / malu, fisio thalita | 03/09 | vence em 3 dias |
+
+E **não** alerta os quatro cartões que também vencem em 01/09, porque estão
+agendados — que é a distinção que o alerta existe para fazer.

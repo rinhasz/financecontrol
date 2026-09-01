@@ -20,6 +20,10 @@ interface Lancamento {
   descricao_transacao?: string
   // a previsão desta linha foi corrigida à mão neste mês (api/projecao.py)
   projecao_manual?: boolean
+  // vencimento esperado, calculado no servidor: a competência atravessa dois
+  // meses do calendário, então a data não se monta só com o mes_ref
+  data_prevista?: string | null
+  dias_para_vencer?: number | null
 }
 
 interface Receita {
@@ -87,6 +91,40 @@ function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () =>
       text-amber-400 bg-amber-950/40 border border-amber-800/40"
       title="Valor estimado pelo método de projeção cadastrado, não lido do extrato. Clique no valor para corrigir.">
       PREVISTO
+    </span>
+  )
+}
+
+/** Quantos dias antes do vencimento uma despesa não agendada vira alerta.
+ *  Três dias é o que sobra para agendar e ainda cair na data — abaixo disso já
+ *  é corrida contra o relógio do banco. */
+const DIAS_ALERTA = 3
+
+/** `null` quando não há o que alertar.
+ *
+ *  Só alerta o que **não está nem agendado**: uma conta agendada pode vencer
+ *  amanhã sem problema nenhum, o dinheiro já está comprometido e a ordem dada.
+ *  O risco é a que ninguém tocou ainda — é ela que gera multa e juros. */
+function urgencia(l: Lancamento): 'vencida' | 'urgente' | null {
+  if (l.status !== 'nao_encontrado') return null
+  const d = l.dias_para_vencer
+  if (d === null || d === undefined) return null
+  if (d < 0) return 'vencida'
+  return d <= DIAS_ALERTA ? 'urgente' : null
+}
+
+function SeloVencimento({ nivel, dias }: { nivel: 'vencida' | 'urgente'; dias: number }) {
+  const texto = nivel === 'vencida'
+    ? (dias === -1 ? 'venceu ontem' : `venceu há ${-dias} dias`)
+    : dias === 0 ? 'vence hoje' : dias === 1 ? 'vence amanhã' : `vence em ${dias} dias`
+  return (
+    <span className={cn('ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded',
+      'text-[10px] font-semibold tracking-wide border',
+      nivel === 'vencida'
+        ? 'text-red-300 bg-red-950/50 border-red-800/60'
+        : 'text-orange-300 bg-orange-950/40 border-orange-800/50')}
+      title="Ainda não está agendada — sem agendar, o risco é multa e juros">
+      <span aria-hidden>!</span>{texto}
     </span>
   )
 }
@@ -191,6 +229,9 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
   const [diaSalarioEdit, setDiaSalarioEdit] = useState(false)
   const [diaSalarioVal, setDiaSalarioVal] = useState('27')
   const [boletoCopiado, setBoletoCopiado] = useState<number | null>(null)
+  // "pendências" = tudo que ainda não está nem agendado, independentemente da
+  // data. O alerta de vencimento é o subconjunto urgente disso.
+  const [soPendencias, setSoPendencias] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -280,7 +321,11 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
   const somaPorStatus = (itens: Lancamento[], st: Lancamento['status']) =>
     itens.filter(l => l.status === st).reduce((s, l) => s + valorDaLinha(l), 0)
 
-  const byCategory = lancamentos.reduce<Record<string, Lancamento[]>>((acc, l) => {
+  const pendentes = lancamentos.filter(l => l.status === 'nao_encontrado')
+  const urgentes = lancamentos.filter(l => urgencia(l) !== null)
+  const listadas = soPendencias ? pendentes : lancamentos
+
+  const byCategory = listadas.reduce<Record<string, Lancamento[]>>((acc, l) => {
     const cat = l.categoria_nome || 'Outros'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(l)
@@ -451,6 +496,39 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
         </div>
       )}
 
+      {/* Aviso do que vence sem estar agendado, e o filtro de pendências.
+          O aviso vem antes da tabela porque é a única coisa da tela que tem
+          prazo: o resto pode esperar, isto não. */}
+      {!loading && (pendentes.length > 0 || urgentes.length > 0) && (
+        <div className="px-6 pb-2 flex items-center gap-3 flex-wrap">
+          {urgentes.length > 0 && (
+            <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-xs
+              text-orange-300 bg-orange-950/40 border border-orange-800/50">
+              <span aria-hidden className="font-bold">!</span>
+              {urgentes.length === 1
+                ? '1 despesa vence em breve e não está agendada'
+                : `${urgentes.length} despesas vencem em breve e não estão agendadas`}
+            </span>
+          )}
+          <button
+            onClick={() => { setSoPendencias(p => !p); if (visao !== 'analitica') setVisao('analitica') }}
+            aria-pressed={soPendencias}
+            title="Tudo que ainda não está nem agendado, com data de vencimento ou sem"
+            className={cn('px-2.5 py-1 rounded-md text-xs border transition-colors',
+              soPendencias
+                ? 'bg-amber-600/15 border-amber-600/60 text-amber-300'
+                : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200')}>
+            {soPendencias ? 'Mostrando pendências' : 'Só pendências'}
+            <span className="ml-1.5 tabular-nums opacity-70">{pendentes.length}</span>
+          </button>
+          {soPendencias && (
+            <span className="text-xs text-zinc-600">
+              despesas ainda não agendadas — a visão consolidada não filtra
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Tabela */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         {loading ? (
@@ -489,6 +567,10 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
                         <tr key={l.id} className={cn('transition-colors', ROW_BG[l.status], i > 0 && 'border-t border-zinc-800/40')}>
                           <td className="px-4 py-2.5 text-zinc-300 font-medium">
                             {l.item_nome}
+                            {(() => {
+                              const n = urgencia(l)
+                              return n && <SeloVencimento nivel={n} dias={l.dias_para_vencer as number} />
+                            })()}
                             {l.recorrencia === 'esporadica' && (
                               <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
                                 title={l.descricao_transacao ?? 'Despesa esporádica'}>

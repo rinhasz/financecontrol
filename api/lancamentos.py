@@ -1,6 +1,6 @@
 import json
 from flask import Blueprint, jsonify, request
-from .db import get_db, get_config_value, periodo_competencia
+from .db import get_db, get_config_value, periodo_competencia, data_no_periodo
 
 bp = Blueprint('lancamentos', __name__)
 
@@ -75,7 +75,7 @@ def list_lancamentos():
     # mês fechar com número errado.
     rows = conn.execute("""
         SELECT l.*, d.nome as item_nome, l.despesa_id as item_id, d.tipo_valor,
-               d.padrao_variabilidade, d.recorrencia,
+               d.padrao_variabilidade, d.recorrencia, d.dia_vencimento,
                c.nome as categoria_nome, c.id as categoria_id
         FROM lancamento l
         JOIN despesa d ON d.id = l.despesa_id
@@ -100,6 +100,7 @@ def list_lancamentos():
     manuais = pj.manuais_do_mes(conn, 'despesa', mes_ref)
 
     despesas = [dict(r) for r in rows] + _esporadicas_do_mes(conn, mes_ref, 'despesa')
+    _marcar_vencimento(conn, despesas, mes_ref)
     for d in despesas:
         d['projetado'] = proj.get(d['item_id'])
         d['projecao_manual'] = d['item_id'] in manuais
@@ -110,6 +111,30 @@ def list_lancamentos():
     receitas = _receitas_do_mes(conn, mes_ref)
     conn.close()
     return jsonify({'despesas': despesas, 'receitas': receitas})
+
+
+def _marcar_vencimento(conn, despesas: list, mes_ref: str) -> None:
+    """Acrescenta `data_prevista` e `dias_para_vencer` a cada despesa.
+
+    Serve para a tela avisar do que vence e ainda **não está nem agendado** —
+    o caso que custa multa e juros. O sinal precisa vir daqui e não do
+    frontend: montar a data a partir do `dia_vencimento` exige saber que a
+    competência atravessa dois meses do calendário, e essa regra já mora no
+    servidor (`data_no_periodo`).
+
+    A contagem é contra **hoje**, não contra o mês exibido: olhar um mês
+    passado não deve pintar tudo de vermelho, e por isso `dias_para_vencer`
+    fica `None` quando a data não existe.
+    """
+    from datetime import date
+
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '26'))
+    ini, fim = periodo_competencia(mes_ref, dia_corte)
+    hoje = date.today()
+    for d in despesas:
+        venc = data_no_periodo(d.get('dia_vencimento'), ini, fim)
+        d['data_prevista'] = venc.isoformat() if venc else None
+        d['dias_para_vencer'] = (venc - hoje).days if venc else None
 
 
 def _receitas_do_mes(conn, mes_ref: str) -> list:
