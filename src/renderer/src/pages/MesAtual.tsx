@@ -91,6 +91,36 @@ function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () =>
   )
 }
 
+/** Os três totais de um grupo.
+ *
+ *  Um número só escondia a diferença entre o que já tem data e o que é
+ *  estimativa — e é essa diferença que decide o quanto dá para confiar no
+ *  total. As cores são as mesmas dos selos de status nas linhas: azul para
+ *  agendado, âmbar para previsto.
+ *
+ *  `a vencer` aqui é **só o agendado**, não o agendado somado ao que falta da
+ *  projeção (que é o sentido do card "A vencer" do resumo, ver comentário lá).
+ *  No grupo, `a vencer` e `previsto` são parcelas que não se sobrepõem, e o
+ *  que sobra para o total é o que já foi pago.
+ */
+function TotaisDoGrupo({ aVencer, previsto, total }: {
+  aVencer: number; previsto: number; total: number
+}) {
+  return (
+    <span className="flex items-baseline gap-3 text-xs tabular-nums whitespace-nowrap">
+      <span className="text-blue-400/70" title="Agendado: já tem data e ainda não saiu da conta">
+        a vencer <span className="font-medium">{formatBRL(aVencer)}</span>
+      </span>
+      <span className="text-amber-400/70" title="Em aberto: estimado pela projeção, ainda não confirmado">
+        previsto <span className="font-medium">{formatBRL(previsto)}</span>
+      </span>
+      <span className="text-zinc-500" title="Tudo do grupo, incluindo o que já foi pago">
+        total <span className="font-medium text-zinc-300">{formatBRL(total)}</span>
+      </span>
+    </span>
+  )
+}
+
 type Visao = 'analitica' | 'consolidada'
 
 /** Linha da visão consolidada: uma por item, com as ocorrências somadas e o
@@ -236,6 +266,10 @@ export function MesAtual() {
   // pronta do resumo — aqui só se decide onde a linha aparece.
   const renda = receitas.filter(r => !TIPOS_MOVIMENTACAO.has(r.tipo))
   const movimentacao = receitas.filter(r => TIPOS_MOVIMENTACAO.has(r.tipo))
+
+  const valorDaLinha = (l: Lancamento) => l.valor_real ?? l.valor_esperado
+  const somaPorStatus = (itens: Lancamento[], st: Lancamento['status']) =>
+    itens.filter(l => l.status === st).reduce((s, l) => s + valorDaLinha(l), 0)
 
   const byCategory = lancamentos.reduce<Record<string, Lancamento[]>>((acc, l) => {
     const cat = l.categoria_nome || 'Outros'
@@ -421,9 +455,10 @@ export function MesAtual() {
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
                   <div className="flex-1 h-px bg-zinc-800" />
-                  <span className="text-xs text-zinc-600">
-                    {formatBRL(items.reduce((s, l) => s + (l.valor_real ?? l.valor_esperado), 0))}
-                  </span>
+                  <TotaisDoGrupo
+                    aVencer={somaPorStatus(items, 'agendado')}
+                    previsto={somaPorStatus(items, 'nao_encontrado')}
+                    total={items.reduce((s, l) => s + valorDaLinha(l), 0)} />
                 </div>
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
                   <table className="w-full text-sm">
@@ -547,8 +582,22 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
 
   // categorias com maior gasto primeiro — a ordem alfabética delas raramente
   // é o que se quer olhar antes
+  // Na consolidada o total continua sendo o LÍQUIDO (estorno já abatido), que
+  // é o número que a visão existe para dar. As duas parcelas novas saem das
+  // linhas de gasto por status — estorno não tem status e fica de fora delas,
+  // aparecendo só no líquido.
+  const somaCons = (itens: DespesaConsolidada[], st: string) =>
+    itens.reduce((s, d) => s + d.linhas
+      .filter(l => l.tipo === 'gasto' && l.status === st)
+      .reduce((a, l) => a + l.valor, 0), 0)
+
   const categorias = Object.entries(porCategoria)
-    .map(([cat, itens]) => ({ cat, itens: ordenar(itens), total: itens.reduce((s, d) => s + d.liquido, 0) }))
+    .map(([cat, itens]) => ({
+      cat, itens: ordenar(itens),
+      total: itens.reduce((s, d) => s + d.liquido, 0),
+      aVencer: somaCons(itens, 'agendado'),
+      previsto: somaCons(itens, 'nao_encontrado'),
+    }))
     .sort((a, b) => b.total - a.total)
 
   return (
@@ -571,12 +620,12 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
         </label>
       </div>
 
-      {categorias.map(({ cat, itens, total }) => (
+      {categorias.map(({ cat, itens, total, aVencer, previsto }) => (
         <div key={cat}>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
             <div className="flex-1 h-px bg-zinc-800" />
-            <span className="text-xs text-zinc-600 tabular-nums">{formatBRL(total)}</span>
+            <TotaisDoGrupo aVencer={aVencer} previsto={previsto} total={total} />
           </div>
           <div className="rounded-lg overflow-hidden border border-zinc-800/60">
             <table className="w-full text-sm">
