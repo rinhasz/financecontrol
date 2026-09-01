@@ -4,17 +4,21 @@ import { Catalogo } from './pages/Catalogo'
 import { Importacao } from './pages/Importacao'
 import { EmailBusca } from './pages/EmailBusca'
 import { Investimentos } from './pages/Investimentos'
+import { PlanejarResgates } from './pages/PlanejarResgates'
+import { Parametros } from './pages/Parametros'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { cn } from './lib/utils'
 
-type Page = 'mes' | 'catalogo' | 'importacao' | 'email' | 'investimentos'
+type Page = 'mes' | 'resgates' | 'catalogo' | 'importacao' | 'email' | 'investimentos' | 'parametros'
 
 const NAV = [
   { id: 'mes' as Page, label: 'Mês Atual', icon: CalendarIcon },
+  { id: 'resgates' as Page, label: 'Planejar Resgates', icon: TimelineIcon },
   { id: 'catalogo' as Page, label: 'Catálogo', icon: ListIcon },
   { id: 'importacao' as Page, label: 'Importar Extrato', icon: UploadIcon },
   { id: 'email' as Page, label: 'Procurar em Emails', icon: MailIcon },
-  { id: 'investimentos' as Page, label: 'Investimentos', icon: WalletIcon }
+  { id: 'investimentos' as Page, label: 'Investimentos', icon: WalletIcon },
+  { id: 'parametros' as Page, label: 'Parâmetros', icon: GearIcon }
 ]
 
 export default function App(): JSX.Element {
@@ -66,7 +70,12 @@ export default function App(): JSX.Element {
           {/* As três telas ficam sempre montadas — só a visibilidade muda — para
               não perder o estado (ex: importação em andamento) ao trocar de aba */}
           <div className={cn('h-full', page !== 'mes' && 'hidden')}>
-            <ErrorBoundary nome="Mês Atual"><MesAtual /></ErrorBoundary>
+            <ErrorBoundary nome="Mês Atual">
+              <MesAtual onPlanejarResgates={() => setPage('resgates')} />
+            </ErrorBoundary>
+          </div>
+          <div className={cn('h-full', page !== 'resgates' && 'hidden')}>
+            <ErrorBoundary nome="Planejar Resgates"><PlanejarResgates /></ErrorBoundary>
           </div>
           <div className={cn('h-full', page !== 'catalogo' && 'hidden')}>
             <ErrorBoundary nome="Catálogo"><Catalogo /></ErrorBoundary>
@@ -79,6 +88,9 @@ export default function App(): JSX.Element {
           </div>
           <div className={cn('h-full', page !== 'investimentos' && 'hidden')}>
             <ErrorBoundary nome="Investimentos"><Investimentos active={page === 'investimentos'} /></ErrorBoundary>
+          </div>
+          <div className={cn('h-full', page !== 'parametros' && 'hidden')}>
+            <ErrorBoundary nome="Parâmetros"><Parametros /></ErrorBoundary>
           </div>
         </div>
       </main>
@@ -97,6 +109,28 @@ function Versao(): JSX.Element {
     <p className="text-xs text-zinc-600" title="Quando o frontend foi buildado e quando o backend subiu">
       {v ? `ui ${v.build_em} · api ${v.backend_em}` : 'v1.0.0'}
     </p>
+  )
+}
+
+function TimelineIcon({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h18" />
+      <circle cx="7" cy="12" r="2" />
+      <circle cx="17" cy="12" r="2" />
+      <path d="M7 8V6M17 18v-2" />
+    </svg>
+  )
+}
+
+function GearIcon({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   )
 }
 

@@ -254,3 +254,105 @@ Item que ainda não foi pago, recebido nem agendado mostra status **Em aberto**
 com o selo **PREVISTO** ao lado. O valor daquela linha não veio do extrato: veio
 da projeção. Sem dizer isso, um previsto se confunde com um realizado — e a
 diferença é exatamente o que separa "já saiu da conta" de "estimativa".
+
+
+---
+
+# Plano de resgates (quando, não só quanto)
+
+A calculadora responde **quanto** falta resgatar no mês. Ela não responde o que
+fazer com esse número: resgatar tudo hoje deixa dinheiro parado na conta
+corrente rendendo nada; resgatar tarde demais fura a reserva.
+
+`api/resgates.py` responde **quando**. O link "Planejar Resgates", ao lado do
+valor a resgatar no Mês Atual, abre a tela.
+
+## A linha do tempo
+
+Parte do **saldo lido do extrato**, não do início do mês: metade da competência
+já aconteceu e está dentro daquele número. Contar de novo o que já foi pago
+debitaria a mesma conta duas vezes.
+
+Daí para frente, um evento por dia:
+
+| origem | vai para o dia |
+|---|---|
+| despesa agendada | a data do lançamento no extrato |
+| despesa em aberto | o `dia_vencimento` do catálogo, dentro da janela |
+| receita prevista | a data do lançamento |
+| receita em aberto | o `dia_recebimento` do catálogo |
+| investimento que vence | a `data_vencimento` do papel |
+
+Vencimento anterior ao saldo e ainda não pago cai no **próprio dia do corte**: é
+dinheiro que sai a qualquer momento.
+
+**Resgate não conta como entrada.** Receita do tipo `resgate_mensal` ou
+`resgate_esporadico` fica fora da linha do tempo — contá-la seria contar com o
+dinheiro que ainda estamos decidindo tirar.
+
+## O algoritmo, em duas partes
+
+**1. Quanto precisa ter sido resgatado até cada dia.** Simula o mês sem resgate
+nenhum e acumula o **máximo** da falta contra a reserva:
+
+```
+preciso[d] = max sobre os dias ≤ d de (reserva − saldo_sem_resgate)
+```
+
+Máximo, e não a falta do dia, porque dinheiro resgatado não volta: se o saldo
+furou 3 mil no dia 5, esses 3 mil precisam ter entrado até o dia 5, mesmo que no
+dia 6 chegue o salário. A curva é não-decrescente por construção, e os dias em
+que ela **sobe** são os prazos — resgatar exatamente ali é o mais tarde
+possível, ou seja, o plano que deixa o dinheiro investido por mais tempo.
+
+**2. Encaixar nos resgates disponíveis.** Se há mais prazos que resgates, dois
+viram um, e o resgate vai para o **primeiro** deles — antecipar é seguro,
+atrasar não é. Funde sempre o par mais barato, com custo medido em
+`valor × dias de antecipação`: adiantar R$ 1.000 por 6 dias custa menos que
+adiantar R$ 20.000 por 2.
+
+## Investimento que vence é resgate certo
+
+Papel que vence vira dinheiro na conta sem ninguém pedir. Entra na linha do
+tempo como entrada **e** ocupa uma das vagas de resgate do mês — é a única
+informação de investimento que esta fase usa. Qual papel resgatar para os
+demais é decisão da fase seguinte.
+
+## `resgates_por_mes` — preferência, não limite
+
+Um resgate só no começo do mês sempre resolveria; o número não existe para
+tornar o plano possível, e sim para escolher **onde ficar** no trade-off entre
+render mais e operar menos. Verificado na carteira real (setembro/2026, saldo de
+R$ 46.116,63, reserva de R$ 5.000, uma LCA de R$ 233.746 vencendo em 14/09):
+
+| `resgates_por_mes` | plano |
+|---|---|
+| 1 ou 2 | 01/09 — R$ 27.897,04 |
+| 4 | 01/09 R$ 20.872,80 · 08/09 R$ 5.911,74 · 12/09 R$ 1.112,50 |
+
+O total é o mesmo; o que muda é quanto tempo cada parcela fica rendendo. Em
+nenhum dos casos o saldo fura a reserva.
+
+## Verificação
+
+Cenários sintéticos sobre `_planejar`, cada um isolando uma regra:
+
+| cenário | esperado | resultado |
+|---|---|---|
+| saldo cobre o mês | nenhum resgate | `[]` |
+| um prazo só | resgata no dia exato | 03/09, o dia da saída |
+| 3 prazos, 3 vagas | just-in-time | 3 resgates nos 3 prazos |
+| 3 prazos, 1 vaga | funde tudo no primeiro | 1 resgate em 01/09 |
+| 3 prazos, 2 vagas | funde o par mais barato | mantém o de 01/09, funde os outros dois |
+| salário depois do furo | o furo continua exigindo resgate | resgata em 01/09 |
+
+## Parâmetros (tela própria)
+
+`reserva_desejada`, `dia_recebimento_salario` e `resgates_por_mes` passam a ter
+tela — cada campo com a explicação do que ele muda, porque são números que
+mexem em telas inteiras e um campo sem explicação vira um número que ninguém
+ousa tocar.
+
+O **saldo não fica lá**, de propósito: ele é lido do extrato a cada importação, e
+digitá-lo à mão é a exceção — feita no Mês Atual, onde dá para ver a data a que
+ele se refere.

@@ -260,6 +260,10 @@ CREATE TABLE IF NOT EXISTS config (
 );
 
 INSERT OR IGNORE INTO config VALUES ('reserva_desejada', '5000');
+-- quantos resgates se quer fazer no mes (api/resgates.py). Preferencia, nao
+-- limite: mais resgates deixam o dinheiro investido por mais tempo, ao custo
+-- de mais operacoes.
+INSERT OR IGNORE INTO config VALUES ('resgates_por_mes', '2');
 INSERT OR IGNORE INTO config VALUES ('saldo_conta', '0');
 INSERT OR IGNORE INTO config VALUES ('dia_recebimento_salario', '26');
 """

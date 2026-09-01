@@ -176,7 +176,7 @@ const ROW_BG = {
   nao_encontrado: 'hover:bg-zinc-800/40'
 }
 
-export function MesAtual() {
+export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => void }) {
   const [mesRef, setMesRef] = useState(currentMesRef())
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [receitas, setReceitas] = useState<Receita[]>([])
@@ -429,9 +429,22 @@ export function MesAtual() {
                     : undefined}>
                   A resgatar
                 </p>
-                <p className={cn('text-lg font-bold', resumo.faltaResgatar > 0 ? 'text-amber-400' : 'text-emerald-400')}>
-                  {formatBRL(resumo.faltaResgatar)}
-                </p>
+                <div className="flex items-baseline gap-2">
+                  <p className={cn('text-lg font-bold', resumo.faltaResgatar > 0 ? 'text-amber-400' : 'text-emerald-400')}>
+                    {formatBRL(resumo.faltaResgatar)}
+                  </p>
+                  {/* o "quanto" fica aqui; o "quando" é outra pergunta, e tem
+                      tela própria — ver api/resgates.py */}
+                  {onPlanejarResgates && (
+                    <button onClick={onPlanejarResgates}
+                      className="text-xs text-zinc-500 hover:text-emerald-400 underline
+                        underline-offset-2 decoration-zinc-700 hover:decoration-emerald-500
+                        transition-colors whitespace-nowrap"
+                      title="Ver a linha do tempo do mês e em que datas programar cada resgate">
+                      Planejar Resgates
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

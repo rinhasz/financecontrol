@@ -64,6 +64,10 @@ export const api = {
     manual: (natureza: 'despesa' | 'receita', itemId: number, mes: string, valor: number | null) =>
       post('/api/projecao/manual', { natureza, item_id: itemId, mes_ref: mes, valor })
   },
+  resgates: {
+    // mes vazio deixa o servidor usar a competencia de hoje
+    plano: (mes: string) => get('/api/resgates/plano' + (mes ? `?mes=${mes}` : ''))
+  },
   config: {
     get: () => get('/api/config'),
     set: (data: Record<string, unknown>) => post('/api/config', data)
