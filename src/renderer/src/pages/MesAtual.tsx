@@ -91,30 +91,36 @@ function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () =>
   )
 }
 
-/** Os três totais de um grupo.
+/** Os totais de um grupo, das parcelas para os agregados.
  *
- *  Um número só escondia a diferença entre o que já tem data e o que é
- *  estimativa — e é essa diferença que decide o quanto dá para confiar no
- *  total. As cores são as mesmas dos selos de status nas linhas: azul para
- *  agendado, âmbar para previsto.
+ *  `agendado` e `previsto` são as duas parcelas do que ainda não saiu da conta,
+ *  e não se sobrepõem: uma tem data, a outra é estimativa da projeção. `a
+ *  vencer` é a soma delas — o número que de fato precisa de dinheiro, e o mesmo
+ *  sentido do card "A vencer" do resumo. `pago` é o que já saiu.
  *
- *  `a vencer` aqui é **só o agendado**, não o agendado somado ao que falta da
- *  projeção (que é o sentido do card "A vencer" do resumo, ver comentário lá).
- *  No grupo, `a vencer` e `previsto` são parcelas que não se sobrepõem, e o
- *  que sobra para o total é o que já foi pago.
+ *  Um número só escondia justamente a diferença que decide o quanto dá para
+ *  confiar no total: um grupo todo agendado e um grupo todo projetado somavam
+ *  igual. As cores repetem os selos de status das linhas — azul agendado,
+ *  âmbar previsto, verde pago.
  */
-function TotaisDoGrupo({ aVencer, previsto, total }: {
-  aVencer: number; previsto: number; total: number
+function TotaisDoGrupo({ agendado, previsto, pago, total }: {
+  agendado: number; previsto: number; pago: number; total: number
 }) {
   return (
-    <span className="flex items-baseline gap-3 text-xs tabular-nums whitespace-nowrap">
-      <span className="text-blue-400/70" title="Agendado: já tem data e ainda não saiu da conta">
-        a vencer <span className="font-medium">{formatBRL(aVencer)}</span>
+    <span className="flex items-baseline gap-2.5 text-xs tabular-nums whitespace-nowrap">
+      <span className="text-blue-400/70" title="Tem data marcada e ainda não saiu da conta">
+        agendado <span className="font-medium">{formatBRL(agendado)}</span>
       </span>
       <span className="text-amber-400/70" title="Em aberto: estimado pela projeção, ainda não confirmado">
         previsto <span className="font-medium">{formatBRL(previsto)}</span>
       </span>
-      <span className="text-zinc-500" title="Tudo do grupo, incluindo o que já foi pago">
+      <span className="text-zinc-400" title="Agendado + previsto: tudo que ainda vai sair da conta">
+        a vencer <span className="font-medium text-zinc-300">{formatBRL(agendado + previsto)}</span>
+      </span>
+      <span className="text-emerald-400/70" title="Já saiu da conta">
+        pago <span className="font-medium">{formatBRL(pago)}</span>
+      </span>
+      <span className="text-zinc-500" title="Tudo do grupo: pago + a vencer">
         total <span className="font-medium text-zinc-300">{formatBRL(total)}</span>
       </span>
     </span>
@@ -456,8 +462,9 @@ export function MesAtual() {
                   <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
                   <div className="flex-1 h-px bg-zinc-800" />
                   <TotaisDoGrupo
-                    aVencer={somaPorStatus(items, 'agendado')}
+                    agendado={somaPorStatus(items, 'agendado')}
                     previsto={somaPorStatus(items, 'nao_encontrado')}
+                    pago={somaPorStatus(items, 'pago')}
                     total={items.reduce((s, l) => s + valorDaLinha(l), 0)} />
                 </div>
                 <div className="rounded-lg overflow-hidden border border-zinc-800/60">
@@ -595,8 +602,9 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
     .map(([cat, itens]) => ({
       cat, itens: ordenar(itens),
       total: itens.reduce((s, d) => s + d.liquido, 0),
-      aVencer: somaCons(itens, 'agendado'),
+      agendado: somaCons(itens, 'agendado'),
       previsto: somaCons(itens, 'nao_encontrado'),
+      pago: somaCons(itens, 'pago'),
     }))
     .sort((a, b) => b.total - a.total)
 
@@ -620,12 +628,12 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
         </label>
       </div>
 
-      {categorias.map(({ cat, itens, total, aVencer, previsto }) => (
+      {categorias.map(({ cat, itens, total, agendado, previsto, pago }) => (
         <div key={cat}>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{cat}</span>
             <div className="flex-1 h-px bg-zinc-800" />
-            <TotaisDoGrupo aVencer={aVencer} previsto={previsto} total={total} />
+            <TotaisDoGrupo agendado={agendado} previsto={previsto} pago={pago} total={total} />
           </div>
           <div className="rounded-lg overflow-hidden border border-zinc-800/60">
             <table className="w-full text-sm">
