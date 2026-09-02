@@ -463,6 +463,46 @@ def init_db():
     if cols_val and 'fluxo' not in cols_val:
         conn.execute('ALTER TABLE valorizacao ADD COLUMN fluxo REAL NOT NULL DEFAULT 0')
 
+    # ------------------------------------------------------------------
+    # As três bases diárias de investimento: posição, valorização e movimento.
+    #
+    # Cada uma passa a ser **autossuficiente** — carrega a identidade do papel
+    # (produto, emissor, indexador, datas, taxa) além dos seus próprios números.
+    # É denormalizado de propósito: são fotos diárias, e uma foto que depende de
+    # join para ser lida deixa de ser foto. Ler a valorização de 01/09 não pode
+    # depender de a posição de 25/08 ainda existir com o mesmo id.
+    #
+    # `valor_aplicacao_atualizado` é o fio que liga as três: nasce igual ao valor
+    # de aplicação na posição, é recalculado no movimento
+    # (`+ aplicação − resgate`) e é transportado para a valorização, onde entra
+    # na regra de recálculo do saldo.
+    # ------------------------------------------------------------------
+    cols_inv = [r[1] for r in conn.execute('PRAGMA table_info(investimento)').fetchall()]
+    if cols_inv and 'valor_aplicacao_atualizado' not in cols_inv:
+        conn.execute('ALTER TABLE investimento ADD COLUMN valor_aplicacao_atualizado REAL')
+        # na importação da posição os dois nascem iguais: ainda não houve movimento
+        conn.execute('UPDATE investimento SET valor_aplicacao_atualizado = valor_aplicacao')
+
+    for coluna, tipo in (
+            ('produto', 'TEXT'), ('emissor', 'TEXT'), ('indexador', 'TEXT'),
+            ('ativo', 'TEXT'), ('data_aplicacao', 'TEXT'), ('data_vencimento', 'TEXT'),
+            ('data_liquidez', 'TEXT'), ('quantidade', 'REAL'),
+            ('valor_aplicacao_atualizado', 'REAL'), ('perc_indexador', 'REAL'),
+            ('taxa', 'REAL'), ('saldo_bruto_accrual', 'REAL'),
+            ('saldo_liquido_accrual', 'REAL'), ('saldo_bruto_mtm', 'REAL'),
+            ('saldo_liquido_mtm', 'REAL')):
+        if cols_val and coluna not in cols_val:
+            conn.execute(f'ALTER TABLE valorizacao ADD COLUMN {coluna} {tipo}')
+
+    cols_mov = [r[1] for r in conn.execute('PRAGMA table_info(movimento_investimento)').fetchall()]
+    for coluna, tipo in (
+            ('emissor', 'TEXT'), ('indexador', 'TEXT'), ('ativo', 'TEXT'),
+            ('data_liquidez', 'TEXT'), ('pu', 'REAL'), ('quantidade', 'REAL'),
+            ('valor_aplicacao', 'REAL'), ('valor_aplicacao_atualizada', 'REAL'),
+            ('perc_indexador', 'REAL'), ('taxa', 'REAL'), ('valor_movimento', 'REAL')):
+        if cols_mov and coluna not in cols_mov:
+            conn.execute(f'ALTER TABLE movimento_investimento ADD COLUMN {coluna} {tipo}')
+
     conn.commit()
     _seed_regras_transacao(conn)
     conn.close()

@@ -106,8 +106,9 @@ export function ExtratoInvestimento({ onConcluido }: { onConcluido: () => void }
           <div>
             <h2 className="text-base font-semibold text-zinc-100">Importar extrato de investimento</h2>
             <p className="text-xs text-zinc-500 mt-1 max-w-lg">
-              Lê as linhas de <strong className="text-zinc-400">RESGATE</strong> e ajusta a posição.
-              O movimento fica gravado à parte — dá para excluir depois e a posição volta ao que era.
+              Lê as linhas de <strong className="text-zinc-400">RESGATE</strong>, grava o movimento
+              e já revaloriza a posição. O movimento fica à parte — dá para excluir depois e a
+              posição volta ao que era.
             </p>
           </div>
           <button onClick={() => { setAberto(false); limpar() }}
@@ -216,7 +217,7 @@ export function ExtratoInvestimento({ onConcluido }: { onConcluido: () => void }
               <button onClick={confirmar} disabled={!podeConfirmar}
                 className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium
                   disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-                {ocupado ? 'Gravando...' : `Confirmar ${prev.itens.length} movimento(s)`}
+                {ocupado ? 'Gravando e atualizando...' : `Confirmar e atualizar (${prev.itens.length})`}
               </button>
               <button onClick={() => { setAberto(false); limpar() }}
                 className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-400
@@ -224,7 +225,7 @@ export function ExtratoInvestimento({ onConcluido }: { onConcluido: () => void }
                 Cancelar
               </button>
               <span className="text-xs text-zinc-600">
-                nada é gravado até aqui — e depois de gravado dá para excluir
+                grava o movimento e já revaloriza a posição — e depois dá para excluir
               </span>
             </div>
           </>

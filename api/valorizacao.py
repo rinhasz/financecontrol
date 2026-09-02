@@ -226,8 +226,9 @@ def _pu_base(inv: dict) -> float:
     return inv.get('pu') or 1.0
 
 
-def _passo(conn, inv_id: int, d: date, pu_ant: float, fator: float, pu_novo: float,
-           qtd: float, metodo: str, detalhe: str, fluxo: float = 0.0) -> None:
+def _passo(conn, inv: dict, d: date, pu_ant: float, fator: float, pu_novo: float,
+           qtd: float, metodo: str, detalhe: str, fluxo: float = 0.0,
+           aplicacao_atualizada: float = None) -> None:
     """Grava um dia da memória de cálculo.
 
     Existe para que `variacao` saia sempre do mesmo lugar: são três caminhos que
@@ -239,11 +240,25 @@ def _passo(conn, inv_id: int, d: date, pu_ant: float, fator: float, pu_novo: flo
     a ser esta variação líquida do fluxo do dia — e é por isso que ela fica
     gravada por dia, e não recalculada a partir das pontas.
     """
+    saldo = pu_novo * qtd
+    # MTM para o que tem preço de mercado, accrual para o que rende por curva —
+    # a mesma distinção da posição, mantida aqui para a base diária poder ser
+    # lida sozinha, sem consultar de onde o papel veio.
+    mtm = metodo in ('mercado', 'anbima')
     conn.execute(
         'INSERT INTO valorizacao (investimento_id, data, pu_anterior, fator, pu, '
-        'saldo, variacao, fluxo, metodo, detalhe) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        (inv_id, d.isoformat(), pu_ant, fator, pu_novo, pu_novo * qtd,
-         (pu_novo - pu_ant) * qtd, fluxo, metodo, detalhe))
+        'saldo, variacao, fluxo, metodo, detalhe, produto, emissor, indexador, ativo, '
+        'data_aplicacao, data_vencimento, data_liquidez, quantidade, '
+        'valor_aplicacao_atualizado, perc_indexador, taxa, saldo_bruto_accrual, '
+        'saldo_liquido_accrual, saldo_bruto_mtm, saldo_liquido_mtm) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        (inv['id'], d.isoformat(), pu_ant, fator, pu_novo, saldo,
+         (pu_novo - pu_ant) * qtd, fluxo, metodo, detalhe,
+         inv.get('produto'), inv.get('emissor'), inv.get('indexador'), inv.get('ativo'),
+         inv.get('data_aplicacao'), inv.get('data_vencimento'), inv.get('data_liquidez'),
+         qtd, aplicacao_atualizada, inv.get('perc_indexador'), inv.get('taxa'),
+         None if mtm else saldo, None if mtm else saldo,
+         saldo if mtm else None, saldo if mtm else None))
 
 
 def _movimentos_por_papel(conn) -> dict:
@@ -278,17 +293,23 @@ def _aplicar_movimento(mov: dict, pu: float, qtd: float):
     """
     saldo = pu * qtd
     metodo = mov.get('metodo') or 'proporcional'
+    tipo = (mov.get('tipo') or 'resgate').lower()
 
+    if tipo == 'aplicacao':
+        return qtd, 0.0        # 3.3.3: entra depois do fator, em _aplicar_movimento_pos
     if metodo == 'credito':
-        saldo_novo = saldo - (mov['valor_bruto'] or 0)
+        saldo_novo = saldo - abs(mov.get('valor_movimento') or mov.get('valor_bruto') or 0)
     else:
-        # proporcional: tira do valor a mesma fatia que saiu do principal
-        antes = mov.get('valor_anterior') or 0
-        principal = mov['valor_principal'] or 0
-        base = (mov.get('valor_novo') or 0)
-        # a razão é recalculada a partir do que foi gravado no movimento, para o
-        # resultado não depender de o saldo de hoje ter mudado desde o import
-        razao = (base / antes) if antes else 1.0
+        # 3.3.2 — resgate proporcional:
+        #   novo = (valor_aplicacao_atualizado / valor_aplicacao) × saldo_anterior
+        # A razão sai dos valores de **aplicação** gravados no movimento, e não
+        # do saldo, para o resultado não mudar se a valorização for refeita com
+        # dados de mercado diferentes.
+        antes = mov.get('valor_aplicacao') or 0
+        depois = mov.get('valor_aplicacao_atualizada')
+        if depois is None:
+            depois = antes - abs(mov.get('valor_principal') or 0)
+        razao = (depois / antes) if antes else 1.0
         saldo_novo = saldo * razao
 
     saldo_novo = max(0.0, saldo_novo)
@@ -297,16 +318,26 @@ def _aplicar_movimento(mov: dict, pu: float, qtd: float):
 
 
 def _aplicar_movimento_pos(mov: dict, pu: float, qtd: float):
-    """O método `extrato`, aplicado **depois** do fator do dia.
+    """O que entra **depois** do fator do dia. Dois casos, pelo mesmo motivo.
 
-    O valor que o banco publica na seção "Posição em" já é o fechamento — tem o
-    rendimento do dia dentro. Encaixá-lo aqui é o que faz o número da tela ser,
-    literalmente, o número do extrato.
+    **Aplicação** (regra 3.3.3): `saldo_anterior × atualização + aplicação`. O
+    dinheiro que acabou de chegar não rendeu o dia que ainda não passou por ele
+    — somá-lo antes do fator pagaria juros sobre um aporte que nem existia.
+
+    **Método `extrato`**: o valor que o banco publica em "Posição em" já é o
+    fechamento, com o rendimento dentro. Aplicá-lo antes renderia o dia duas
+    vezes (erro de R$ 99,97, pego em teste).
     """
-    if (mov.get('metodo') or '') != 'extrato' or not mov.get('valor_novo'):
-        return qtd, 0.0
     saldo = pu * qtd
-    saldo_novo = max(0.0, mov['valor_novo'])
+    tipo = (mov.get('tipo') or 'resgate').lower()
+
+    if tipo == 'aplicacao':
+        saldo_novo = saldo + abs(mov.get('valor_movimento') or mov.get('valor_bruto') or 0)
+    elif (mov.get('metodo') or '') == 'extrato' and mov.get('valor_novo'):
+        saldo_novo = max(0.0, mov['valor_novo'])
+    else:
+        return qtd, 0.0
+
     return (saldo_novo / pu if pu else 0.0), round(saldo_novo - saldo, 2)
 
 
@@ -341,6 +372,12 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
         for m in movimentos.get(
                 (inv['produto'], inv.get('data_aplicacao'), inv.get('data_vencimento')), []):
             movs.setdefault(m['data'], []).append(m)
+        # O fio que liga as três bases (3.2). Parte do valor de aplicação
+        # **original**, e não do já atualizado: o já atualizado é o resultado da
+        # última caminhada, e começar por ele faria os dias anteriores ao
+        # movimento mostrarem um valor que só passou a valer depois dele.
+        # Cada movimento guarda o valor absoluto, então reprocessar é idempotente.
+        aplic_atual = inv.get('valor_aplicacao')
         # O que vale é o último dia **efetivo**, não o último dia do calendário:
         # o CDI de hoje só é divulgado amanhã, e dizer "valorizado até hoje"
         # quando o último fator aplicado é de anteontem seria mentira.
@@ -355,9 +392,12 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
             do_dia = movs.get(d.isoformat(), [])
             fluxo_do_dia, nota_mov = 0.0, ''
             for m in do_dia:
-                if (m.get('metodo') or '') == 'extrato':
-                    continue                      # entra depois do fator
+                # 'extrato' e aplicação entram depois do fator (3.3.3)
+                if (m.get('metodo') or '') == 'extrato' or (m.get('tipo') or '') == 'aplicacao':
+                    continue
                 qtd, delta = _aplicar_movimento(m, pu, qtd)
+                if m.get('valor_aplicacao_atualizada') is not None:
+                    aplic_atual = m['valor_aplicacao_atualizada']
                 fluxo_do_dia += delta
                 nota_mov += f" · {m['tipo']} de {abs(delta):,.2f} ({m['metodo']})"
 
@@ -365,27 +405,29 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
             if metodo in ('mercado', 'anbima'):
                 if pu_mercado is None:
                     # sem preço no dia: o papel não some, mantém o último
-                    _passo(conn, inv['id'], d, pu, 1.0, pu, qtd, metodo,
-                           detalhe + nota_mov, fluxo_do_dia)
+                    _passo(conn, inv, d, pu, 1.0, pu, qtd, metodo,
+                           detalhe + nota_mov, fluxo_do_dia, aplic_atual)
                     continue
                 fator = pu_mercado / pu if pu else 1.0
                 pu_novo = pu_mercado
             else:
                 fator, metodo, detalhe = fator_do_dia(inv, d, conn, util)
                 if fator is None:
-                    _passo(conn, inv['id'], d, pu, 1.0, pu, qtd, 'parado',
-                           detalhe + nota_mov, fluxo_do_dia)
+                    _passo(conn, inv, d, pu, 1.0, pu, qtd, 'parado',
+                           detalhe + nota_mov, fluxo_do_dia, aplic_atual)
                     continue
                 pu_novo = pu * fator
 
             for m in do_dia:
                 qtd, delta = _aplicar_movimento_pos(m, pu_novo, qtd)
+                if delta and m.get('valor_aplicacao_atualizada') is not None:
+                    aplic_atual = m['valor_aplicacao_atualizada']
                 if delta:
                     fluxo_do_dia += delta
-                    nota_mov += f" · {m['tipo']} de {abs(delta):,.2f} (extrato)"
+                    nota_mov += f" · {m['tipo']} de {abs(delta):,.2f}"
 
-            _passo(conn, inv['id'], d, pu, fator, pu_novo, qtd, metodo,
-                   detalhe + nota_mov, fluxo_do_dia)
+            _passo(conn, inv, d, pu, fator, pu_novo, qtd, metodo,
+                   detalhe + nota_mov, fluxo_do_dia, aplic_atual)
             pu, andou = pu_novo, True
             ultimo_metodo, ultimo_detalhe, ultima_data = metodo, detalhe, d.isoformat()
 
@@ -394,8 +436,10 @@ def valorizar(conn, data_posicao: str, ate: date = None) -> dict:
 
         conn.execute(
             'UPDATE investimento SET data_valorizacao=?, pu_valorizado=?, '
-            'saldo_valorizado=?, metodo_valorizacao=?, detalhe_valorizacao=? WHERE id=?',
-            (ultima_data, pu, pu * qtd, ultimo_metodo, ultimo_detalhe, inv['id']))
+            'saldo_valorizado=?, metodo_valorizacao=?, detalhe_valorizacao=?, '
+            'valor_aplicacao_atualizado=? WHERE id=?',
+            (ultima_data, pu, pu * qtd, ultimo_metodo, ultimo_detalhe,
+             aplic_atual, inv['id']))
         valorizados += 1 if andou else 0
         parados += 0 if andou else 1
 

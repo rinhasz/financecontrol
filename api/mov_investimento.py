@@ -196,10 +196,24 @@ def calcular(linha, r: dict, pos_extrato):
     credito = ontem - (r['valor_bruto'] or 0)
     extrato = pos_extrato['valor_atual'] if pos_extrato else None
 
+    # "valor da posição atualizada = valor da posição + aplicação − resgate"
+    sinal = 1 if (r.get('tipo') or 'resgate') == 'aplicacao' else -1
+    aplicacao_nova = aplicacao + sinal * a
+
     return {
+        'tipo': r.get('tipo') or 'resgate',
+        'valor_movimento': round(r.get('valor_bruto') or 0, 2),
         'valor_aplicacao_antes': round(aplicacao, 2),
-        'valor_aplicacao_depois': round(aplicacao - a, 2),
+        'valor_aplicacao_depois': round(aplicacao_nova, 2),
         'valor_anterior': round(ontem, 2),
+        # campos do papel, copiados para o movimento ser autossuficiente
+        'papel': {
+            'produto': linha['produto'], 'emissor': linha['emissor'],
+            'indexador': linha['indexador'], 'ativo': linha['ativo'],
+            'data_liquidez': linha['data_liquidez'], 'pu': linha['pu'],
+            'quantidade': linha['quantidade'], 'valor_aplicacao': aplicacao,
+            'perc_indexador': linha['perc_indexador'], 'taxa': linha['taxa'],
+        },
         'metodos': {
             'proporcional': round(proporcional, 2) if proporcional is not None else None,
             'credito': round(credito, 2),
@@ -284,19 +298,37 @@ def confirmar():
             valor_novo = it['metodos'].get(metodo)
             if valor_novo is None:
                 valor_novo = it['metodos']['proporcional']
+            p = it['papel']
             conn.execute(
                 'INSERT OR REPLACE INTO movimento_investimento '
-                '(data, tipo, produto, data_aplicacao, data_vencimento, n_operacao, '
-                ' valor_principal, valor_bruto, valor_anterior, valor_novo, metodo, arquivo) '
-                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                (it['data'], 'resgate', produto, it['data_aplicacao'], it['data_vencimento'],
-                 it['n_operacao'], it['valor_principal'], it['valor_bruto'],
+                '(data, tipo, produto, emissor, indexador, ativo, data_aplicacao, '
+                ' data_vencimento, data_liquidez, n_operacao, pu, quantidade, '
+                ' valor_aplicacao, valor_aplicacao_atualizada, perc_indexador, taxa, '
+                ' valor_movimento, valor_principal, valor_bruto, valor_anterior, '
+                ' valor_novo, metodo, arquivo) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (it['data'], it['tipo'], produto, p['emissor'], p['indexador'], p['ativo'],
+                 it['data_aplicacao'], it['data_vencimento'], p['data_liquidez'],
+                 it['n_operacao'], p['pu'], p['quantidade'],
+                 p['valor_aplicacao'], it['valor_aplicacao_depois'],
+                 p['perc_indexador'], p['taxa'],
+                 it['valor_movimento'], it['valor_principal'], it['valor_bruto'],
                  it['valor_anterior'], valor_novo, metodo, dados['arquivo']))
             gravados += 1
 
-    return jsonify({'ok': True, 'gravados': gravados,
-                    'msg': f'{gravados} movimento(s) gravado(s). '
-                           'Rode "Atualizar Posições" para o efeito aparecer.'})
+    # O import não termina no movimento: sem revalorizar, a tela continuaria
+    # mostrando o papel do tamanho antigo, e caberia ao usuário lembrar de
+    # clicar noutro botão para ver o efeito do que acabou de importar.
+    from . import valorizacao
+    with db() as conn:
+        ultima = conn.execute('SELECT MAX(data_posicao) d FROM investimento').fetchone()['d']
+        atualizado = valorizacao.valorizar(conn, ultima) if ultima else {'ok': False}
+
+    extra = ''
+    if atualizado.get('ok'):
+        extra = f" Posição revalorizada até {atualizado.get('data_valorizacao')}."
+    return jsonify({'ok': True, 'gravados': gravados, 'valorizacao': atualizado,
+                    'msg': f'{gravados} movimento(s) gravado(s).{extra}'})
 
 
 @bp.route('/investimentos/movimentos')

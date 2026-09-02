@@ -613,3 +613,73 @@ que a rentabilidade precisa.
 Abaixo da posição, lista os movimentos de um período com o antes, o depois, o
 método usado e o arquivo de origem, e um botão de **excluir** por linha. É a
 peça que torna o ajuste reversível: excluir devolve a posição ao que era.
+
+---
+
+# As três bases diárias
+
+Reorganização pedida para não haver confusão sobre onde cada número mora.
+
+| base | tabela | uma linha por |
+|---|---|---|
+| **posição** | `investimento` | papel, por foto importada |
+| **valorização** | `valorizacao` | papel, por dia |
+| **movimento** | `movimento_investimento` | movimento (resgate ou aplicação) |
+
+## Cada base é autossuficiente
+
+As três carregam a identidade do papel — produto, emissor, indexador, datas,
+PU, quantidade, % do indexador, taxa, liquidez — além dos seus próprios números.
+É denormalizado **de propósito**: são fotos diárias, e uma foto que depende de
+`JOIN` para ser lida deixa de ser foto. Ler a valorização de 01/09 não pode
+depender de a posição de 25/08 ainda existir com o mesmo `id`.
+
+A valorização guarda também os quatro saldos separados
+(`bruto/líquido × accrual/mtm`), preenchidos conforme o método do dia: MTM para
+o que tem preço de mercado, accrual para o que rende por curva.
+
+## `valor_aplicacao_atualizado`: o fio que liga as três
+
+```
+posição      nasce igual a valor_aplicacao      (foto do banco, sem movimento)
+movimento    = valor_aplicacao + aplicação − resgate
+valorização  transportado do movimento, dia a dia
+```
+
+Na caminhada diária ele **parte do valor de aplicação original**, não do já
+atualizado: o já atualizado é o resultado da última passagem, e começar por ele
+faria os dias *anteriores* ao movimento mostrarem um valor que só passou a valer
+depois dele. Foi um bug real, pego em teste — 31/08 exibia o valor pós-resgate
+de 01/09. Como cada movimento guarda o valor **absoluto**, reprocessar é
+idempotente: três valorizações seguidas dão exatamente o mesmo resultado.
+
+## As regras de recálculo
+
+| situação | regra | onde entra |
+|---|---|---|
+| **3.3.1** sem movimento | saldo de ontem × atualização | — |
+| **3.3.2** resgate | `(aplic_atualizada / aplic) × saldo_ontem × atualização` | **antes** do fator |
+| **3.3.3** aplicação | `saldo_ontem × atualização + aplicação` | **depois** do fator |
+
+A assimetria não é descuido. No resgate a razão multiplica o saldo, então tanto
+faz a ordem; na aplicação o dinheiro **acabou de chegar** e não pode render um
+dia que ainda não passou por ele — somá-lo antes do fator pagaria juros sobre um
+aporte que nem existia.
+
+Verificado com movimento sintético: `233.746,38 × 1,00048560 + 50.000 =
+283.859,89`, exatamente o que a base gravou.
+
+## O botão faz as duas coisas
+
+"Confirmar e atualizar" grava o movimento **e já revaloriza a posição**. Sem
+isso, a tela continuaria mostrando o papel do tamanho antigo e caberia ao
+usuário lembrar de clicar noutro botão para ver o efeito do que acabou de
+importar.
+
+## Nota sobre o método do resgate
+
+A regra 3.3.2 é o método `proporcional`. Medido contra o extrato do banco no
+resgate real de 01/09, ele fica **R$ 187,38 acima** do valor publicado, e
+registra fluxo de R$ 27.799,85 quando saíram R$ 28.000,73. O método `extrato`
+— que usa o número que o banco publica — continua disponível na tela e acerta na
+bucha. A escolha é do usuário, feita no preview, e fica gravada no movimento.

@@ -392,13 +392,18 @@ def _gravar_posicao(blocos, data_posicao, nome, origens):
             conn.executemany(
                 'INSERT INTO investimento (data_posicao, origem, produto, ativo, emissor, '
                 'indexador, perc_indexador, taxa, data_aplicacao, data_vencimento, '
-                'data_liquidez, pu, quantidade, valor_aplicacao, saldo_bruto_accrual, '
+                'data_liquidez, pu, quantidade, valor_aplicacao, valor_aplicacao_atualizado, '
+                'saldo_bruto_accrual, '
                 'saldo_liquido_accrual, saldo_bruto_mtm, saldo_liquido_mtm, carga_id) '
                 'VALUES (:data_posicao,:origem,:produto,:ativo,:emissor,:indexador,'
                 ':perc_indexador,:taxa,:data_aplicacao,:data_vencimento,:data_liquidez,'
-                ':pu,:quantidade,:valor_aplicacao,:saldo_bruto_accrual,'
+                ':pu,:quantidade,:valor_aplicacao,:valor_aplicacao_atualizado,'
+                ':saldo_bruto_accrual,'
                 ':saldo_liquido_accrual,:saldo_bruto_mtm,:saldo_liquido_mtm,:carga_id)',
-                [{**i, 'carga_id': carga_id} for i in itens])
+                # na foto do banco os dois nascem iguais: movimento nenhum
+                # aconteceu ainda. Só o extrato de movimentação separa os dois.
+                [{**i, 'carga_id': carga_id,
+                  'valor_aplicacao_atualizado': i.get('valor_aplicacao')} for i in itens])
 
 
 @bp.route('/investimentos/atualizar', methods=['POST'])
