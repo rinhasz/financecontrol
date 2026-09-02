@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react'
 import { api } from '../lib/api'
+import { ExtratoInvestimento, MovimentosInvestimento } from '../components/ExtratoInvestimento'
 import { cn, formatBRL } from '../lib/utils'
 
 /** Uma posição — o que o internet banking mostra para um papel.
@@ -95,6 +96,8 @@ export function Investimentos({ active }: { active: boolean }) {
   const [memoria, setMemoria] = useState<{ id: number; passos: PassoMemoria[] } | null>(null)
   const [grupoAberto, setGrupoAberto] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // muda a cada import/exclusão de movimento, para a lista abaixo recarregar
+  const [versaoMovs, setVersaoMovs] = useState(0)
 
   const load = useCallback(async (d?: string) => {
     setLoading(true)
@@ -215,6 +218,7 @@ export function Investimentos({ active }: { active: boolean }) {
             className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-100 transition-colors">
             {loading ? 'Lendo...' : 'Importar posição'}
           </button>
+          <ExtratoInvestimento onConcluido={() => { setVersaoMovs(v => v + 1); load(dataSel) }} />
           {!!pos?.itens.length && (
             <button onClick={atualizarPosicoes} disabled={loading || atualizando}
               className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
@@ -450,6 +454,11 @@ export function Investimentos({ active }: { active: boolean }) {
             </div>
           </div>
         )}
+
+        {/* Movimentos lidos de extrato: auditável e reversível (doc 16) */}
+        <div className="mt-6">
+          <MovimentosInvestimento recarregar={versaoMovs} />
+        </div>
       </div>
     </div>
   )

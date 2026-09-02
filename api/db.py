@@ -217,8 +217,44 @@ CREATE TABLE IF NOT EXISTS valorizacao (
   -- seguinte trouxer aplicações e resgates, o rendimento do dia é esta variação
   -- menos o fluxo de caixa do dia, e sem ela um resgate viraria "prejuízo".
   variacao        REAL,
+  -- entrada/saída de dinheiro no papel naquele dia (resgate é negativo). Fica
+  -- ao lado da variação para separar rendimento de fluxo: sem isso, um resgate
+  -- de R$ 28 mil apareceria como prejuízo de R$ 28 mil.
+  fluxo           REAL NOT NULL DEFAULT 0,
   metodo          TEXT,
   detalhe         TEXT
+);
+
+-- Movimentos de investimento lidos do extrato mensal (resgate, por ora).
+--
+-- Tabela à parte, e nunca escrita por cima da posição: a posição importada é a
+-- foto que o banco mandou, e adulterá-la destruiria o ponto de partida da
+-- conferência. O movimento fica ao lado, é aplicado durante a valorização, e
+-- **apagar a linha reconstrói a posição anterior** — que é o que permite
+-- reimportar um extrato sem medo.
+--
+-- `valor_principal` é o "Valor aplicação" da linha de RESGATE do extrato (o
+-- quanto do principal saiu); `valor_bruto` é o "Valor creditado" (o que de fato
+-- caiu na conta, já com o rendimento). Os dois são guardados porque cada um
+-- responde a uma pergunta, e porque os métodos de recálculo usam um ou outro.
+CREATE TABLE IF NOT EXISTS movimento_investimento (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  data             TEXT NOT NULL,          -- dia do movimento
+  tipo             TEXT NOT NULL DEFAULT 'resgate',
+  produto          TEXT NOT NULL,          -- LCI | LCA | CDB | COFRINHOS | LIG | LF
+  data_aplicacao   TEXT,                   -- chaves de identificação da operação
+  data_vencimento  TEXT,
+  n_operacao       TEXT,
+  valor_principal  REAL NOT NULL,
+  valor_bruto      REAL,
+  -- foto do antes e do depois, para a tela mostrar o efeito e para dar
+  -- para auditar sem refazer a conta
+  valor_anterior   REAL,
+  valor_novo       REAL,
+  metodo           TEXT,                   -- proporcional | credito | extrato
+  arquivo          TEXT,
+  criado_em        TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(produto, data, n_operacao, valor_principal)
 );
 
 CREATE TABLE IF NOT EXISTS posicao_investimento (
@@ -424,6 +460,8 @@ def init_db():
     cols_val = [r[1] for r in conn.execute('PRAGMA table_info(valorizacao)').fetchall()]
     if cols_val and 'variacao' not in cols_val:
         conn.execute('ALTER TABLE valorizacao ADD COLUMN variacao REAL')
+    if cols_val and 'fluxo' not in cols_val:
+        conn.execute('ALTER TABLE valorizacao ADD COLUMN fluxo REAL NOT NULL DEFAULT 0')
 
     conn.commit()
     _seed_regras_transacao(conn)

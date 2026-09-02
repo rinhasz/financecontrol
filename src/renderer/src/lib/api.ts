@@ -106,6 +106,24 @@ export const api = {
     // a valorização vai à rede buscar CDI, IPCA e cotações: sem timeout curto
     atualizar: () => post('/api/investimentos/atualizar', undefined, 120_000),
     memoria: (id: number) => get(`/api/investimentos/${id}/memoria`),
+    // extrato mensal do produto: lê os resgates e ajusta a posição
+    extratoPreview: (file: File, produto: string) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('produto', produto)
+      return fetch('/api/investimentos/movimentos/preview', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    extratoConfirmar: (file: File, produto: string, metodo: string) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('produto', produto)
+      fd.append('metodo', metodo)
+      return fetch('/api/investimentos/movimentos/confirmar', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    movimentos: (ini?: string, fim?: string) =>
+      get('/api/investimentos/movimentos' + (ini && fim ? `?ini=${ini}&fim=${fim}` : '')),
+    excluirMovimento: (id: number) =>
+      fetch(`/api/investimentos/movimentos/${id}`, { method: 'DELETE' }).then(r => r.json()),
     importar: (file: File) => {
       const fd = new FormData()
       fd.append('file', file)

@@ -103,6 +103,16 @@ export function PlanejarResgates({ mesInicial }: { mesInicial?: string }) {
           </div>
           <button onClick={() => setMesRef(nextMesRef(mesRef))}
             className="px-2 py-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800">&rsaquo;</button>
+
+          {/* O plano é calculado na abertura da tela e depois congela. Saldo
+              novo, conta agendada, resgate importado — nada disso reaparece
+              aqui sem recalcular, e um plano velho é pior que nenhum. */}
+          <button onClick={load} disabled={loading}
+            title="Refaz o plano com o saldo, os lançamentos e os vencimentos de agora"
+            className="ml-auto px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-300
+              disabled:opacity-40 hover:border-zinc-500 hover:text-zinc-100 transition-colors">
+            {loading ? 'Atualizando...' : 'Atualizar'}
+          </button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 rounded-lg overflow-hidden">

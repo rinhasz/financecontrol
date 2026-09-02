@@ -530,3 +530,86 @@ fica guardado e **não** é rebaixado.
 Sem isso o `DELETE` falhava por chave estrangeira e a importação devolvia um 500
 mudo. Ver a armadilha registrada no doc 12 — é a segunda vez que uma tabela nova
 apontando para outra quebra uma importação que substitui.
+
+---
+
+# Movimentos: extrato mensal do produto
+
+A posição é uma **foto** de um dia. Entre uma foto e a seguinte o dinheiro se
+mexe — resgate parcial, principalmente — e a valorização, que só sabe render,
+continuaria mostrando um papel que não existe mais no tamanho que ela pensa.
+
+O botão **"Importar extrato"** na aba Investimentos lê o extrato mensal do
+produto (`ExtratoMensal_LCA.xls`, HTML disfarçado de `.xls`, como todo arquivo
+do internet banking), acha as linhas de **RESGATE** e grava cada uma como um
+movimento.
+
+## Tabela à parte, nunca posição corrigida
+
+`movimento_investimento` fica ao lado da posição, e a posição **nunca é
+alterada**. Escrever por cima dela destruiria o ponto de partida da conferência
+— e conferir contra o banco é a razão de a tela existir. O movimento é aplicado
+durante a valorização, e **apagar a linha reconstrói a posição anterior**, sem
+nada mais a desfazer: a valorização é recalculada do zero a cada "Atualizar
+Posições".
+
+## Identificação da operação
+
+Pela **data de aplicação + data de vencimento**, dentro do produto escolhido.
+Zero ou mais de um casamento **para o import e acusa** — dois papéis com as
+mesmas duas datas são indistinguíveis aqui, e escolher errado corromperia a
+posição em silêncio.
+
+> **O número da operação não serve para casar.** No mesmo arquivo, o resgate
+> aparece como `110000690502` e a posição do mesmo papel como `110000095862`.
+> Foi por isso que a identificação por datas, e não por código, era o caminho
+> certo.
+
+## Os três métodos, e por que a tela mostra os três
+
+Depois do resgate, quanto vale o papel? Medido no resgate real de 01/09/2026
+(LCA 94% do CDI, valor de 31/08 = R$ 233.746,38, creditado R$ 28.000,73,
+principal resgatado R$ 23.187,00):
+
+| método | conta | saldo em 01/09 | vs banco | fluxo registrado |
+|---|---|---:|---:|---:|
+| `extrato` | o valor que o banco publica em "Posição em" | 205.859,16 | **0,00** | −28.000,73 |
+| `credito` | `valor_ontem − creditado`, depois rende o dia | 205.845,56 | −13,60 | −28.000,73 |
+| `proporcional` | `valor_ontem × (aplicação − A) / aplicação` | 206.046,54 | +187,38 | −27.799,85 |
+
+Os R$ 13,60 do `credito` **não são erro de fórmula**: são o CDI de 01/09, que o
+BCB ainda não publicou e a valorização repete do dia anterior. A conta do banco
+é essa — `(233.746,39 − 28.000,73) × 1,00055 = 205.859,16`, e 1,00055 é 94% do
+CDI diário.
+
+O `proporcional` erra mais, e erra duas coisas: o valor e o **fluxo de caixa**.
+Ele registra R$ 27.799,85 saindo quando saíram R$ 28.000,73 — e é o fluxo que
+alimenta a separação entre rendimento e movimentação, base da rentabilidade.
+
+Por isso o padrão é `extrato`, com os três lado a lado e a diferença explícita:
+a escolha fica visível em vez de escondida atrás de uma fórmula.
+
+## Onde o movimento entra na valorização
+
+Na quantidade, e não no saldo. O saldo é sempre `PU × quantidade`, então reduzir
+a quantidade faz o resgate sobreviver a todos os dias seguintes sem nenhum caso
+especial adiante.
+
+**`proporcional` e `credito` entram antes do fator do dia**; o rendimento incide
+sobre o que sobrou, que é o certo — quem resgatou de manhã não perde o dia
+inteiro. **`extrato` entra depois**, porque o número publicado já é o fechamento,
+com o rendimento dentro: aplicá-lo antes renderia o dia duas vezes, e foi
+exatamente o que aconteceu no primeiro teste (R$ 99,97 a mais).
+
+## `valorizacao.fluxo`
+
+Coluna nova ao lado de `variacao`. Sem ela, um resgate de R$ 28 mil apareceria
+como prejuízo de R$ 28 mil no dia. Com ela, o dia 01/09 do papel fica legível:
+`variacao +99,92` (rendeu) e `fluxo −28.000,73` (saiu) — que é a decomposição de
+que a rentabilidade precisa.
+
+## Tela de movimentos
+
+Abaixo da posição, lista os movimentos de um período com o antes, o depois, o
+método usado e o arquivo de origem, e um botão de **excluir** por linha. É a
+peça que torna o ajuste reversível: excluir devolve a posição ao que era.
