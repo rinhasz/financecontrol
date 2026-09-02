@@ -389,6 +389,49 @@ Reimplementá-la em TypeScript seria uma segunda cópia para divergir.
 A contagem é contra **hoje**, não contra o mês exibido: abrir um mês passado não
 deve pintar tudo de vermelho.
 
+## Atrasado: depois do dia, agendado também conta
+
+A regra tem duas metades, e a data é o que as separa:
+
+```
+antes do vencimento  -> só preocupa o que NÃO está nem agendado
+                        (agendado está resolvido: ordem dada, dinheiro comprometido)
+depois do vencimento -> agendado TAMBÉM preocupa
+                        (a data passou e o débito não caiu)
+```
+
+Um agendado que passou do dia sem virar pago é sinal de que ou o débito falhou,
+ou o extrato ainda não foi reimportado. Nos dois casos é para olhar — e era um
+caso que a primeira versão da regra, que só olhava `nao_encontrado`, deixava
+invisível.
+
+**Vale para receita também.** `_marcar_vencimento` recebe o campo do dia
+(`dia_vencimento` para despesa, `dia_recebimento` para receita) porque a
+pergunta é a mesma dos dois lados: passou do dia e não aconteceu? Em 02/09/2026
+o alerta pega quatro linhas, duas de cada lado:
+
+| linha | dia previsto | status |
+|---|---|---|
+| Cartão Mercado Pago | 01/09 | **agendado** |
+| adiantamento deusa | 01/09 | **agendado** |
+| juros conta corrente | 27/08 | em aberto |
+| juliana: aluguel casa parte 1 | 01/09 | em aberto |
+
+As duas primeiras só aparecem por causa da metade nova da regra.
+
+## O dia previsto fica visível
+
+Sem ver o dia, "atrasado" é uma afirmação que o usuário não tem como conferir.
+A célula de data passa a mostrar sempre o vencimento:
+
+- **não aconteceu ainda** → `venc. dd/mm`, em vermelho quando atrasado;
+- **já aconteceu** → a data real em cima e `venc. dd/mm` embaixo, esmaecido —
+  o que permite ver, de passagem, o que foi pago fora do dia.
+
+O aviso do topo separa os dois contadores. Somá-los apagaria a diferença entre
+"passou do dia" e "ainda dá tempo", que é exatamente a informação que decide se
+a ação é urgente.
+
 ## Pendência é mais amplo que alerta
 
 O filtro **"Só pendências"** mostra tudo que ainda não está nem agendado,

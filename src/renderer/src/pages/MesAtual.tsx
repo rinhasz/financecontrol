@@ -39,6 +39,9 @@ interface Receita {
   descricao_transacao?: string
   objetivo?: string | null
   projecao_manual?: boolean
+  // dia previsto de recebimento, calculado no servidor (igual à despesa)
+  data_prevista?: string | null
+  dias_para_vencer?: number | null
 }
 
 interface Resumo {
@@ -100,31 +103,85 @@ function SeloPrevisto({ manual, onLimpar }: { manual?: boolean; onLimpar?: () =>
  *  é corrida contra o relógio do banco. */
 const DIAS_ALERTA = 3
 
+/** Uma linha só precisa de um dia previsto e um status para ser julgada — por
+ *  isso serve despesa e receita, que têm os dois com nomes diferentes. */
+interface Vencivel {
+  status: string
+  dias_para_vencer?: number | null
+}
+
 /** `null` quando não há o que alertar.
  *
- *  Só alerta o que **não está nem agendado**: uma conta agendada pode vencer
- *  amanhã sem problema nenhum, o dinheiro já está comprometido e a ordem dada.
- *  O risco é a que ninguém tocou ainda — é ela que gera multa e juros. */
-function urgencia(l: Lancamento): 'vencida' | 'urgente' | null {
-  if (l.status !== 'nao_encontrado') return null
+ *  Duas situações diferentes, e a diferença é a data:
+ *
+ *  - **antes** do vencimento, só preocupa o que **não está nem agendado**. Uma
+ *    conta agendada que vence amanhã está resolvida — o dinheiro está
+ *    comprometido e a ordem foi dada;
+ *  - **depois** do vencimento, agendado também vira problema: a data passou e o
+ *    débito não caiu. Ou falhou, ou o extrato ainda não foi reimportado — nos
+ *    dois casos é para olhar.
+ */
+function urgencia(l: Vencivel): 'atrasado' | 'urgente' | null {
+  const feito = l.status === 'pago' || l.status === 'recebido'
+  if (feito) return null
   const d = l.dias_para_vencer
   if (d === null || d === undefined) return null
-  if (d < 0) return 'vencida'
+  if (d < 0) return 'atrasado'
+  // ainda no prazo: agendado está resolvido, o resto não
+  if (l.status !== 'nao_encontrado') return null
   return d <= DIAS_ALERTA ? 'urgente' : null
 }
 
-function SeloVencimento({ nivel, dias }: { nivel: 'vencida' | 'urgente'; dias: number }) {
-  const texto = nivel === 'vencida'
-    ? (dias === -1 ? 'venceu ontem' : `venceu há ${-dias} dias`)
-    : dias === 0 ? 'vence hoje' : dias === 1 ? 'vence amanhã' : `vence em ${dias} dias`
+function SeloVencimento({ nivel, dias }: { nivel: 'atrasado' | 'urgente'; dias: number }) {
+  if (nivel === 'atrasado') {
+    return (
+      <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded
+        text-[10px] font-semibold tracking-wide border
+        text-red-300 bg-red-950/50 border-red-800/60"
+        title="Passou do dia previsto e ainda não foi pago/recebido">
+        <span aria-hidden>!</span>ATRASADO
+        <span className="font-normal opacity-80">
+          {dias === -1 ? 'há 1 dia' : `há ${-dias} dias`}
+        </span>
+      </span>
+    )
+  }
+  const texto = dias === 0 ? 'vence hoje' : dias === 1 ? 'vence amanhã' : `vence em ${dias} dias`
   return (
-    <span className={cn('ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded',
-      'text-[10px] font-semibold tracking-wide border',
-      nivel === 'vencida'
-        ? 'text-red-300 bg-red-950/50 border-red-800/60'
-        : 'text-orange-300 bg-orange-950/40 border-orange-800/50')}
+    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded
+      text-[10px] font-semibold tracking-wide border
+      text-orange-300 bg-orange-950/40 border-orange-800/50"
       title="Ainda não está agendada — sem agendar, o risco é multa e juros">
       <span aria-hidden>!</span>{texto}
+    </span>
+  )
+}
+
+/** A célula de data das duas tabelas.
+ *
+ *  Mostra sempre o **dia previsto**, e não só a data em que aconteceu: sem ele
+ *  não dá para saber se a linha está no prazo, e era essa a informação que
+ *  faltava para o "atrasado" fazer sentido. Quando já aconteceu, a data real
+ *  vem em cima e o previsto embaixo, esmaecido. */
+function CelulaData({ realizada, prevista, atrasado }: {
+  realizada?: string | null; prevista?: string | null; atrasado?: boolean
+}) {
+  const fmt = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
+  const prev = prevista
+    ? new Date(prevista + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    : null
+  if (realizada) {
+    return (
+      <span className="text-xs">
+        <span className="text-zinc-400">{fmt(realizada)}</span>
+        {prev && <span className="block text-zinc-700">venc. {prev}</span>}
+      </span>
+    )
+  }
+  if (!prev) return <span className="text-xs text-zinc-700">—</span>
+  return (
+    <span className={cn('text-xs', atrasado ? 'text-red-400' : 'text-zinc-500')}>
+      venc. {prev}
     </span>
   )
 }
@@ -322,7 +379,10 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
     itens.filter(l => l.status === st).reduce((s, l) => s + valorDaLinha(l), 0)
 
   const pendentes = lancamentos.filter(l => l.status === 'nao_encontrado')
-  const urgentes = lancamentos.filter(l => urgencia(l) !== null)
+  // atrasado e urgente são avisos diferentes: um já passou do dia, o outro
+  // ainda dá tempo. Somá-los num contador só apagaria a diferença.
+  const atrasados = [...lancamentos, ...receitas].filter(x => urgencia(x) === 'atrasado')
+  const urgentes = lancamentos.filter(l => urgencia(l) === 'urgente')
   const listadas = soPendencias ? pendentes : lancamentos
 
   const byCategory = listadas.reduce<Record<string, Lancamento[]>>((acc, l) => {
@@ -499,8 +559,17 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
       {/* Aviso do que vence sem estar agendado, e o filtro de pendências.
           O aviso vem antes da tabela porque é a única coisa da tela que tem
           prazo: o resto pode esperar, isto não. */}
-      {!loading && (pendentes.length > 0 || urgentes.length > 0) && (
+      {!loading && (pendentes.length > 0 || urgentes.length > 0 || atrasados.length > 0) && (
         <div className="px-6 pb-2 flex items-center gap-3 flex-wrap">
+          {atrasados.length > 0 && (
+            <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-xs
+              text-red-300 bg-red-950/50 border border-red-800/60">
+              <span aria-hidden className="font-bold">!</span>
+              {atrasados.length === 1
+                ? '1 lançamento passou do dia e não aconteceu'
+                : `${atrasados.length} lançamentos passaram do dia e não aconteceram`}
+            </span>
+          )}
           {urgentes.length > 0 && (
             <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-xs
               text-orange-300 bg-orange-950/40 border border-orange-800/50">
@@ -597,8 +666,9 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
                               </button>
                             )}
                           </td>
-                          <td className="px-4 py-2.5 text-zinc-500 text-xs">
-                            {l.data_pagamento ? new Date(l.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                          <td className="px-4 py-2.5">
+                            <CelulaData realizada={l.data_pagamento} prevista={l.data_prevista}
+                              atrasado={urgencia(l) === 'atrasado'} />
                           </td>
                           <td className="px-4 py-2.5">
                             <span className={cn('inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border', STATUS_STYLE[l.status])}>
@@ -887,6 +957,10 @@ function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
                 i > 0 && 'border-t border-zinc-800/40', esmaecido && 'opacity-70')}>
                 <td className="px-4 py-2.5 text-zinc-300 font-medium">
                   {r.item_nome}
+                  {(() => {
+                    const n = urgencia(r)
+                    return n && <SeloVencimento nivel={n} dias={r.dias_para_vencer as number} />
+                  })()}
                   {r.recorrencia === 'esporadica' && (
                     <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-500/70"
                       title={r.descricao_transacao ?? 'Receita esporádica'}>
@@ -900,8 +974,9 @@ function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
                   esmaecido ? 'text-zinc-400' : 'text-emerald-400')}>
                   {formatBRL(r.valor_real ?? r.valor_esperado)}
                 </td>
-                <td className="px-4 py-2.5 text-zinc-500 text-xs w-24">
-                  {r.data_recebimento ? new Date(r.data_recebimento + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                <td className="px-4 py-2.5 w-24">
+                  <CelulaData realizada={r.data_recebimento} prevista={r.data_prevista}
+                    atrasado={urgencia(r) === 'atrasado'} />
                 </td>
                 <td className="px-4 py-2.5 w-28">
                   <span className={cn('text-xs px-2 py-0.5 rounded border',

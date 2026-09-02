@@ -113,8 +113,12 @@ def list_lancamentos():
     return jsonify({'despesas': despesas, 'receitas': receitas})
 
 
-def _marcar_vencimento(conn, despesas: list, mes_ref: str) -> None:
-    """Acrescenta `data_prevista` e `dias_para_vencer` a cada despesa.
+def _marcar_vencimento(conn, itens: list, mes_ref: str, campo_dia: str = 'dia_vencimento') -> None:
+    """Acrescenta `data_prevista` e `dias_para_vencer` a cada item.
+
+    Serve os dois lados: a despesa vence pelo `dia_vencimento`, a receita cai
+    pelo `dia_recebimento`. A pergunta é a mesma — passou do dia e ainda não
+    aconteceu? — e por isso a conta é a mesma.
 
     Serve para a tela avisar do que vence e ainda **não está nem agendado** —
     o caso que custa multa e juros. O sinal precisa vir daqui e não do
@@ -131,8 +135,9 @@ def _marcar_vencimento(conn, despesas: list, mes_ref: str) -> None:
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '26'))
     ini, fim = periodo_competencia(mes_ref, dia_corte)
     hoje = date.today()
-    for d in despesas:
-        venc = data_no_periodo(d.get('dia_vencimento'), ini, fim)
+    for d in itens:
+        venc = data_no_periodo(d.get(campo_dia), ini, fim)
+        d['dia_previsto'] = d.get(campo_dia)
         d['data_prevista'] = venc.isoformat() if venc else None
         d['dias_para_vencer'] = (venc - hoje).days if venc else None
 
@@ -142,7 +147,7 @@ def _receitas_do_mes(conn, mes_ref: str) -> list:
     existem como transação). Mesma união do lado da despesa."""
     rows = conn.execute("""
         SELECT lr.*, r.nome as item_nome, r.tipo, r.tipo_valor, r.padrao_variabilidade,
-               r.recorrencia, c.nome as categoria_nome, c.id as categoria_id
+               r.recorrencia, r.dia_recebimento, c.nome as categoria_nome, c.id as categoria_id
         FROM lancamento_receita lr
         JOIN receita r ON r.id = lr.receita_id
         LEFT JOIN categoria c ON c.id = r.categoria_id
@@ -158,6 +163,7 @@ def _receitas_do_mes(conn, mes_ref: str) -> list:
 
     itens = [{**dict(r), 'item_id': r['receita_id']} for r in rows]
     itens += _esporadicas_do_mes(conn, mes_ref, 'receita')
+    _marcar_vencimento(conn, itens, mes_ref, 'dia_recebimento')
     for r in itens:
         r['projetado'] = proj.get(r['item_id'])
         r['projecao_manual'] = r['item_id'] in manuais
