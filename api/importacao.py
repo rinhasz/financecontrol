@@ -346,12 +346,16 @@ def importar():
     datas = sorted(t['data'] for t in txs)
     conn = get_db()
 
-    today = date.today().isoformat()
-
     def _situacao(t):
-        # o parser só marca 'agendada' (seção "lançamentos futuros" do Itaú);
-        # o resto veio da parte já debitada do extrato
-        return t.get('situacao') or ('agendada' if t['data'] > today else 'efetivada')
+        # Agendado é SÓ o que o banco lista em "lançamentos futuros" (ou marca
+        # como tal numa coluna de situação) — nunca decidido pela data.
+        #
+        # O critério por data errava no fim de semana: conta paga no domingo já
+        # sai da conta, mas o Itaú a lança com a data do próximo dia útil. Ela
+        # não aparece em lançamentos futuros, porque já foi debitada — e o
+        # "data > hoje" a marcava como agendada, somando no "a vencer" um
+        # dinheiro que já tinha saído e que o saldo já refletia.
+        return t.get('situacao') or 'efetivada'
 
     ini, fim = datas[0], datas[-1]
 

@@ -94,8 +94,22 @@ O arquivo **não tem coluna de status**. O que existe é uma linha-marcador de
 seção com o texto "lançamentos futuros"; tudo que vem depois dela é agendado.
 `_parse_excel_sheet` procura esse marcador e só então marca `situacao='agendada'`.
 
-Fora do Excel, a regra de fallback é a data: transação com data futura é
-agendada, o resto é efetivada (`_situacao()` em `importar()`).
+**Agendado é só o que está em "lançamentos futuros"** — ou marcado como tal
+numa coluna de situação, quando o arquivo tiver uma. **Nunca pela data.** Todo o
+resto é efetivado (`_situacao()` em `importar()`), inclusive OFX e CSV, que não
+têm seção de futuros e trazem só o que já foi lançado.
+
+> **A regra por data errava no fim de semana.** Até 13/09/2026 havia um fallback:
+> sem marca de seção, `data > hoje` virava agendado. Mas conta paga no domingo
+> já sai da conta e o Itaú a lança com a data do **próximo dia útil** — e, como
+> já foi debitada, ela **não** aparece em lançamentos futuros. No extrato de
+> 13/09 (domingo), cinco linhas com data de 14/09 caíam nesse buraco: três
+> despesas (adiantamento deusa, Cartão Mercado Pago, multa de trânsito) ficavam
+> "agendadas" e somavam R$ 1.940,22 no "a vencer" — dinheiro que já tinha saído
+> e que o saldo lido do extrato já refletia. Contado duas vezes.
+>
+> Reimportar o mesmo arquivo com a regra nova corrigiu as cinco para efetivadas,
+> as três despesas para pagas, e preservou as 42 associações.
 
 ---
 
