@@ -84,6 +84,30 @@ function remuneracao(i: Investimento) {
   return '—'
 }
 
+type OrdemVenc = 'original' | 'asc' | 'desc'
+
+/** Ordena a tabela detalhada pelo vencimento.
+ *
+ *  Papel sem vencimento (ação, cofrinho) vai sempre para o **fim**, nos dois
+ *  sentidos: ele não vence nunca, e intercalá-lo com datas — ou jogá-lo no topo
+ *  na ordem decrescente — esconderia justamente o que a ordenação existe para
+ *  mostrar, que é o que vence primeiro. Empate por data se desfaz pelo saldo,
+ *  maior primeiro. */
+function ordenarPorVencimento<T extends { data_vencimento: string | null; saldo: number | null; saldo_posicao: number | null }>(
+  itens: T[], ordem: OrdemVenc
+): T[] {
+  if (ordem === 'original') return itens
+  const sinal = ordem === 'asc' ? 1 : -1
+  const saldo = (i: T) => i.saldo ?? i.saldo_posicao ?? 0
+  return [...itens].sort((a, b) => {
+    if (!a.data_vencimento && !b.data_vencimento) return saldo(b) - saldo(a)
+    if (!a.data_vencimento) return 1
+    if (!b.data_vencimento) return -1
+    const c = a.data_vencimento.localeCompare(b.data_vencimento) * sinal
+    return c !== 0 ? c : saldo(b) - saldo(a)
+  })
+}
+
 export function Investimentos({ active }: { active: boolean }) {
   const [pos, setPos] = useState<Posicao | null>(null)
   const [datas, setDatas] = useState<{ data_posicao: string; n: number; total: number }[]>([])
@@ -95,6 +119,7 @@ export function Investimentos({ active }: { active: boolean }) {
   const [erro, setErro] = useState('')
   const [memoria, setMemoria] = useState<{ id: number; passos: PassoMemoria[] } | null>(null)
   const [grupoAberto, setGrupoAberto] = useState<string | null>(null)
+  const [ordemVenc, setOrdemVenc] = useState<OrdemVenc>('original')
   const fileRef = useRef<HTMLInputElement>(null)
   // muda a cada import/exclusão de movimento, para a lista abaixo recarregar
   const [versaoMovs, setVersaoMovs] = useState(0)
@@ -344,6 +369,22 @@ export function Investimentos({ active }: { active: boolean }) {
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Detalhado</span>
                 <div className="flex-1 h-px bg-zinc-800" />
+                <div className="flex items-center gap-1 text-xs" role="group" aria-label="Ordenar por vencimento">
+                  <span className="text-zinc-600 mr-1">Ordenar:</span>
+                  {([
+                    ['original', 'Original'],
+                    ['asc', 'Vence primeiro'],
+                    ['desc', 'Vence por último'],
+                  ] as [OrdemVenc, string][]).map(([o, rot]) => (
+                    <button key={o} onClick={() => setOrdemVenc(o)} aria-pressed={ordemVenc === o}
+                      className={cn('px-2 py-0.5 rounded border transition-colors',
+                        ordemVenc === o
+                          ? 'border-emerald-600 bg-emerald-600/10 text-emerald-400'
+                          : 'border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300')}>
+                      {rot}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="rounded-lg border border-zinc-800/60 overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
@@ -354,7 +395,20 @@ export function Investimentos({ active }: { active: boolean }) {
                       <th className="px-3 py-2 text-left font-medium">Emissor</th>
                       <th className="px-3 py-2 text-left font-medium">Remuneração</th>
                       <th className="px-3 py-2 text-center font-medium">Aplicação</th>
-                      <th className="px-3 py-2 text-center font-medium">Vencimento</th>
+                      <th className="px-3 py-2 text-center font-medium">
+                        {/* clicar no cabeçalho cicla: vence primeiro → vence por
+                            último → ordem original */}
+                        <button
+                          onClick={() => setOrdemVenc(o => o === 'asc' ? 'desc' : o === 'desc' ? 'original' : 'asc')}
+                          className={cn('inline-flex items-center gap-1 hover:text-zinc-200 transition-colors',
+                            ordemVenc !== 'original' && 'text-emerald-400')}
+                          title="Ordenar por vencimento">
+                          Vencimento
+                          <span aria-hidden className="w-2">
+                            {ordemVenc === 'asc' ? '↑' : ordemVenc === 'desc' ? '↓' : '↕'}
+                          </span>
+                        </button>
+                      </th>
                       <th className="px-3 py-2 text-center font-medium">Liquidez</th>
                       <th className="px-3 py-2 text-right font-medium">PU</th>
                       <th className="px-3 py-2 text-right font-medium">Qtde</th>
@@ -369,7 +423,7 @@ export function Investimentos({ active }: { active: boolean }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {pos.itens.map((i, k) => (
+                    {ordenarPorVencimento(pos.itens, ordemVenc).map((i, k) => (
                       <Fragment key={i.id}>
                       <tr className={cn('hover:bg-zinc-800/40', k > 0 && 'border-t border-zinc-800/40')}>
                         <td className="px-3 py-2 text-zinc-300 font-medium">{i.produto}</td>
