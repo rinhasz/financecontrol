@@ -62,10 +62,35 @@ com agendamentos até outubro toca quatro competências; escolher uma no combo
 deixava as outras por bater, em silêncio.
 
 A importação agora devolve `meses`: as competências que o arquivo tocou, cada
-uma com o total de lançamentos e quantos são agendados. A tela mostra essas
+uma com o total de lançamentos, quantos são agendados e **quantos ainda estão
+sem despesa ou receita associada** (`pendentes`). A tela mostra essas
 competências como opções — **não um seletor de mês livre**, só os meses que o
 arquivo realmente cobre — e começa pela que tem mais lançamentos já efetivados,
 que é o mês que o extrato veio fechar.
+
+### `pendentes`: o que faltava para os futuros não ficarem para trás
+
+O batimento **sempre** soube casar lançamento futuro: `carregar_transacoes` não
+filtra por situação, e agendado entra como candidato igual a qualquer outro. O
+que faltava era alguém avisar que o mês da frente existia e estava por fazer.
+
+A revisão bate **uma competência por vez**, e começa pela do extrato que se
+acabou de fechar. Os agendados, por definição, caem na competência **seguinte** —
+então ficavam num mês que o usuário não tinha motivo para abrir. Medido no
+extrato de 27/09/2026:
+
+| competência | lançamentos | agendados | a associar |
+|---|---:|---:|---:|
+| set/2026 | 39 | 0 | **0** |
+| out/2026 | 15 | 12 | **15** |
+| nov/2026 | 1 | 1 | **1** |
+
+Quinze lançamentos de outubro esperando associação, sem nada na tela dizendo
+isso. Agora cada chip mostra `N a associar` (em âmbar quando há pendência) e,
+ao lado, um empurrão explícito: *"← ainda falta associar Out/2026"*.
+
+A contagem é feita antes de fechar a conexão da importação, com uma consulta por
+competência: transações na janela sem `despesa_id` nem `receita_id`.
 
 O `/api/batimento` sem `mes_ref` também deduz: usa a competência de **hoje** por
 esta regra, e devolve qual usou. Isso importa mais do que parece — em 29/08/2026

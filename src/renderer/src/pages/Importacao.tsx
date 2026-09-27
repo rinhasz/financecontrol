@@ -8,7 +8,7 @@ type Step = 'selecionar' | 'revisar' | 'concluido'
 interface ParsedTx { data: string; descricao: string; valor: number }
 
 /** Uma competência tocada pelo extrato, com quanto dela é lançamento futuro. */
-interface MesCoberto { mes: string; total: number; agendados: number }
+interface MesCoberto { mes: string; total: number; agendados: number; pendentes?: number }
 
 type Natureza = 'despesa' | 'receita'
 
@@ -132,21 +132,37 @@ function MesesCobertos({ meses, atual, onEscolher, disabled }: {
   meses: MesCoberto[]; atual: string; onEscolher: (m: string) => void; disabled: boolean
 }) {
   if (meses.length < 2) return null
+  const faltando = meses.filter(m => (m.pendentes ?? 0) > 0 && m.mes !== atual)
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span className="text-xs text-zinc-500">O extrato cobre:</span>
-      {meses.map(m => (
-        <button key={m.mes} onClick={() => onEscolher(m.mes)} disabled={disabled}
-          className={cn('px-2.5 py-1 rounded-md text-xs border transition-colors disabled:opacity-40',
-            m.mes === atual
-              ? 'bg-emerald-600/10 border-emerald-600 text-emerald-400'
-              : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
-          {mesRefLabel(m.mes)}
-          <span className="text-zinc-500 ml-1 tabular-nums">
-            {m.total}{m.agendados > 0 ? ` · ${m.agendados} agendados` : ''}
-          </span>
-        </button>
-      ))}
+      {meses.map(m => {
+        const pend = m.pendentes ?? 0
+        return (
+          <button key={m.mes} onClick={() => onEscolher(m.mes)} disabled={disabled}
+            title={pend > 0
+              ? `${pend} lançamento(s) deste mês ainda sem despesa ou receita associada`
+              : 'Nada pendente neste mês'}
+            className={cn('px-2.5 py-1 rounded-md text-xs border transition-colors disabled:opacity-40',
+              m.mes === atual
+                ? 'bg-emerald-600/10 border-emerald-600 text-emerald-400'
+                : pend > 0
+                  ? 'border-amber-700/60 text-amber-300 hover:border-amber-500'
+                  : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+            {mesRefLabel(m.mes)}
+            <span className="ml-1 tabular-nums opacity-80">
+              {pend > 0 ? `${pend} a associar` : `${m.total} ok`}
+            </span>
+          </button>
+        )
+      })}
+      {/* Os agendados caem sempre na competência seguinte. Sem este empurrão o
+          mês da frente ficava por bater e ninguém notava. */}
+      {faltando.length > 0 && (
+        <span className="text-xs text-amber-400/80">
+          ← ainda falta associar {faltando.map(m => mesRefLabel(m.mes)).join(' e ')}
+        </span>
+      )}
     </div>
   )
 }

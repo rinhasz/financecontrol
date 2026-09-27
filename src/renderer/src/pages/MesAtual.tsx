@@ -603,7 +603,11 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500">Carregando...</div>
         ) : visao === 'consolidada' ? (
-          <BlocoConsolidado dados={consolidado} />
+          <BlocoConsolidado dados={consolidado}
+            onCorrigir={async (itemId, valor) => {
+              await api.projecao.manual('despesa', itemId, mesRef, valor)
+              load()
+            }} />
         ) : (
           <div className="space-y-3">
             {/* Entradas vêm antes das saídas: é a ordem em que o mês acontece.
@@ -733,9 +737,21 @@ function LinhasDetalhe({ linhas }: { linhas: LinhaConsolidada[] }) {
 }
 
 
-function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
+function BlocoConsolidado({ dados, onCorrigir }: {
+  dados: Consolidado | null
+  /** corrige a previsão de um item em aberto, igual à visão analítica */
+  onCorrigir?: (itemId: number, valor: number) => void
+}) {
   const [ordem, setOrdem] = useState<OrdemCons>('valor')
   const [aberta, setAberta] = useState<number | null>(null)
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editVal, setEditVal] = useState('')
+
+  function salvar(itemId: number) {
+    const v = parseFloat(editVal.replace(',', '.'))
+    if (!isNaN(v)) onCorrigir?.(itemId, v)
+    setEditId(null)
+  }
 
   if (!dados) return <div className="text-zinc-500 text-sm">Sem dados.</div>
   const { despesas, anulados, receitas, totais } = dados
@@ -829,11 +845,49 @@ function BlocoConsolidado({ dados }: { dados: Consolidado | null }) {
                           d.estornado > 0 ? 'text-amber-400' : 'text-zinc-700')}>
                           {d.estornado > 0 ? `− ${formatBRL(d.estornado)}` : '—'}
                         </td>
-                        <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium w-32',
-                          d.liquido < 0 ? 'text-emerald-400' : 'text-zinc-200')}
-                          title={d.liquido < 0 ? 'Voltou mais do que saiu neste mês' : undefined}>
-                          {formatBRL(d.liquido)}
-                        </td>
+                        {/* Só é editável a linha inteiramente em aberto: aí o
+                            líquido é a projeção e nada mais. Com ocorrência já
+                            paga ou estorno no meio, não dá para saber qual
+                            parcela o número digitado deveria substituir. */}
+                        {(() => {
+                          const soPrevisto = !!onCorrigir && d.linhas.length > 0
+                            && d.linhas.every(l => l.tipo === 'gasto' && l.status === 'nao_encontrado')
+                          const classe = cn('px-4 py-2.5 text-right tabular-nums font-medium w-32',
+                            d.liquido < 0 ? 'text-emerald-400' : 'text-zinc-200')
+                          if (editId === d.item_id) {
+                            return (
+                              <td className={classe}>
+                                <input autoFocus value={editVal}
+                                  onChange={e => setEditVal(e.target.value)}
+                                  onBlur={() => salvar(d.item_id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') salvar(d.item_id)
+                                    if (e.key === 'Escape') setEditId(null)
+                                  }}
+                                  className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-sm
+                                    text-zinc-200 w-28 text-right outline-none focus:border-emerald-500" />
+                              </td>
+                            )
+                          }
+                          if (!soPrevisto) {
+                            return (
+                              <td className={classe}
+                                title={d.liquido < 0 ? 'Voltou mais do que saiu neste mês' : undefined}>
+                                {formatBRL(d.liquido)}
+                              </td>
+                            )
+                          }
+                          return (
+                            <td className={classe}>
+                              <button
+                                onClick={() => { setEditId(d.item_id); setEditVal(String(d.liquido)) }}
+                                className="hover:text-emerald-400 transition-colors tabular-nums"
+                                title="Previsão — clique para corrigir">
+                                {formatBRL(d.liquido)}
+                              </button>
+                            </td>
+                          )
+                        })()}
                       </tr>
                       {aberto && <LinhasDetalhe linhas={d.linhas} />}
                     </Fragment>

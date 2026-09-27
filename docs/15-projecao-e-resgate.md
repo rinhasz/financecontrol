@@ -94,6 +94,14 @@ item a item.
 
 ## Correção manual da projeção
 
+> **Vale nas duas visões.** A analítica sempre deixou clicar no valor; a
+> consolidada mostrava o líquido como texto puro, e clicar nele não fazia nada —
+> o usuário concluía, com razão, que "não dá para corrigir". Agora a consolidada
+> também edita, mas **só na linha inteiramente em aberto**: aí o líquido é a
+> projeção e nada mais. Com ocorrência já paga ou estorno no meio, não há como
+> saber qual parcela o número digitado deveria substituir, e a linha segue
+> apenas leitura.
+
 A projeção automática acerta na maioria, mas não em todas. `projecao_manual`
 `(natureza, item_id, mes_ref, valor)` guarda a correção de **um item num mês**,
 e tem precedência sobre tudo:

@@ -499,9 +499,6 @@ def importar():
     # Quem revisa precisa saber quais, para não deixar um mês por bater.
     dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '27'))
 
-    conn.commit()
-    conn.close()
-
     contagem = {}
     for t in txs:
         m = competencia_da_data(t['data'], dia_corte)
@@ -509,7 +506,23 @@ def importar():
         c = contagem.setdefault(m, {'mes': m, 'total': 0, 'agendados': 0})
         c['total'] += 1
         c['agendados'] += 1 if agendada else 0
+
+    # Quantas transações de cada competência ainda estão sem dono.
+    #
+    # É este número que diz se o mês precisa de revisão. Sem ele a tela listava
+    # as competências cobertas mas não dizia quais tinham trabalho pendente — e
+    # os lançamentos futuros, que por definição caem no mês seguinte, ficavam
+    # por associar sem ninguém notar. O batimento sempre soube casá-los; o que
+    # faltava era alguém avisar que aquele mês existia e estava por fazer.
+    for m, c in contagem.items():
+        ini_m, fim_m = periodo_competencia(m, dia_corte)
+        c['pendentes'] = conn.execute(
+            'SELECT COUNT(*) FROM transacao WHERE data BETWEEN ? AND ? '
+            'AND despesa_id IS NULL AND receita_id IS NULL', (ini_m, fim_m)).fetchone()[0]
     meses = [contagem[m] for m in sorted(contagem)]
+
+    conn.commit()
+    conn.close()
 
     msg = f'{len(txs)} lançamentos do extrato ({ini} a {fim})'
     if saldo_valor is not None:
