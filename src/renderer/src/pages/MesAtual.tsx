@@ -1032,7 +1032,9 @@ function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
                   <CelulaData realizada={r.data_recebimento} prevista={r.data_prevista}
                     atrasado={urgencia(r) === 'atrasado'} />
                 </td>
-                <td className="px-4 py-2.5 w-28">
+                {/* cabe o status e o selo lado a lado: "Em aberto" + PREVISTO
+                    não cabia em w-28 e quebrava em duas linhas */}
+                <td className="px-4 py-2.5 w-48 whitespace-nowrap">
                   <span className={cn('text-xs px-2 py-0.5 rounded border',
                     r.status === 'recebido'
                       ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800/50'
