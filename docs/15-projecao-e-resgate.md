@@ -101,6 +101,12 @@ item a item.
 > projeção e nada mais. Com ocorrência já paga ou estorno no meio, não há como
 > saber qual parcela o número digitado deveria substituir, e a linha segue
 > apenas leitura.
+>
+> **Vale nos dois lados.** `projecao_manual` sempre aceitou `natureza='receita'`
+> — o que faltava era a tela: o valor da receita era texto puro e não abria
+> campo nenhum. Agora a receita **em aberto** também é clicável, pelo mesmo
+> endpoint. Recebida não é: o valor vem do extrato. Esporádica também não, pela
+> mesma razão.
 
 A projeção automática acerta na maioria, mas não em todas. `projecao_manual`
 `(natureza, item_id, mes_ref, valor)` guarda a correção de **um item num mês**,

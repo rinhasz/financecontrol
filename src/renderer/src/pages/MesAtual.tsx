@@ -338,6 +338,16 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
     load()
   }
 
+  /** Corrige a previsão de uma receita em aberto.
+   *
+   *  Não passa por `saveValor`: aquele recebe um `Lancamento` e decide entre
+   *  editar o lançamento e corrigir a projeção. Aqui só existe o segundo caso —
+   *  receita recebida tem valor do extrato e nem chega a ser clicável. */
+  async function corrigirReceita(itemId: number, valor: number) {
+    await api.projecao.manual('receita', itemId, mesRef, valor)
+    load()
+  }
+
   async function saveSaldo() {
     const val = parseFloat(saldoVal.replace(',', '.'))
     if (!isNaN(val)) await api.config.set({ saldo_conta: val })
@@ -615,11 +625,13 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
                 chegam na conta sem serem renda nova (doc 14). */}
             {renda.length > 0 && (
               <BlocoReceitas titulo="Receitas" itens={renda}
-                onLimparProjecao={id => limparProjecao('receita', id)} />
+                onLimparProjecao={id => limparProjecao('receita', id)}
+                onCorrigir={corrigirReceita} />
             )}
             {movimentacao.length > 0 && (
               <BlocoReceitas titulo="Movimentação — não é renda" itens={movimentacao}
-                onLimparProjecao={id => limparProjecao('receita', id)} esmaecido />
+                onLimparProjecao={id => limparProjecao('receita', id)}
+                onCorrigir={corrigirReceita} esmaecido />
             )}
 
             {Object.entries(byCategory).map(([cat, items]) => (
@@ -980,10 +992,21 @@ function BlocoConsolidado({ dados, onCorrigir }: {
 }
 
 
-function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
+function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao, onCorrigir }: {
   titulo: string; itens: Receita[]; esmaecido?: boolean
   onLimparProjecao: (itemId: number) => void
+  /** corrige a previsão de uma receita em aberto — mesmo caminho da despesa */
+  onCorrigir?: (itemId: number, valor: number) => void
 }) {
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editVal, setEditVal] = useState('')
+
+  function salvar(itemId: number) {
+    const v = parseFloat(editVal.replace(',', '.'))
+    if (!isNaN(v)) onCorrigir?.(itemId, v)
+    setEditId(null)
+  }
+
   // Calculado das próprias linhas, e não recebido pronto: o total que vinha do
   // resumo era `renda`, que é só o **recebido** — o cabeçalho dizia "total"
   // mostrando 47 mil enquanto as linhas somavam 65 mil. Somando aqui, as cinco
@@ -1024,9 +1047,33 @@ function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao }: {
                   {r.objetivo && <span className="ml-2 text-xs text-zinc-500">· {r.objetivo}</span>}
                 </td>
                 <td className="px-4 py-2.5 text-zinc-500 text-xs">{TIPO_LABEL[r.tipo] ?? r.tipo}</td>
+                {/* Em aberto o número é projeção e pode ser corrigido, igual à
+                    despesa. Recebida ou esporádica, quem manda é o extrato. */}
                 <td className={cn('px-4 py-2.5 text-right font-medium tabular-nums',
                   esmaecido ? 'text-zinc-400' : 'text-emerald-400')}>
-                  {formatBRL(r.valor_real ?? r.valor_esperado)}
+                  {editId === r.item_id ? (
+                    <input autoFocus value={editVal}
+                      onChange={e => setEditVal(e.target.value)}
+                      onBlur={() => salvar(r.item_id)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') salvar(r.item_id)
+                        if (e.key === 'Escape') setEditId(null)
+                      }}
+                      className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-sm
+                        text-zinc-200 w-28 text-right outline-none focus:border-emerald-500" />
+                  ) : onCorrigir && r.status === 'nao_encontrado' && r.recorrencia !== 'esporadica' ? (
+                    <button
+                      onClick={() => {
+                        setEditId(r.item_id)
+                        setEditVal(String(r.valor_real ?? r.valor_esperado))
+                      }}
+                      className="hover:text-emerald-300 transition-colors tabular-nums"
+                      title="Previsão — clique para corrigir">
+                      {formatBRL(r.valor_real ?? r.valor_esperado)}
+                    </button>
+                  ) : (
+                    formatBRL(r.valor_real ?? r.valor_esperado)
+                  )}
                 </td>
                 <td className="px-4 py-2.5 w-24">
                   <CelulaData realizada={r.data_recebimento} prevista={r.data_prevista}
