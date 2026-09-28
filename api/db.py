@@ -547,6 +547,17 @@ def init_db():
         if cols_val and coluna not in cols_val:
             conn.execute(f'ALTER TABLE valorizacao ADD COLUMN {coluna} {tipo}')
 
+    # A fatura traz a categoria do próprio emissor em cada compra — descoberta
+    # depois de o schema já existir. Ela fica ao lado da categoria do app, nunca
+    # por cima: é a única que não depende de modelo, e é contra ela que se
+    # audita o refino da IA.
+    cols_fit = [r[1] for r in conn.execute('PRAGMA table_info(fatura_item)').fetchall()]
+    for coluna, tipo in (
+            ('internacional', 'INTEGER NOT NULL DEFAULT 0'),
+            ('categoria_fatura', 'TEXT'), ('cidade', 'TEXT')):
+        if cols_fit and coluna not in cols_fit:
+            conn.execute(f'ALTER TABLE fatura_item ADD COLUMN {coluna} {tipo}')
+
     cols_mov = [r[1] for r in conn.execute('PRAGMA table_info(movimento_investimento)').fetchall()]
     for coluna, tipo in (
             ('emissor', 'TEXT'), ('indexador', 'TEXT'), ('ativo', 'TEXT'),

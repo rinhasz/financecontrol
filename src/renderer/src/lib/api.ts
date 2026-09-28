@@ -133,6 +133,33 @@ export const api = {
   categorias: {
     list: () => get('/api/categorias')
   },
+  cartoes: {
+    // o PDF inteiro vai para o servidor: parse, categorização e conferência
+    // acontecem lá. A chamada à IA leva alguns segundos por fatura, então o
+    // timeout padrão de 20s não serve — uma fatura de 187 lançamentos estoura.
+    importarPreview: (file: File, ia = true) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('ia', ia ? '1' : '0')
+      return fetch('/api/cartoes/importar/preview', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    importarConfirmar: (file: File, ia = true, rotulo = '', forcar = false) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('ia', ia ? '1' : '0')
+      if (rotulo) fd.append('rotulo', rotulo)
+      if (forcar) fd.append('forcar', '1')
+      return fetch('/api/cartoes/importar/confirmar', { method: 'POST', body: fd }).then(r => r.json())
+    },
+    faturas: () => get('/api/cartoes/faturas'),
+    excluirFatura: (id: number) =>
+      fetch(`/api/cartoes/faturas/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    itens: (mesRef?: string) => get('/api/cartoes/itens' + (mesRef ? `?mes_ref=${mesRef}` : '')),
+    analise: (mesRef?: string) => get('/api/cartoes/analise' + (mesRef ? `?mes_ref=${mesRef}` : '')),
+    // corrigir a categoria ensina uma regra que vale nas próximas faturas
+    recategorizar: (id: number, categoria: string, aprender = true) =>
+      post(`/api/cartoes/itens/${id}/categoria`, { categoria, aprender })
+  },
   importacao: {
     // sem mês: a competência de cada lançamento sai da data dele, no servidor,
     // e a resposta traz em `meses` quais o extrato cobriu

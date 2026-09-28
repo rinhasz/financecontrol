@@ -59,6 +59,13 @@ RE_FIM_INTERNACIONAL = re.compile(r'Total(lançamentos|transações)inter\.?emR\
 # total do The One fechar (20.319,61 + 4,06 = 20.323,67).
 RE_ENCARGO = re.compile(r'(RepassedeIOFemR\$)\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})', re.I)
 
+# A categoria que o próprio emissor atribui, na linha logo abaixo da compra:
+# `ALIMENTAÇÃO.SAOPAULO`. A cidade é **opcional** — às vezes a linha quebra e
+# sobra só `DIVERSOS.`, e exigi-la derrubava a cobertura de 100% para 88%.
+# Dígitos ficam de fora do padrão de propósito: é o que impede uma linha de
+# valor (`SANFRANCISCO 110,00 BRL 21,57`) de passar por categoria.
+RE_CATEGORIA = re.compile(r'^([A-ZÀ-Ú][A-ZÀ-Ú\s]{2,30}?)\.\s*([A-ZÀ-Úa-zà-ú\s]{0,30})$')
+
 
 def _num(s):
     if s is None:
@@ -128,25 +135,30 @@ def _linhas_em_ordem_de_leitura(conteudo: bytes) -> list:
     Cada coluna é percorrida de cima a baixo antes de passar para a próxima. É
     isso que mantém marcador e lançamento no mesmo fluxo — sem isso, um
     `Lançamentosnocartão(final…)` da coluna direita fechava itens da esquerda.
+
+    Devolve `(bloco, texto)`, onde `bloco` identifica a coluna de origem
+    (página, coluna). O id existe para a categoria: ela vem na linha **seguinte**
+    ao lançamento, e sem saber onde uma coluna termina o último item dela pegaria
+    a categoria da primeira linha da coluna vizinha — errado e silencioso.
     """
     import pdfplumber
     saida = []
     with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
-        for pg in pdf.pages:
+        for npg, pg in enumerate(pdf.pages):
             palavras = pg.extract_words()
             if not palavras:
                 continue
             corte = _corte_de_coluna(palavras)
             faixas = [(-float('inf'), corte), (corte, float('inf'))] if corte \
                 else [(-float('inf'), float('inf'))]
-            for xini, xfim in faixas:
+            for ncol, (xini, xfim) in enumerate(faixas):
                 col = [w for w in palavras if xini <= w['x0'] < xfim]
                 linhas = {}
                 for w in col:
                     linhas.setdefault(round(w['top']), []).append(w)
                 for chave in sorted(linhas):
                     ws = sorted(linhas[chave], key=lambda y: y['x0'])
-                    saida.append(' '.join(w['text'] for w in ws).strip())
+                    saida.append(((npg, ncol), ' '.join(w['text'] for w in ws).strip()))
     return saida
 
 
@@ -210,7 +222,8 @@ def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
     comecou = False        # antes do primeiro portador é tudo cabeçalho
 
     internacional = False
-    for linha in _linhas_em_ordem_de_leitura(conteudo):
+    registros = _linhas_em_ordem_de_leitura(conteudo)
+    for idx, (bloco, linha) in enumerate(registros):
         if RE_INICIO_FUTURAS.search(linha):
             secao = 'proxima_fatura'
         if RE_INTERNACIONAL.search(linha):
@@ -263,7 +276,13 @@ def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
                 'valor': _num(m.group(4)),
                 'parcela_n': pn,
                 'parcela_total': pt,
+                'categoria_fatura': None,
+                'cidade': None,
+                '_idx': idx,
+                '_bloco': bloco,
             })
+
+    _categorizar_pela_fatura(itens, registros)
 
     texto = ' '.join(extrair_texto(conteudo))
 
@@ -282,6 +301,41 @@ def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
 
     return {'cabecalho': cab, 'itens': itens, 'totais_cartao': totais_cartao,
             'conferencia': conferir(itens, totais_cartao, cab)}
+
+
+def _categorizar_pela_fatura(itens: list, registros: list):
+    """Preenche a categoria que o **emissor** atribuiu a cada compra.
+
+    Cobertura medida nas três faturas reais: 167/168, 38/39 e 2/2 nos
+    lançamentos do mês. As duas faltas são a compra internacional e o estorno de
+    cashback, que o banco de fato não categoriza — e nenhum dos dois é gasto.
+
+    O bloco de parcelas futuras não vem categorizado em fatura nenhuma (0/18,
+    0/4, 0/1): é compromisso, não compra. Mas é o **mesmo estabelecimento** da
+    parcela deste mês (`ITAUSHOP 07/10` agora, `08/10` na próxima), então a
+    categoria se herda por casamento — sem IA e sem chute.
+    """
+    for it in itens:
+        idx, bloco = it.pop('_idx', None), it.pop('_bloco', None)
+        if idx is None or idx + 1 >= len(registros):
+            continue
+        prox_bloco, prox_texto = registros[idx + 1]
+        # nunca atravessar a fronteira da coluna: a linha seguinte ali é de
+        # outra coluna e a categoria pertenceria a outro lançamento
+        if prox_bloco != bloco:
+            continue
+        m = RE_CATEGORIA.match(prox_texto.strip())
+        if m:
+            it['categoria_fatura'] = m.group(1).strip()
+            it['cidade'] = (m.group(2) or '').strip() or None
+
+    herdado = {}
+    for it in itens:
+        if it['secao'] == 'lancamento' and it.get('categoria_fatura'):
+            herdado.setdefault(it['estabelecimento'], it['categoria_fatura'])
+    for it in itens:
+        if not it.get('categoria_fatura'):
+            it['categoria_fatura'] = herdado.get(it['estabelecimento'])
 
 
 def conferir(itens: list, totais_cartao: dict, cab: dict) -> dict:

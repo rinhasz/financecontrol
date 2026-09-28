@@ -128,8 +128,8 @@ bancário (doc 10).
 ```
 id, fatura_id, secao, portador, cartao_final,
 data_compra, estabelecimento, estabelecimento_norm,
-valor, parcela_n, parcela_total,
-categoria, origem_categoria, criado_em
+valor, parcela_n, parcela_total, internacional,
+categoria_fatura, cidade, categoria, origem_categoria, criado_em
 ```
 
 - **`secao`**: `lancamento` (desta fatura) ou `proxima_fatura` (compromisso já
@@ -137,8 +137,12 @@ categoria, origem_categoria, criado_em
   dívida futura. Separá-los é requisito, não detalhe.
 - **`estabelecimento`** é o texto cru do PDF, preservado sempre. `_norm` é a
   versão legível (`ARBORETTOCAFEECOZIN` → `Arboretto Café e Cozinha`).
-- **`origem_categoria`**: `regra` | `ia` | `manual`. Sem isso não há como saber
-  no que confiar nem o que a IA acertou.
+- **`origem_categoria`**: `fatura` | `ia` | `regra` | `manual`, em ordem
+  crescente de precedência. Sem isso não há como saber no que confiar nem o que
+  a IA acertou.
+- **`categoria_fatura`** é o rótulo do próprio emissor, cru e **nunca
+  sobrescrito**. É a única categoria que não depende de modelo nenhum, e é
+  contra ela que se audita o refino.
 
 ### `cartao_categoria_regra` — o que o usuário ensinou
 
@@ -152,14 +156,60 @@ Corrigir a categoria de um estabelecimento **ensina** — exatamente como
 regra vale mais que a IA, porque o usuário sabe mais que o modelo sobre a
 própria vida.
 
+## A fatura já categoriza
+
+Descoberto ao conferir os PDFs, e muda o desenho: **o emissor põe uma categoria
+em cada compra**, numa linha `CATEGORIA.CIDADE` logo abaixo do lançamento
+(`ALIMENTAÇÃO.SAOPAULO`, `VEÍCULOS.SAOPAULO`). É determinístico, é de graça, e
+cobre quase tudo:
+
+| fatura | lançamentos do mês | parcelas futuras |
+|---|---|---|
+| The One | **167/168** | 0/18 |
+| Black | **38/39** | 0/4 |
+| Azul | **2/2** | 0/1 |
+
+As duas faltas do mês são a **compra internacional** e o **estorno de cashback**
+— que o banco realmente não categoriza, e nenhum dos dois é gasto a analisar.
+
+As parcelas futuras não vêm categorizadas em nenhuma fatura: é bloco de
+compromisso, não de compra. Mas é o **mesmo estabelecimento** da parcela deste
+mês (`ITAUSHOP 07/10` agora, `ITAUSHOP 08/10` na próxima), então a categoria se
+**herda por casamento de estabelecimento** — sem IA, sem chute.
+
+> **A linha de categoria nem sempre traz a cidade.** Às vezes quebra e sobra só
+> `DIVERSOS.`. Exigir cidade derrubava a cobertura de 100% para 88%.
+
+> **O look-ahead não pode atravessar coluna.** A leitura é coluna a coluna: o
+> último lançamento de uma coluna teria como "próxima linha" a primeira da
+> coluna seguinte, e pegaria a categoria errada **em silêncio** — nenhuma
+> conferência de total acusaria. Medido nas três faturas: zero lançamentos no
+> fim de coluna, risco hoje nulo. Ainda assim o parser carrega o id do bloco e
+> se recusa a atravessar, porque a próxima fatura pode ter outro layout.
+
 ## O papel da IA, e o que ela não faz
+
+Com a categoria do emissor na mão, a IA deixa de ser a fonte da categoria — o
+que é bom, porque a fonte determinística é melhor. Ela passa a fazer só o que
+regex não faz.
 
 Gemini (já configurado, `GEMINI_API_KEY`, mesmo cliente de `email_busca.py`) faz
 **duas coisas**:
 
 1. **Normalizar o estabelecimento** — desfazer o texto colado e devolver o nome
-   legível.
-2. **Categorizar** — atribuir categoria a partir do nome do estabelecimento.
+   legível (`ARBORETTOCAFEECOZIN` → "Arboretto Café e Cozinha").
+2. **Refinar a categoria** — porque os baldes do emissor são grossos demais para
+   a pergunta "o que dá para cortar":
+
+| balde do emissor | o que esconde | por que importa |
+|---|---|---|
+| `ALIMENTAÇÃO` R$ 8.736,94 | Sacolão e Pão de Açúcar junto com Arboretto (12x) e Homem de Mello (16x) | **supermercado ≠ restaurante** — é o corte mais acionável da fatura |
+| `TURISMOEENTRETENIM` R$ 3.972,07 | `Apple.com/Bill` 4x, `GoogleOne` | são **assinaturas**, o sinal de corte mais óbvio, perdidas dentro de "viagem" |
+| `DIVERSOS` R$ 3.088,88 | Prudential (seguro), Sephora (cosmético), Vivara (joia), Panini (brinquedo) | 23 lançamentos num balde que não responde nada |
+| `EDUCAÇÃO` R$ 1.191,60 | `MP*GOCASE` (capinha de celular) | o emissor também erra |
+
+A categoria do emissor fica gravada em `categoria_fatura` e **não é
+sobrescrita**: se o refino errar, dá para voltar.
 
 E **não faz** nenhuma destas, por decisão explícita:
 
@@ -240,6 +290,61 @@ Candidatos a corte, cada um com o critério que o tornou candidato:
 
 O último é o mais útil e o menos óbvio: saber que uma parcela acaba é saber
 quanto de fôlego chega sem precisar cortar nada.
+
+## O que ficou implementado, e o que foi medido
+
+### A taxonomia do app
+
+Vinte categorias, mais finas que as oito do emissor porque a pergunta é outra:
+ele classifica para faturar, o app classifica para **cortar**.
+
+```
+Supermercado · Restaurante e bar · Delivery · Combustível · Transporte ·
+Saúde · Farmácia · Educação · Vestuário · Beleza · Assinaturas · Viagem ·
+Lazer · Presentes · Seguros · Casa · Esporte · Eletrônicos · Filhos ·
+Outros · Encargos
+```
+
+### Precedência, da mais fraca para a mais forte
+
+| origem | quem decide |
+|---|---|
+| `fatura` | o rótulo do emissor, traduzido para a taxonomia do app |
+| `ia` | Gemini, só onde o balde era grosso ou não havia nada |
+| `regra` | palavra-chave do app **ou** o que o usuário já ensinou |
+| `manual` | o usuário, nesta fatura |
+
+### Medido nas faturas reais
+
+**Só com o caminho determinístico**, sem IA nenhuma: `fatura` 107 + `regra` 101
+nos lançamentos do mês, e **R$ 344,47 de R$ 26.652,41 sem classificar — 1,3%**.
+O dicionário de palavras-chave sozinho já corrige erros do emissor: `MP*GOCASE`
+sai de `EDUCAÇÃO` para Eletrônicos.
+
+**Com a IA ligada** (The One, 187 itens): sobra **zero** não classificado, 93
+lançamentos ganham nome legível e ela muda **12** categorias. As que importam
+são exatamente a divisão que o emissor não faz:
+
+| estabelecimento | antes | depois |
+|---|---|---|
+| Minuto Pão de Açúcar | Restaurante e bar | **Supermercado** |
+| Clement's Carnes | Restaurante e bar | **Supermercado** |
+| Hiper Zaffari São Paulo | Restaurante e bar | **Supermercado** |
+| Google Cloud | Não classificado | **Assinaturas** |
+| Iupp Tag Itaú | Não classificado | **Transporte** |
+
+A normalização entrega o que regex não entrega: `ARBORETTOCAFEECOZIN` →
+"Arboretto Café e Cozinha", `BacioDiLatte` → "Bacio di Latte".
+
+> **Encargo não é compra.** O IOF entrou na IA na primeira rodada e voltou como
+> "Repasse de IOF em R$ → Outros", poluindo a análise com uma linha que ninguém
+> decidiu gastar. Agora `secao='encargo'` recebe a categoria `Encargos` direto e
+> nunca é enviado ao modelo.
+
+> **A IA só é creditada quando muda algo.** Marcar `ia` também onde ela apenas
+> confirmou o que a fatura já dizia inflava o contador de 12 para 88 — e o
+> resumo de origens existe justamente para o usuário saber em quanto do
+> resultado o modelo opinou. Confirmar não é opinar.
 
 ## O que esta fase deliberadamente não faz
 

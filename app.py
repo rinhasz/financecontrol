@@ -24,6 +24,7 @@ from api.receitas import bp as bp_receitas
 from api.investimentos import bp as bp_investimentos
 from api.resgates import bp as bp_resgates
 from api.mov_investimento import bp as bp_mov_investimento
+from api.cartoes_api import bp as bp_cartoes
 from api.importacao import bp as bp_importacao
 from api.email_busca import bp as bp_email_busca
 
@@ -75,6 +76,7 @@ app.register_blueprint(bp_receitas,    url_prefix='/api')
 app.register_blueprint(bp_investimentos, url_prefix='/api')
 app.register_blueprint(bp_resgates, url_prefix='/api')
 app.register_blueprint(bp_mov_investimento, url_prefix='/api')
+app.register_blueprint(bp_cartoes,     url_prefix='/api')
 app.register_blueprint(bp_importacao,  url_prefix='/api')
 app.register_blueprint(bp_email_busca, url_prefix='/api')
 

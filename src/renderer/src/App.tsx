@@ -5,11 +5,12 @@ import { Importacao } from './pages/Importacao'
 import { EmailBusca } from './pages/EmailBusca'
 import { Investimentos } from './pages/Investimentos'
 import { PlanejarResgates } from './pages/PlanejarResgates'
+import { Cartoes } from './pages/Cartoes'
 import { Parametros } from './pages/Parametros'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { cn } from './lib/utils'
 
-type Page = 'mes' | 'resgates' | 'catalogo' | 'importacao' | 'email' | 'investimentos' | 'parametros'
+type Page = 'mes' | 'resgates' | 'catalogo' | 'importacao' | 'email' | 'investimentos' | 'cartoes' | 'parametros'
 
 const NAV = [
   { id: 'mes' as Page, label: 'Mês Atual', icon: CalendarIcon },
@@ -18,6 +19,7 @@ const NAV = [
   { id: 'importacao' as Page, label: 'Importar Extrato', icon: UploadIcon },
   { id: 'email' as Page, label: 'Procurar em Emails', icon: MailIcon },
   { id: 'investimentos' as Page, label: 'Investimentos', icon: WalletIcon },
+  { id: 'cartoes' as Page, label: 'Cartões', icon: CardIcon },
   { id: 'parametros' as Page, label: 'Parâmetros', icon: GearIcon }
 ]
 
@@ -89,6 +91,9 @@ export default function App(): JSX.Element {
           <div className={cn('h-full', page !== 'investimentos' && 'hidden')}>
             <ErrorBoundary nome="Investimentos"><Investimentos active={page === 'investimentos'} /></ErrorBoundary>
           </div>
+          <div className={cn('h-full', page !== 'cartoes' && 'hidden')}>
+            <ErrorBoundary nome="Cartões"><Cartoes active={page === 'cartoes'} /></ErrorBoundary>
+          </div>
           <div className={cn('h-full', page !== 'parametros' && 'hidden')}>
             <ErrorBoundary nome="Parâmetros"><Parametros /></ErrorBoundary>
           </div>
@@ -130,6 +135,15 @@ function GearIcon({ size = 16 }: { size?: number }): JSX.Element {
       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function CardIcon({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M2 10h20" />
     </svg>
   )
 }
