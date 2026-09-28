@@ -44,6 +44,7 @@ interface Analise {
   meses: string[]
   total_lancamentos: number
   total_comprometido: number
+  total_encargos: number
   por_categoria: Grupo[]
   por_estabelecimento: Grupo[]
   por_portador: Grupo[]
@@ -447,6 +448,14 @@ function AbaAnalise({ analise, carregando, maxCat }: {
         <div>
           <div className="text-xs uppercase text-zinc-500">Gasto no mês</div>
           <div className="text-2xl tabular-nums">{formatBRL(analise.total_lancamentos)}</div>
+          {/* Sem esta linha o total não fecha com o PDF, e um número que não
+              reconcilia com o papel do banco não merece confiança. */}
+          {!!analise.total_encargos && (
+            <div className="text-xs text-zinc-500">
+              + {formatBRL(analise.total_encargos)} de encargos ={' '}
+              {formatBRL(analise.total_lancamentos + analise.total_encargos)} nas faturas
+            </div>
+          )}
         </div>
         <div>
           <div className="text-xs uppercase text-zinc-500">Já comprometido (próxima fatura)</div>

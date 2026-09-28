@@ -486,6 +486,7 @@ def analise():
 
     lanc = [i for i in itens if i['secao'] == 'lancamento']
     fut = [i for i in itens if i['secao'] == 'proxima_fatura']
+    enc = [i for i in itens if i['secao'] == 'encargo']
 
     def agrupar(chave, base=lanc):
         g = {}
@@ -549,6 +550,11 @@ def analise():
         'ok': True, 'mes_ref': mes, 'meses': meses,
         'total_lancamentos': round(sum(i['valor'] or 0 for i in lanc), 2),
         'total_comprometido': round(sum(i['valor'] or 0 for i in fut), 2),
+        # Encargo fica fora do gasto — IOF não é escolha de ninguém — mas vai
+        # na resposta porque sem ele a tela não fecha com a fatura: 26.652,41 de
+        # compra + 4,06 de IOF = 26.656,47, que é a soma dos PDFs. Um total que
+        # não reconcilia com o papel do banco destrói a confiança na análise.
+        'total_encargos': round(sum(i['valor'] or 0 for i in enc), 2),
         'por_categoria': agrupar('categoria'),
         'por_estabelecimento': agrupar('estabelecimento')[:40],
         'por_portador': agrupar('portador'),

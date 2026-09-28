@@ -42,11 +42,12 @@ batimentos e associa remetentes — não editar à mão.
 
 **Implementado:** Função 1 completa (catálogo, competência, importação que
 substitui o período, batimento com preview, Mês Atual, resgate), receitas com
-classificação por tipo (doc 14) e busca de boletos/Pix por email.
+classificação por tipo (doc 14), busca de boletos/Pix por email (doc 08),
+projeção editável e plano de resgates (doc 15), investimentos com posição e
+valorização diária (doc 16) e análise da fatura de cartão (doc 17).
 
-**Não implementado:** Funções 2 (despesas extras), 3 (análise do mês) e 4
-(investimentos) — ver doc 06. A tabela `posicao_investimento` existe no schema
-mas não é usada.
+**Não implementado:** Funções 2 (despesas extras) e 3 (análise do mês) — ver
+doc 06.
 
 ## Stack
 
