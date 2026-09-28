@@ -13,3 +13,7 @@ electron.vite.config.ts
 tsconfig.node.json
 tsconfig.web.json
 *.tsbuildinfo
+
+# cópias de segurança do banco: contêm o histórico real, nunca versionar
+dev.sqlite.bkp-*
+*.bkp-*
