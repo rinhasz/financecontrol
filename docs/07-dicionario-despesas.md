@@ -47,6 +47,8 @@ conversa com o usuário.
 | `PIX QRS MERCADO PAG01/08` | Cartao Mercado Pago | Teatro Maju |
 | `PAG BOLETO RED BALLOON S.A.` | red balloon malu | adiantamento deusa |
 | `PIX TRANSF DEUSA D12/08` | adiantamento deusa | — |
+| `PIX TRANSF DEUSA DA` | adiantamento deusa | cartao porto |
+| `PIX TRANSF MARCELO O` | vaga garagem chacara monteverde | vale transporte deusa |
 
 ## Notas
 

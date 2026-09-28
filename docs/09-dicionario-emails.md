@@ -14,3 +14,4 @@ verdade que o app consulta é o banco.
 | `faturadigital@minhaclaro.com.br` | net |
 | `faturadigital@itaupersonnalite.com.br` | cartao black |
 | `grp-sousulamerica@sulamerica.com.br` | convenio sogra |
+| `conta@safra.com.br` | parcela wey |
