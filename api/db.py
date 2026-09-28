@@ -134,6 +134,59 @@ CREATE TABLE IF NOT EXISTS projecao_manual (
   UNIQUE(natureza, item_id, mes_ref)
 );
 
+-- Fatura de cartão de crédito, lida do PDF (doc 17). Uma linha por arquivo
+-- importado; reimportar substitui, nunca duplica — mesma regra do extrato.
+CREATE TABLE IF NOT EXISTS fatura_cartao (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  cartao                 TEXT NOT NULL,      -- rótulo legível: "The One", "Black"
+  final                  TEXT,               -- 4 últimos dígitos do cartão titular
+  arquivo                TEXT,
+  mes_ref                TEXT,               -- competência do vencimento
+  data_vencimento        TEXT,
+  total_fatura           REAL,
+  total_lancamentos      REAL,
+  total_proximas_faturas REAL,
+  pagamento_minimo       REAL,
+  limite_total           REAL,
+  criado_em              TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(cartao, data_vencimento)
+);
+
+-- Um lançamento da fatura.
+--
+-- `secao` separa o que é gasto DESTE mês do que é parcela já contratada que
+-- ainda vai chegar: mesma forma no PDF, significados opostos na análise.
+-- `estabelecimento` guarda o texto cru (vem sem espaços: "BacioDiLatte") e
+-- `_norm` a versão legível; o cru fica para poder reconferir contra o PDF.
+CREATE TABLE IF NOT EXISTS fatura_item (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  fatura_id            INTEGER NOT NULL REFERENCES fatura_cartao(id),
+  secao                TEXT NOT NULL DEFAULT 'lancamento',  -- lancamento | proxima_fatura
+  portador             TEXT,
+  cartao_final         TEXT,
+  data_compra          TEXT,
+  estabelecimento      TEXT NOT NULL,
+  estabelecimento_norm TEXT,
+  valor                REAL NOT NULL,
+  parcela_n            INTEGER,
+  parcela_total        INTEGER,
+  categoria            TEXT,
+  origem_categoria     TEXT,                 -- regra | ia | manual
+  criado_em            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- O que o usuário ensinou sobre categoria de estabelecimento. Corrigir uma
+-- categoria vale mais que a IA na importação seguinte — o usuário sabe mais
+-- que o modelo sobre a própria vida. Mesma ideia de transacao_despesa_regra.
+CREATE TABLE IF NOT EXISTS cartao_categoria_regra (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  padrao    TEXT NOT NULL,
+  categoria TEXT NOT NULL,
+  acertos   INTEGER NOT NULL DEFAULT 1,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(padrao, categoria)
+);
+
 CREATE TABLE IF NOT EXISTS transacao_receita_regra (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   padrao     TEXT NOT NULL,

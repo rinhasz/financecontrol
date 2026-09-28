@@ -34,6 +34,53 @@ A consequência da última é a regra mais importante do parser: **reconhecer pe
 forma da linha, nunca pela posição na página**. Um bloco não termina onde parece
 terminar.
 
+### Ler por coordenada, não por linha de texto
+
+`extract_text()` achata as duas colunas numa linha só. Dá para extrair os dois
+lançamentos daí com regex — a primeira versão fazia isso — mas os **marcadores
+de seção também caem nas colunas**, e aí um `Lançamentosnocartão(final8051)` da
+coluna direita fechava, por estar "depois" no texto, itens da coluna esquerda. O
+sintoma foi característico: **total geral certo, totais por cartão errados**.
+Nada se perdia; tudo ia para o cartão errado.
+
+A geometria real é regular e idêntica nas três faturas:
+
+| | data | estabelecimento | valor (x1) |
+|---|---|---|---|
+| coluna A | x≈151 | x≈178 | **x1≈340** |
+| coluna B | x≈367 | x≈394 | **x1≈556** |
+
+O corte fica em ~353 — **não** no meio da página (298), que jogava o valor da
+coluna A para dentro da coluna B.
+
+> **A âncora tem que ser o valor, não a data.** A segunda tentativa derivou as
+> colunas das posições das datas, e piorou tudo: **a parcela (`07/10`) também é
+> um token `DD/MM`**, com x próprio (~301), e criava uma coluna fantasma entre o
+> valor da A e a data da B. As linhas se despedaçaram — 20 lançamentos lidos
+> onde havia 168. Valores são right-aligned em x1 estável; datas não servem.
+
+Clusters de valor com menos de três membros são ignorados: são cabeçalho, rodapé
+e as tabelas de simulação de parcelamento, não colunas de lançamento.
+
+### Compra internacional e encargo
+
+Dois casos que só apareceram porque a conferência não fechava, e que **não são
+compra comum**:
+
+```
+Lançamentosinternacionais          <- bloco próprio, depois dos blocos por cartão
+RAFAELINHASZ(final7484)
+12/09 ANTHROPIC*CLAUDESUB 116,69   <- entra no total da fatura...
+SANFRANCISCO 110,00 BRL 21,57      <- cidade e valor em US$ (sem data: não casa)
+Totaltransaçõesinter.emR$ 116,69   <- ...mas tem total próprio
+RepassedeIOFemR$ 4,06              <- encargo: sem data, sem estabelecimento
+```
+
+O `Lançamentosnocartão(final7484)` cobre **só o doméstico**. Somar a compra
+internacional ali acusava +116,69 num cartão que estava certo. E o IOF, que não
+é compra mas é dinheiro da fatura, era exatamente o que faltava para o total
+fechar: `20.319,61 + 4,06 = 20.323,67`.
+
 ### Gramática de um lançamento
 
 ```
@@ -136,12 +183,28 @@ mais um dicionário inicial de palavras-chave, e o que não casar fica em
 O PDF traz os próprios totais, então o parser pode ser verificado contra ele —
 e deve, porque um lançamento perdido numa coluna passa despercebido:
 
-| conferência | fonte no PDF |
-|---|---|
-| soma dos itens de cada portador | `Lançamentosnocartão(finalXXXX)` |
-| soma de todos os lançamentos | `Totaldoslançamentosatuais 20.323,67` |
-| soma das parcelas futuras | `Totalparapróximasfaturas 18.792,38` |
-| total da fatura | `=Totaldestafatura` |
+| conferência | fonte no PDF | o que entra |
+|---|---|---|
+| soma por portador | `Lançamentosnocartão(finalXXXX)` | só compra **doméstica** |
+| soma de todos os lançamentos | `Totaldoslançamentosatuais` | doméstica + internacional + encargo |
+| soma das parcelas futuras | **`Próximafatura`** | o bloco lista só a próxima |
+
+> **A conferência das parcelas mirava o número errado.** `Totalparapróximasfaturas`
+> (18.792,38) soma **todas** as parcelas que ainda faltam; o bloco lista apenas
+> as da **próxima** fatura (4.314,76). O PDF traz os dois, e
+> `Próxima + Demais = Total` fecha nas três faturas — o alvo certo é `Próximafatura`.
+
+### Resultado
+
+As três faturas fecham **ao centavo**, nas três conferências:
+
+| fatura | itens | por cartão | total geral | próxima fatura |
+|---|---|---|---|---|
+| The One | 167 dom. + 1 inter. + 1 encargo + 18 futuras | 9/9 ✓ | 20.323,67 ✓ | 4.314,76 ✓ |
+| Black | 39 + 4 futuras | 4/4 ✓ | 5.166,19 ✓ | 1.247,69 ✓ |
+| Azul | 2 + 1 futura | 2/2 ✓ | 1.166,61 ✓ | 1.105,11 ✓ |
+
+Quinze seções de cartão conferidas, zero divergências.
 
 A importação **mostra as diferenças antes de gravar**. Divergiu, não importa.
 
