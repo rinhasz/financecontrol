@@ -156,6 +156,9 @@ export const api = {
       fetch(`/api/cartoes/faturas/${id}`, { method: 'DELETE' }).then(r => r.json()),
     itens: (mesRef?: string) => get('/api/cartoes/itens' + (mesRef ? `?mes_ref=${mesRef}` : '')),
     analise: (mesRef?: string) => get('/api/cartoes/analise' + (mesRef ? `?mes_ref=${mesRef}` : '')),
+    // monta o dossiê e pede conselho à IA: passa dos 20s padrão com folga
+    sugestoes: (mesRef?: string) =>
+      get('/api/cartoes/sugestoes' + (mesRef ? `?mes_ref=${mesRef}` : ''), 180_000),
     // corrigir a categoria ensina uma regra que vale nas próximas faturas
     recategorizar: (id: number, categoria: string, aprender = true) =>
       post(`/api/cartoes/itens/${id}/categoria`, { categoria, aprender })

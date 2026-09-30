@@ -346,6 +346,101 @@ A normalização entrega o que regex não entrega: `ARBORETTOCAFEECOZIN` →
 > resumo de origens existe justamente para o usuário saber em quanto do
 > resultado o modelo opinou. Confirmar não é opinar.
 
+## Detalhe por categoria, e conselho de verdade
+
+Pedido depois da primeira entrega: ver o **detalhe de cada categoria**, e
+sugestões bem mais inteligentes — *"em alguns casos a pergunta será se preciso
+realmente gastar o que foi gasto. Em outros casos, se posso comprar as mesmas
+coisas gastando menos."*
+
+### Três níveis, porque a decisão não está no resumo
+
+`categoria → estabelecimento → lançamento`. A categoria diz onde o dinheiro
+está; o estabelecimento é onde a decisão acontece. "Restaurante e bar R$
+5.074,67" não é acionável. "Arboretto, 12 vezes, R$ 91,75 em média" é.
+
+### A fronteira da IA muda aqui — de propósito
+
+Até agora a IA **não lia valores**, e essa regra continua valendo para
+**extração**: valor, data e parcela saem do parser, sempre. Conselho é outra
+coisa. Não existe resposta para "precisava gastar isso?" sem ver quanto, quantas
+vezes e com que regularidade.
+
+| a IA passa a ler | a IA nunca faz |
+|---|---|
+| agregados: total, contagem e ticket médio por categoria e estabelecimento | escrever valor na base |
+| parcelamentos: quanto sai por mês e quanto ainda falta | criar, apagar ou alterar lançamento |
+| repetição, micro-compras, cobranças no mesmo dia | citar estabelecimento que não está no dossiê |
+
+Extração é determinística, análise é opinativa. Misturar as duas é o que produz
+número errado com cara de certeza.
+
+### As duas perguntas, separadas na tela
+
+| tipo | pergunta | exemplo real do mês |
+|---|---|---|
+| `necessidade` | precisava gastar isso? | 41 compras em três lugares, R$ 2.548,49 |
+| `preco` | dava para gastar menos na mesma coisa? | R$ 603,98/mês de assinaturas = R$ 7.247/ano |
+
+São decisões de natureza diferente: cortar um hábito não é o mesmo que trocar de
+fornecedor, e embaralhar os dois deixa o conselho inútil.
+
+### O que out/2026 revelou, e a primeira entrega não mostrava
+
+- **R$ 23.789,32 ainda vão chegar** em parcelas já contratadas — **3,5x** o que
+  a tela chamava de comprometido, que era só a próxima fatura (R$ 6.667,56).
+- **Só R$ 1.100,80 foi decisão nova** deste mês em parcelamento; R$ 6.170,00 são
+  parcelas de decisões antigas e R$ 19.381,61 à vista. Quase um quarto da fatura
+  já estava contratado antes de o mês começar.
+- **R$ 2.548,49 em 41 compras** em três lugares (Homem de Mello 16x, L.G.A. 13x,
+  Arboretto 12x). É hábito, não decisão — e é onde o corte pesa.
+- **Apple.com/Bill 4x no mês**, duas no mesmo dia: várias assinaturas somadas
+  num nome só.
+- **HMODONTOLOGIA, duas cobranças de R$ 1.160,00 no mesmo dia.** Pode ser
+  entrada mais parcela, pode ser cobrança repetida. O app aponta; conferir é do
+  usuário.
+
+> A estimativa de parcelamento supõe **parcelas iguais** — é o que a fatura
+> permite afirmar, e vai rotulada como estimativa por isso.
+
+### Validação do que o modelo devolve
+
+Sem isto o conselho é chute com aparência de análise:
+
+- o **alvo** tem de existir no dossiê (uma categoria ou um estabelecimento);
+- a **economia estimada** não pode passar o que foi gasto naquele alvo no mês;
+- sugestão sem diagnóstico ou sem ação concreta é descartada.
+
+### Economia pontual não é economia mensal
+
+A primeira rodada de sugestões somou **R$ 4.003,80/mês** e, multiplicando,
+anunciaria R$ 48 mil por ano. O número era enganoso, e de três formas
+diferentes:
+
+| alvo | o que a IA propôs | por que não fecha |
+|---|---|---|
+| Sephora R$ 561,00 | parar de comprar cosméticos | **uma compra só** no mês — não se repete |
+| Palmeiras Store R$ 250,00 | parar compras por impulso | idem, gasto pontual |
+| MP*GOCASE R$ 415,50 | cessar compras de acessórios | é **parcelamento** (2x R$ 207,75): já contratado, não há o que cortar |
+
+Então a recorrência **não** é opinião do modelo — sai dos dados, antes de ele
+falar:
+
+| classe | critério | o que a economia significa |
+|---|---|---|
+| `recorrente` | 3+ compras no mês no mesmo lugar | hábito: a economia se repete todo mês |
+| `pontual` | 1 ou 2 compras, sem parcela | **ganho único**, nunca multiplicado por 12 |
+| `comprometido` | tem parcela em andamento | não se corta agora; o que volta, volta quando a parcela acabar |
+
+A tela mostra **três totais separados** e jamais um só: economia recorrente por
+mês, ganho pontual (uma vez) e o que se libera quando os parcelamentos
+terminarem. Somar os três num número anual é o tipo de conta que faz a análise
+inteira perder credibilidade.
+
+> Com **um único mês importado** não existe prova de repetição: `recorrente`
+> ainda é inferido da frequência dentro do mês, não medida entre meses. A tela
+> diz isso, em vez de fingir precisão.
+
 ## O que esta fase deliberadamente não faz
 
 - **Não lança no Mês Atual.** A fatura já entra lá como uma despesa só; duplicar

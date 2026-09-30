@@ -487,6 +487,7 @@ def analise():
     lanc = [i for i in itens if i['secao'] == 'lancamento']
     fut = [i for i in itens if i['secao'] == 'proxima_fatura']
     enc = [i for i in itens if i['secao'] == 'encargo']
+    parc = _parcelamentos(lanc)
 
     def agrupar(chave, base=lanc):
         g = {}
@@ -562,4 +563,299 @@ def analise():
         'comprometido': agrupar('estabelecimento', fut),
         'candidatos': candidatos[:25],
         'media_anterior': {k: round(v, 2) for k, v in media.items()},
+        # O compromisso real, que a primeira versão desta tela escondia: ela
+        # chamava de "comprometido" só a próxima fatura (6.667,56) quando o que
+        # ainda vai chegar é 23.789,32 — 3,5x mais.
+        'parcelamentos': parc,
+        'total_a_chegar': round(sum(p['resta'] for p in parc), 2),
+        'decisao': _decisao(lanc),
+    })
+
+
+def _parcelamentos(lanc: list) -> list:
+    """Parcelas em andamento e quanto falta de cada uma.
+
+    Supõe parcelas iguais: é o que a fatura permite afirmar, já que ela só
+    publica a parcela do mês e o total. Por isso o número vai rotulado como
+    estimativa na tela.
+
+    A mesma compra aparece duas vezes na fatura — parcela k no bloco do mês e
+    k+1 no bloco de próximas — então a contagem sai só do bloco do mês, senão
+    cada parcelamento entraria em dobro.
+    """
+    vistos, saida = set(), []
+    for i in lanc:
+        pn, pt = i.get('parcela_n'), i.get('parcela_total')
+        if not pn or not pt:
+            continue
+        chave = (i['estabelecimento'], pt, round(i['valor'] or 0, 2))
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        faltam = max(0, pt - pn)
+        saida.append({
+            'estabelecimento': i.get('estabelecimento_norm') or i['estabelecimento'],
+            'categoria': i.get('categoria'),
+            'parcela_n': pn, 'parcela_total': pt,
+            'valor_mes': round(i['valor'] or 0, 2),
+            'faltam': faltam,
+            'resta': round(faltam * (i['valor'] or 0), 2),
+            'termina_agora': pn >= pt,
+        })
+    saida.sort(key=lambda x: -x['resta'])
+    return saida
+
+
+def _decisao(lanc: list) -> dict:
+    """Quanto da fatura foi decidido **neste** mês.
+
+    Separa o que ainda é escolha do que já era compromisso: em out/2026, de R$
+    26.652,41, apenas R$ 1.100,80 foram parcelamento novo e R$ 6.170,00 eram
+    parcelas de decisões antigas. Sem esta conta, "precisava gastar isso?" é
+    perguntado sobre dinheiro que já não estava em disputa.
+    """
+    def soma(g):
+        return round(sum(i['valor'] or 0 for i in g), 2)
+    avista = [i for i in lanc if not i.get('parcela_n')]
+    nova = [i for i in lanc if i.get('parcela_n') == 1]
+    antiga = [i for i in lanc if (i.get('parcela_n') or 0) > 1]
+    return {
+        'avista': soma(avista), 'avista_n': len(avista),
+        'parcela_nova': soma(nova), 'parcela_nova_n': len(nova),
+        'parcela_antiga': soma(antiga), 'parcela_antiga_n': len(antiga),
+    }
+
+
+def _dossie(lanc: list, parc: list, media: dict) -> dict:
+    """O que a IA recebe para aconselhar: agregados, nunca a base crua.
+
+    Mandar 233 linhas convidaria o modelo a somar — e somar é do código. Ele
+    recebe as contas já fechadas e opina sobre elas.
+    """
+    por_cat, por_est = {}, {}
+    for i in lanc:
+        nome = i.get('estabelecimento_norm') or i['estabelecimento']
+        for chave, alvo in ((i.get('categoria') or '—', por_cat), (nome, por_est)):
+            e = alvo.setdefault(chave, {'nome': chave, 'n': 0, 'total': 0.0})
+            e['n'] += 1
+            e['total'] += i['valor'] or 0
+    for d in (por_cat, por_est):
+        for e in d.values():
+            e['total'] = round(e['total'], 2)
+            e['medio'] = round(e['total'] / e['n'], 2)
+
+    # cobranças repetidas no mesmo dia e no mesmo lugar: pode ser rotina, pode
+    # ser cobrança dobrada — o app aponta, o usuário confere
+    dia = {}
+    for i in lanc:
+        k = (i.get('data_compra'), i['estabelecimento'])
+        dia.setdefault(k, []).append(i['valor'] or 0)
+    repetidas = [{'data': k[0], 'estabelecimento': k[1], 'vezes': len(v),
+                  'total': round(sum(v), 2)}
+                 for k, v in dia.items() if len(v) > 1]
+    repetidas.sort(key=lambda x: -x['total'])
+
+    # Quem tem parcela em andamento não é candidato a corte neste mês: o
+    # dinheiro já está contratado. Sem esta marca a IA sugeriu "cessar compras"
+    # num parcelamento de 2x que já estava fechado.
+    comprometido = {}
+    for p in parc:
+        comprometido[p['estabelecimento']] = \
+            comprometido.get(p['estabelecimento'], 0.0) + p['resta']
+    for e in por_est.values():
+        e['parcelado'] = e['nome'] in comprometido
+        if e['parcelado']:
+            e['resta_parcelas'] = round(comprometido[e['nome']], 2)
+
+    ordenado = sorted(por_est.values(), key=lambda e: -e['total'])
+    return {
+        'mes_total': round(sum(i['valor'] or 0 for i in lanc), 2),
+        'decisao': _decisao(lanc),
+        'por_categoria': sorted(por_cat.values(), key=lambda e: -e['total']),
+        'por_estabelecimento': ordenado[:45],
+        'frequentes': [e for e in sorted(por_est.values(), key=lambda e: -e['n'])
+                       if e['n'] >= 4][:15],
+        'micro_compras': [e for e in ordenado if e['medio'] < 15 and e['n'] >= 3],
+        'cobrancas_no_mesmo_dia': repetidas[:12],
+        'parcelamentos': parc[:25],
+        'total_a_chegar': round(sum(p['resta'] for p in parc), 2),
+        'media_meses_anteriores': {k: round(v, 2) for k, v in media.items()},
+    }
+
+
+TIPOS = ('necessidade', 'preco')
+
+
+def _gemini_sugestoes(dossie: dict) -> list:
+    """Conselho de economia a partir dos agregados.
+
+    Duas perguntas, deliberadamente separadas, porque exigem decisões
+    diferentes: `necessidade` ("precisava gastar isso?") e `preco` ("dava para
+    gastar o mesmo por menos?"). Trocar de fornecedor não é cortar um hábito.
+    """
+    from .email_busca import _gemini_client, GEMINI_MODEL
+    client = _gemini_client()
+    if not client:
+        return []
+    from google.genai import types
+
+    prompt = (
+        'Você é um analista de finanças pessoais brasileiro, direto e concreto. '
+        'Abaixo estão os agregados de UM mês de faturas de cartão de crédito de '
+        'uma família (valores em R$, já somados por mim — não recalcule).\n\n'
+        'Produza sugestões de economia de DOIS tipos:\n'
+        '- "necessidade": o gasto podia simplesmente não ter acontecido, ou '
+        'acontecer menos vezes. Use frequência e ticket médio como prova.\n'
+        '- "preco": a mesma coisa podia ser comprada por menos — trocar de '
+        'fornecedor, plano anual em vez de mensal, plano família em vez de '
+        'individual, comprar no mercado em vez do delivery, evitar parcelamento '
+        'com juros, rever anuidade ou seguro.\n\n'
+        'Para cada sugestão devolva:\n'
+        '- tipo: "necessidade" ou "preco"\n'
+        '- alvo: o nome EXATO de uma categoria ou estabelecimento que aparece '
+        'no dossiê. Nunca invente nome.\n'
+        '- diagnostico: o que os números mostram, citando os números.\n'
+        '- acao: o que fazer, concreto e executável nesta semana.\n'
+        '- economia_mes: quanto por mês, no máximo o que foi gasto naquele alvo.\n'
+        '- confianca: "alta", "media" ou "baixa".\n\n'
+        'Regras: seja específico — "reduzir alimentação" não serve, '
+        '"trocar 6 das 16 idas ao Homem de Mello por café em casa" serve. '
+        'Não repita o mesmo alvo em duas sugestões do mesmo tipo. '
+        'Estabelecimento com "parcelado": true tem parcela já contratada: NÃO '
+        'sugira "parar de comprar" como economia deste mês, porque o dinheiro já '
+        'saiu da decisão. Se valer a pena, fale em não recontratar e diga quanto '
+        'volta quando as parcelas terminarem.\n'
+        'Gasto que aconteceu 1 ou 2 vezes no mês é pontual: a economia dele NÃO '
+        'se repete todo mês, e o diagnóstico deve dizer isso com clareza.\n'
+        'Priorize o que economiza mais dinheiro com menos sacrifício. '
+        'Não sugira cortar saúde, educação ou seguro sem uma alternativa clara '
+        'de mesmo serviço por menos. Entre 6 e 12 sugestões.\n\n'
+        f'DOSSIÊ:\n{json.dumps(dossie, ensure_ascii=False, indent=1)}'
+    )
+    try:
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+                response_schema={
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'tipo': {'type': 'string', 'enum': list(TIPOS)},
+                            'alvo': {'type': 'string'},
+                            'diagnostico': {'type': 'string'},
+                            'acao': {'type': 'string'},
+                            'economia_mes': {'type': 'number'},
+                            'confianca': {'type': 'string',
+                                          'enum': ['alta', 'media', 'baixa']},
+                        },
+                        'required': ['tipo', 'alvo', 'diagnostico', 'acao'],
+                    },
+                },
+            ),
+        )
+        return json.loads(resp.text)
+    except Exception as e:
+        print(f'[cartoes] falha ao gerar sugestões: {e}')
+        return []
+
+
+def _validar_sugestoes(brutas: list, dossie: dict) -> tuple:
+    """Descarta o que não se sustenta nos números, e diz o que descartou.
+
+    Um conselho com alvo inventado ou economia maior que o próprio gasto é pior
+    que nenhum conselho: parece análise e é chute.
+    """
+    gasto, perfil = {}, {}
+    for e in dossie['por_categoria'] + dossie['por_estabelecimento']:
+        gasto[e['nome']] = e['total']
+        # Recorrência não é opinião do modelo: sai dos dados. Sem isto, uma
+        # compra única de R$ 561 virava "economia mensal" e, multiplicada por
+        # 12, um número que destrói a credibilidade de toda a análise.
+        if e.get('parcelado'):
+            classe = 'comprometido'
+        elif e['n'] >= 3:
+            classe = 'recorrente'
+        else:
+            classe = 'pontual'
+        perfil[e['nome']] = (classe, e.get('resta_parcelas') or 0.0)
+    saida, recusadas = [], []
+    vistos = set()
+    for s in brutas if isinstance(brutas, list) else []:
+        alvo = (s or {}).get('alvo', '')
+        if alvo not in gasto:
+            recusadas.append({'alvo': alvo, 'motivo': 'alvo não existe no dossiê'})
+            continue
+        if not (s.get('diagnostico') or '').strip() or not (s.get('acao') or '').strip():
+            recusadas.append({'alvo': alvo, 'motivo': 'sem diagnóstico ou sem ação'})
+            continue
+        if (s.get('tipo'), alvo) in vistos:
+            continue
+        vistos.add((s.get('tipo'), alvo))
+        eco = s.get('economia_mes')
+        teto = gasto[alvo]
+        limitada = False
+        if not isinstance(eco, (int, float)) or eco < 0:
+            eco = None
+        elif eco > teto:
+            eco, limitada = teto, True
+        classe, resta = perfil.get(alvo, ('pontual', 0.0))
+        valor = round(eco, 2) if eco is not None else None
+        saida.append({
+            'tipo': s['tipo'] if s.get('tipo') in TIPOS else 'necessidade',
+            'alvo': alvo, 'gasto_no_mes': teto,
+            'diagnostico': s['diagnostico'].strip(), 'acao': s['acao'].strip(),
+            'recorrencia': classe,
+            # três coisas diferentes, nunca somadas: o que cai todo mês, o que
+            # se ganha uma vez, e o que só volta quando a parcela acabar
+            'economia_mes': valor if classe == 'recorrente' else None,
+            'ganho_unico': valor if classe == 'pontual' else None,
+            'resta_parcelas': round(resta, 2) if classe == 'comprometido' else None,
+            'economia_limitada_ao_gasto': limitada,
+            'confianca': s.get('confianca') or 'media',
+        })
+    saida.sort(key=lambda x: -((x['economia_mes'] or 0) * 12
+                               + (x['ganho_unico'] or 0)
+                               + (x['resta_parcelas'] or 0)))
+    return saida, recusadas
+
+
+@bp.route('/cartoes/sugestoes')
+def sugestoes():
+    """Onde economizar, com o número que sustenta cada conselho."""
+    mes = request.args.get('mes_ref')
+    with db() as conn:
+        if not mes:
+            r = conn.execute('SELECT MAX(mes_ref) m FROM fatura_cartao').fetchone()
+            mes = r['m'] if r else None
+        if not mes:
+            return jsonify({'ok': True, 'mes_ref': None, 'vazio': True, 'sugestoes': []})
+        itens = [dict(r) for r in conn.execute(
+            'SELECT i.* FROM fatura_item i JOIN fatura_cartao f ON f.id=i.fatura_id '
+            "WHERE f.mes_ref=? AND i.secao='lancamento'", (mes,)).fetchall()]
+        hist = [dict(r) for r in conn.execute(
+            'SELECT i.categoria, i.valor, f.mes_ref FROM fatura_item i '
+            "JOIN fatura_cartao f ON f.id=i.fatura_id WHERE f.mes_ref<? AND i.secao='lancamento'",
+            (mes,)).fetchall()]
+
+    n_meses = len({h['mes_ref'] for h in hist}) or 1
+    media = {}
+    for h in hist:
+        media[h['categoria']] = media.get(h['categoria'], 0.0) + (h['valor'] or 0)
+    media = {k: v / n_meses for k, v in media.items()}
+
+    dossie = _dossie(itens, _parcelamentos(itens), media)
+    brutas = _gemini_sugestoes(dossie)
+    sug, recusadas = _validar_sugestoes(brutas, dossie)
+    return jsonify({
+        'ok': True, 'mes_ref': mes, 'dossie': dossie, 'sugestoes': sug,
+        'recusadas': recusadas, 'com_ia': bool(brutas),
+        'meses_de_historico': n_meses if hist else 0,
+        # Três totais, deliberadamente separados. Um número só aqui seria uma
+        # promessa que os dados não sustentam.
+        'economia_recorrente_mes': round(sum(s['economia_mes'] or 0 for s in sug), 2),
+        'ganho_pontual': round(sum(s['ganho_unico'] or 0 for s in sug), 2),
+        'a_liberar_parcelas': round(sum(s['resta_parcelas'] or 0 for s in sug), 2),
     })
