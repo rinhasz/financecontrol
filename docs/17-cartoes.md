@@ -550,6 +550,23 @@ O `mes_ref` do extrato em aberto sai do **mês seguinte ao da extração**: um
 extrato tirado em 30/09 é a fatura que vence em outubro, e é assim que ele fica
 comparável com as outras quatro, todas em `2026-10`.
 
+E uma quarta parte, que só apareceu quando as cinco faturas ficaram na mesma
+tela: **o total de um extrato aberto não é comparável com o das faturas
+fechadas.** O do cartão Amazon soma R$ 5.016,24, mas R$ 4.309,25 disso é saldo
+anterior que o PDF **não detalha lançamento a lançamento** — só os R$ 706,99 de
+consumo do período entram na análise. Exibir 5.016,24 na lista de faturas
+enquanto a análise conta 706,99 seria o mesmo defeito do IOF: um total que não
+fecha com o resto da tela. Então para `situacao='aberta'` a lista mostra o
+**consumo**, com o total da fatura no tooltip.
+
+O teste disso é uma soma: a coluna que a lista exibe tem de dar exatamente
+`gasto + encargos` da análise.
+
+```
+20.323,67 + 5.166,19 + 1.166,61 + 216,74 + 706,99 = 27.580,20
+gasto 27.518,38 + encargos 61,82              = 27.580,20
+```
+
 ## O que esta fase deliberadamente não faz
 
 - **Não lança no Mês Atual.** A fatura já entra lá como uma despesa só; duplicar

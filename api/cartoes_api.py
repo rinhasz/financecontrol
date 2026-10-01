@@ -497,10 +497,15 @@ def analise():
         # Quais faturas compõem o mês, e se alguma é extrato **aberto**: valor
         # provisório não pode ser mostrado como definitivo, e sem isto a tela
         # não teria como saber a diferença.
+        # `total_lancamentos` vai junto porque num extrato aberto ele difere do
+        # total da fatura: o do cartão Amazon soma R$ 5.016,24, dos quais
+        # R$ 4.309,25 são saldo anterior que o PDF não detalha — só os R$ 706,99
+        # de consumo entram na análise. Mostrar 5.016,24 na tabela enquanto a
+        # análise conta 706,99 seria um total que não reconcilia.
         faturas = [dict(r) for r in conn.execute(
             'SELECT cartao, emissor, situacao, data_vencimento, data_extrato, '
-            ' total_fatura FROM fatura_cartao WHERE mes_ref=? ORDER BY cartao',
-            (mes,)).fetchall()]
+            ' total_fatura, total_lancamentos FROM fatura_cartao '
+            'WHERE mes_ref=? ORDER BY cartao', (mes,)).fetchall()]
 
     lanc = [i for i in itens if i['secao'] == 'lancamento']
     fut = [i for i in itens if i['secao'] == 'proxima_fatura']

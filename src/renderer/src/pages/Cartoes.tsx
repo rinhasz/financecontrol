@@ -54,6 +54,7 @@ interface FaturaResumo {
   data_vencimento: string | null
   data_extrato: string | null
   total_fatura: number | null
+  total_lancamentos: number | null
 }
 
 interface Analise {
@@ -458,11 +459,29 @@ function AbaAnalise({ analise, itens, carregando }: {
                         </span>
                       : <>vence {f.data_vencimento}</>}
                   </td>
-                  <td className="text-right tabular-nums">{formatBRL(f.total_fatura || 0)}</td>
+                  {/* No extrato aberto o total da fatura inclui saldo anterior
+                      que o PDF não detalha; a análise conta só o consumo, e
+                      mostrar o total aqui seria um número que não reconcilia. */}
+                  <td className="text-right tabular-nums">
+                    {f.situacao === 'aberta' && f.total_lancamentos !== null ? (
+                      <span title={'consumo do período. A fatura soma '
+                        + formatBRL(f.total_fatura || 0)
+                        + ', incluindo saldo anterior não detalhado no PDF.'}>
+                        {formatBRL(f.total_lancamentos)}
+                      </span>
+                    ) : formatBRL(f.total_fatura || 0)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {analise.tem_aberta && (
+            <p className="text-xs text-zinc-500 mt-1">
+              Para o extrato aberto está o <strong>consumo do período</strong> — é o que
+              entra na análise. O total da fatura dele inclui saldo anterior que o PDF
+              não detalha lançamento a lançamento.
+            </p>
+          )}
         </section>
       )}
 
