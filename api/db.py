@@ -558,6 +558,26 @@ def init_db():
         if cols_fit and coluna not in cols_fit:
             conn.execute(f'ALTER TABLE fatura_item ADD COLUMN {coluna} {tipo}')
 
+    # Nem todo documento de cartão é fatura fechada: o do cartão Amazon é um
+    # extrato EM ABERTO, sem data de vencimento em página nenhuma, e avisa que
+    # os valores mudam até o fechamento.
+    cols_fc = [r[1] for r in conn.execute('PRAGMA table_info(fatura_cartao)').fetchall()]
+    for coluna, tipo in (
+            ('situacao', "TEXT NOT NULL DEFAULT 'fechada'"),   # fechada | aberta
+            ('data_extrato', 'TEXT'),
+            ('emissor', 'TEXT')):
+        if cols_fc and coluna not in cols_fc:
+            conn.execute(f'ALTER TABLE fatura_cartao ADD COLUMN {coluna} {tipo}')
+
+    # `UNIQUE(cartao, data_vencimento)` não protege o extrato em aberto: sem
+    # vencimento o campo fica nulo, e em SQLite dois NULL não colidem — então
+    # reimportar duplicaria a fatura em silêncio. `mes_ref` é estável nos dois
+    # casos. Índice criado à parte porque mudar o UNIQUE da tabela exigiria
+    # reconstruí-la.
+    if cols_fc:
+        conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ix_fatura_cartao_mes '
+                     'ON fatura_cartao(cartao, mes_ref)')
+
     cols_mov = [r[1] for r in conn.execute('PRAGMA table_info(movimento_investimento)').fetchall()]
     for coluna, tipo in (
             ('emissor', 'TEXT'), ('indexador', 'TEXT'), ('ativo', 'TEXT'),

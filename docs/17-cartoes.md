@@ -441,6 +441,115 @@ inteira perder credibilidade.
 > ainda é inferido da frequência dentro do mês, não medida entre meses. A tela
 > diz isso, em vez de fingir precisão.
 
+## Mais de um emissor: um parser por layout
+
+A primeira versão supôs que "fatura de cartão" fosse uma coisa só. Não é: o
+parser do Itaú é inteiramente modelado no layout dele — duas colunas
+entrelaçadas, valor right-aligned em x1 estável, marcadores
+`Lançamentosnocartão(finalXXXX)` e a linha `CATEGORIA.CIDADE`. Nada disso
+aparece no Mercado Pago nem no Bradesco.
+
+A saída é **um parser por emissor, com contrato único**:
+
+```
+detectar(texto) -> 'itau' | 'mercadopago' | 'bradesco'
+parse_fatura()  -> despacha e devolve sempre
+                   {cabecalho, itens, totais_cartao, conferencia}
+```
+
+Quem consome — persistência, categorização, análise — não sabe de qual banco
+veio a fatura. Acrescentar um emissor é escrever um parser e uma regra de
+detecção, sem tocar em nada do resto.
+
+### Mercado Pago
+
+Coluna única e linhas bem formadas: regex sobre texto basta, sem geometria.
+Cinco páginas, mas só as duas primeiras têm conteúdo — as outras são marketing
+e texto legal, inclusive uma seção "Compras internacionais" que **não tem
+lançamento nenhum**, só a explicação da alíquota de IOF.
+
+| diferença | consequência |
+|---|---|
+| parcela escrita por extenso: `Parcela 4 de 12` | o `PP/TT` do Itaú não casa |
+| dois blocos: `Movimentações na fatura` e `Cartão Visa [...]` | o primeiro é encargo e pagamento, **não compra** |
+| `Pagamento da fatura de setembro/2026 R$ 710,59` | é **pagamento**: entra como `secao='pagamento'` e fica fora de todo total |
+| nenhuma categoria do emissor | a IA e as palavras-chave fazem todo o trabalho |
+
+A conferência fecha ao centavo, e por dois caminhos independentes que o próprio
+PDF publica:
+
+```
+encargos  3,24 + 2,14 + 14,22 + 38,16 = 57,76
+consumos                              158,98   <- "Total" do bloco do cartão
+                                       ------
+total                                  216,74   <- "Total a pagar" do topo
+```
+
+E o resumo da página 1 quebra o mesmo número de outra forma
+(`Tarifas e encargos 3,24` + `Multas por atraso 14,22` +
+`Juros do mês anterior 40,30`, onde 40,30 = 2,14 + 38,16), o que dá uma segunda
+prova de leitura.
+
+> **Não deixe um `.*?` correr atrás de um rótulo.** O pagamento mínimo custou
+> três tentativas. A palavra "mínimo" aparece **nove vezes** nesta fatura, e a
+> primeira é a explicação (`Pagando o valor mínimo, a diferença...`), não o
+> valor. Um padrão `m[íi]nimo.*?R\$` casa ali e então atravessa o documento
+> inteiro até o próximo `R$`, devolvendo R$ 710,59 — o pagamento da fatura
+> anterior. Uma variante devolveu R$ 9,90, a tarifa de saque. O que funciona é
+> a **frase inteira**: `valor mínimo que você deve pagar é de R$ 81,61`, com
+> `\s*` entre as palavras, porque na página 4 ela vem colada
+> (`OvalormínimoquevocêdevepagarédeR$81,61`). Mesma lição do PU e dos totais:
+> ancorar no rótulo completo, nunca numa palavra que se repete.
+
+### Bradesco (cartão Amazon)
+
+Aqui o documento **não é uma fatura fechada** — é um extrato em aberto, e ele
+avisa: *"Valores sujeitos a alteração até o fechamento da fatura."*
+
+| diferença | consequência |
+|---|---|
+| **não existe data de vencimento** em nenhuma página | quebra a chave `UNIQUE(cartao, data_vencimento)` |
+| `Situação do Extrato: EM ABERTO` | o número pode mudar amanhã: a tela precisa dizer isso |
+| seis colunas, várias zeradas de câmbio | o valor em R$ é a **última**, x1≈549 — não a primeira que casa |
+| valor negativo (`-11,98`) | crédito legítimo, não erro de leitura |
+| página 2 completamente vazia | 0 caracteres: iterar páginas sem checar quebra |
+
+> **O nome do estabelecimento se parte acima e abaixo da linha do valor.** Em
+> `AMAZONMKTPLC*CMCOMERCI` os `top` são 602 (início do nome), 609 (data e valor)
+> e 615 (`SA 3/12`, o resto do nome mais a parcela). Agrupar por linha, como no
+> Itaú, despedaçaria o lançamento. Aqui a âncora é o **valor**: para cada valor
+> em x1≈549, o nome se monta com as palavras da faixa da coluna Histórico cujo
+> `top` esteja a ±12px dele.
+
+A conferência também fecha ao centavo, por um invariante que o PDF permite
+montar:
+
+```
+soma dos 10 lançamentos listados      =   706,99
+Total para RAFAEL INHASZ  5.016,24
+Total da Fatura em Real   4.309,25
+                          ---------
+diferença                   706,99   <- igual à soma. Fecha.
+```
+
+### A decisão sobre extrato em aberto
+
+Importar ou recusar? Recusar seria perder o cartão inteiro. Importar com data de
+vencimento inventada seria pior: um campo que mente.
+
+A solução tem três partes:
+
+1. **`situacao`** (`fechada` | `aberta`) na fatura, para a tela nunca apresentar
+   número provisório como definitivo.
+2. **`data_extrato`**, que é o que o documento realmente traz.
+3. **Índice único em `(cartao, mes_ref)`**, porque `mes_ref` é estável nos dois
+   casos — enquanto `data_vencimento` pode ser nula, e em SQLite dois `NULL` não
+   colidem, de modo que reimportar duplicaria a fatura silenciosamente.
+
+O `mes_ref` do extrato em aberto sai do **mês seguinte ao da extração**: um
+extrato tirado em 30/09 é a fatura que vence em outubro, e é assim que ele fica
+comparável com as outras quatro, todas em `2026-10`.
+
 ## O que esta fase deliberadamente não faz
 
 - **Não lança no Mês Atual.** A fatura já entra lá como uma despesa só; duplicar

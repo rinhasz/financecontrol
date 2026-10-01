@@ -211,7 +211,54 @@ def _cabecalho(linhas: list) -> dict:
     }
 
 
+def detectar(conteudo: bytes) -> str:
+    """Qual emissor emitiu este PDF.
+
+    Procurado em marcas que aparecem no topo de cada layout. A ordem importa
+    pouco porque as marcas não se sobrepõem; o que importa é nunca devolver um
+    palpite: sem marca reconhecida, `parse_fatura` recusa em vez de aplicar o
+    parser do Itaú num documento que não é dele e produzir uma leitura vazia.
+    """
+    texto = ' '.join(extrair_texto(conteudo)[:60])
+    if re.search(r'Bradesco\s*Cart[õo]es|Situa[çc][ãa]o\s*do\s*Extrato', texto, re.I):
+        return 'bradesco'
+    if re.search(r'Mercado\s*Pago|Detalhes\s*de\s*consumo', texto, re.I):
+        return 'mercadopago'
+    if re.search(r'Totaldestafatura|Lan[çc]amentosnocart|Cart[ãa]o\s*\d{4}', texto, re.I):
+        return 'itau'
+    return ''
+
+
 def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
+    """Despacha para o parser do emissor e devolve sempre o mesmo contrato.
+
+    Quem consome — persistência, categorização, análise — não sabe de qual
+    banco veio a fatura. Acrescentar um emissor é escrever um parser e uma
+    regra em `detectar()`, sem tocar em mais nada.
+
+    Import tardio dos outros parsers de propósito: eles importam os auxiliares
+    daqui (`_num`, `_data_compra`, `extrair_texto`), e importá-los no topo
+    fecharia um ciclo.
+    """
+    emissor = detectar(conteudo)
+    if emissor == 'mercadopago':
+        from .cartoes_mp import parse as parse_mp
+        dados = parse_mp(conteudo, arquivo)
+    elif emissor == 'bradesco':
+        from .cartoes_bradesco import parse as parse_bradesco
+        dados = parse_bradesco(conteudo, arquivo)
+    elif emissor == 'itau':
+        dados = parse_itau(conteudo, arquivo)
+    else:
+        raise ValueError('Não reconheci o emissor desta fatura. '
+                         'Hoje leio Itaú, Mercado Pago e Bradesco (Amazon).')
+    dados['cabecalho']['emissor'] = emissor
+    dados['cabecalho'].setdefault('situacao', 'fechada')
+    dados['cabecalho'].setdefault('data_extrato', None)
+    return dados
+
+
+def parse_itau(conteudo: bytes, arquivo: str = '') -> dict:
     """`{'cabecalho', 'itens', 'totais_cartao', 'conferencia'}`."""
     cab = _cabecalho(extrair_texto(conteudo))
     venc = cab.get('data_vencimento')

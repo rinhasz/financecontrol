@@ -47,11 +47,22 @@ interface Decisao {
   parcela_antiga: number; parcela_antiga_n: number
 }
 
+interface FaturaResumo {
+  cartao: string
+  emissor: string | null
+  situacao: string | null
+  data_vencimento: string | null
+  data_extrato: string | null
+  total_fatura: number | null
+}
+
 interface Analise {
   ok: boolean
   vazio?: boolean
   mes_ref: string | null
   meses: string[]
+  faturas: FaturaResumo[]
+  tem_aberta: boolean
   total_lancamentos: number
   total_comprometido: number
   total_encargos: number
@@ -417,6 +428,43 @@ function AbaAnalise({ analise, itens, carregando }: {
           </div>
         </div>
       </div>
+
+      {/* Extrato em aberto é número provisório. Apresentá-lo como definitivo
+          seria o mesmo erro de somar ganho pontual com economia mensal. */}
+      {analise.tem_aberta && (
+        <div className="text-sm text-amber-300 border border-amber-500/30 rounded p-2">
+          Um dos cartões deste mês veio como <strong>extrato em aberto</strong>, não
+          fatura fechada: os valores ainda mudam até o fechamento, e não há data de
+          vencimento no documento.
+        </div>
+      )}
+
+      {(analise.faturas || []).length > 1 && (
+        <section>
+          <h2 className="text-sm font-medium mb-2">
+            Faturas deste mês
+            <span className="text-xs text-zinc-500 font-normal"> — {analise.faturas.length} cartões</span>
+          </h2>
+          <table className="w-full text-sm max-w-3xl">
+            <tbody>
+              {analise.faturas.map((f, n) => (
+                <tr key={n} className="border-t border-zinc-900">
+                  <td className="py-1">{f.cartao}</td>
+                  <td className="text-xs text-zinc-600">{f.emissor}</td>
+                  <td className="text-xs text-zinc-500">
+                    {f.situacao === 'aberta'
+                      ? <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/15 text-amber-300">
+                          aberta · extrato de {f.data_extrato}
+                        </span>
+                      : <>vence {f.data_vencimento}</>}
+                  </td>
+                  <td className="text-right tabular-nums">{formatBRL(f.total_fatura || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {/* Quanto da fatura ainda era escolha. Sem esta conta, "precisava gastar
           isso?" é perguntado sobre dinheiro que já não estava em disputa. */}

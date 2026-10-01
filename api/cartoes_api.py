@@ -42,8 +42,14 @@ CATEGORIAS = [
     'Supermercado', 'Restaurante e bar', 'Delivery', 'Combustível',
     'Transporte', 'Saúde', 'Farmácia', 'Educação', 'Vestuário', 'Beleza',
     'Assinaturas', 'Viagem', 'Lazer', 'Presentes', 'Seguros', 'Casa',
-    'Esporte', 'Eletrônicos', 'Filhos', 'Outros', 'Encargos',
+    'Esporte', 'Eletrônicos', 'Filhos', 'Outros', 'Encargos', 'Pagamento',
 ]
+
+# Seções que não são compra: categoria fixa, e nunca enviadas à IA. `Encargos`
+# porque IOF e juros não são escolha de ninguém; `Pagamento` porque quitar a
+# fatura anterior é dinheiro saindo para zerar dívida, não consumo — e deixá-lo
+# ir ao modelo rendeu "Pagamento da Fatura de Setembro -> Outros".
+CATEGORIA_FIXA = {'encargo': 'Encargos', 'pagamento': 'Pagamento'}
 
 NAO_CLASSIFICADO = 'Não classificado'
 
@@ -135,11 +141,9 @@ def _classificar(itens: list, conn, usar_ia: bool = True) -> dict:
     """
     regras = _regras(conn)
     for it in itens:
-        if it['secao'] == 'encargo':
-            # IOF não é compra: não tem estabelecimento nem escolha por trás.
-            # Mandá-lo para a IA rendeu "Repasse de IOF em R$ -> Outros", que
-            # polui a análise com uma linha que ninguém decidiu gastar.
-            it['categoria'], it['origem_categoria'] = 'Encargos', 'fatura'
+        fixa = CATEGORIA_FIXA.get(it['secao'])
+        if fixa:
+            it['categoria'], it['origem_categoria'] = fixa, 'fatura'
             continue
         cat = _por_regra(it['estabelecimento'], regras)
         if cat:
@@ -296,8 +300,11 @@ def _rotulo_cartao(cab: dict) -> str:
 def _analisar(conteudo: bytes, arquivo: str, usar_ia: bool):
     dados = parse_fatura(conteudo, arquivo)
     cab = dados['cabecalho']
-    if not cab.get('data_vencimento'):
-        return None, 'Não consegui achar a data de vencimento na fatura.'
+    # Extrato em aberto não tem vencimento (o do cartão Amazon não traz em
+    # página nenhuma). O que não pode faltar é o `mes_ref`, que é a chave real.
+    if not cab.get('mes_ref'):
+        return None, ('Não consegui achar nem vencimento nem data de extrato '
+                      'nesta fatura, então não sei a que mês ela pertence.')
     cab['rotulo'] = _rotulo_cartao(cab)
     with db() as conn:
         dados['origens'] = _classificar(dados['itens'], conn, usar_ia)
@@ -358,9 +365,11 @@ def confirmar():
 
     cab = dados['cabecalho']
     with db() as conn:
+        # Dedupe por (cartao, mes_ref): é a chave estável nos dois casos, já
+        # que o extrato em aberto não tem vencimento e dois NULL não colidem.
         antiga = conn.execute(
-            'SELECT id FROM fatura_cartao WHERE cartao=? AND data_vencimento=?',
-            (cab['rotulo'], cab['data_vencimento'])).fetchone()
+            'SELECT id FROM fatura_cartao WHERE cartao=? AND mes_ref=?',
+            (cab['rotulo'], cab.get('mes_ref'))).fetchone()
         if antiga:
             # substituição limpa: os itens da importação anterior saem antes,
             # senão a fatura reimportada soma em dobro na análise
@@ -369,12 +378,14 @@ def confirmar():
 
         cur = conn.execute(
             'INSERT INTO fatura_cartao (cartao, final, arquivo, mes_ref, data_vencimento, '
-            ' total_fatura, total_lancamentos, total_proximas_faturas, pagamento_minimo, limite_total) '
-            'VALUES (?,?,?,?,?,?,?,?,?,?)',
+            ' total_fatura, total_lancamentos, total_proximas_faturas, pagamento_minimo, '
+            ' limite_total, situacao, data_extrato, emissor) '
+            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (cab['rotulo'], cab.get('final'), cab.get('arquivo'), cab.get('mes_ref'),
-             cab['data_vencimento'], cab.get('total_fatura'), cab.get('total_lancamentos'),
+             cab.get('data_vencimento'), cab.get('total_fatura'), cab.get('total_lancamentos'),
              cab.get('total_proximas_faturas'), cab.get('pagamento_minimo'),
-             cab.get('limite_total')))
+             cab.get('limite_total'), cab.get('situacao') or 'fechada',
+             cab.get('data_extrato'), cab.get('emissor')))
         fid = cur.lastrowid
 
         for it in dados['itens']:
@@ -483,6 +494,13 @@ def analise():
             (mes,)).fetchall()]
         meses = [r['mes_ref'] for r in conn.execute(
             'SELECT DISTINCT mes_ref FROM fatura_cartao ORDER BY mes_ref DESC').fetchall()]
+        # Quais faturas compõem o mês, e se alguma é extrato **aberto**: valor
+        # provisório não pode ser mostrado como definitivo, e sem isto a tela
+        # não teria como saber a diferença.
+        faturas = [dict(r) for r in conn.execute(
+            'SELECT cartao, emissor, situacao, data_vencimento, data_extrato, '
+            ' total_fatura FROM fatura_cartao WHERE mes_ref=? ORDER BY cartao',
+            (mes,)).fetchall()]
 
     lanc = [i for i in itens if i['secao'] == 'lancamento']
     fut = [i for i in itens if i['secao'] == 'proxima_fatura']
@@ -549,6 +567,8 @@ def analise():
 
     return jsonify({
         'ok': True, 'mes_ref': mes, 'meses': meses,
+        'faturas': faturas,
+        'tem_aberta': any(f.get('situacao') == 'aberta' for f in faturas),
         'total_lancamentos': round(sum(i['valor'] or 0 for i in lanc), 2),
         'total_comprometido': round(sum(i['valor'] or 0 for i in fut), 2),
         # Encargo fica fora do gasto — IOF não é escolha de ninguém — mas vai
