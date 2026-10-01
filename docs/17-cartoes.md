@@ -359,6 +359,14 @@ coisas gastando menos."*
 está; o estabelecimento é onde a decisão acontece. "Restaurante e bar R$
 5.074,67" não é acionável. "Arboretto, 12 vezes, R$ 91,75 em média" é.
 
+No terceiro nível cada lançamento mostra **de qual cartão saiu**, com o final
+quando existir (`The One ·1801`). Isso deixou de ser detalhe quando passaram a
+conviver cinco faturas de três emissores no mesmo mês: sem a origem, duas
+compras iguais no mesmo dia são indistinguíveis, e o final é o que separa entre
+si os dez adicionais do The One. O portador aparece ao lado, mas só quando há um
+— Mercado Pago e Bradesco não trazem portador, e um campo vazio ali só abriria
+um vão na linha.
+
 ### A fronteira da IA muda aqui — de propósito
 
 Até agora a IA **não lia valores**, e essa regra continua valendo para

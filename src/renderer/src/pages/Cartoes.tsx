@@ -552,15 +552,37 @@ function AbaAnalise({ analise, itens, carregando }: {
                             {e.its.slice().sort((a, b) => (b.data_compra || '').localeCompare(a.data_compra || ''))
                               .map(i => (
                                 <div key={i.id} className="flex gap-3 text-xs text-zinc-400 py-0.5">
-                                  <span className="w-12 tabular-nums">
+                                  <span className="w-12 shrink-0 tabular-nums">
                                     {(i.data_compra || '').slice(8, 10)}/{(i.data_compra || '').slice(5, 7)}
                                   </span>
                                   <span className="truncate">{i.estabelecimento}</span>
                                   {i.parcela_n && (
-                                    <span className="text-zinc-600">{i.parcela_n}/{i.parcela_total}</span>
+                                    <span className="shrink-0 text-zinc-600">{i.parcela_n}/{i.parcela_total}</span>
                                   )}
-                                  <span className="text-zinc-600 truncate">{i.portador}</span>
-                                  <span className="ml-auto tabular-nums text-zinc-300">{formatBRL(i.valor)}</span>
+                                  {/* De qual cartão saiu. Com cinco faturas de três emissores no
+                                      mesmo mês, "onde gastei" fica incompleto sem isto — e o final
+                                      separa entre si os 10 adicionais do The One. O portador é
+                                      condicional porque Mercado Pago e Bradesco não trazem nenhum,
+                                      e um span vazio abriria um vão na linha. */}
+                                  <span
+                                    className="ml-auto shrink-0 text-zinc-500"
+                                    title={`${i.cartao || ''}`
+                                      + (i.cartao_final ? ` · final ${i.cartao_final}` : '')
+                                      + (i.portador ? ` · ${i.portador}` : '')}
+                                  >
+                                    {i.cartao}
+                                    {i.cartao_final && (
+                                      <span className="text-zinc-600"> ·{i.cartao_final}</span>
+                                    )}
+                                  </span>
+                                  {i.portador && (
+                                    <span className="shrink-0 truncate max-w-[9rem] text-zinc-600">
+                                      {i.portador}
+                                    </span>
+                                  )}
+                                  <span className="w-24 shrink-0 text-right tabular-nums text-zinc-300">
+                                    {formatBRL(i.valor)}
+                                  </span>
                                 </div>
                               ))}
                           </div>
