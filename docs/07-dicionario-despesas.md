@@ -49,6 +49,7 @@ conversa com o usuário.
 | `PIX TRANSF DEUSA D12/08` | adiantamento deusa | — |
 | `PIX TRANSF DEUSA DA` | adiantamento deusa | cartao porto |
 | `PIX TRANSF MARCELO O` | vaga garagem chacara monteverde | vale transporte deusa |
+| `PAG TIT BANCO 422` | parcela wey | convenio pai e mae |
 
 ## Notas
 
