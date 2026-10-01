@@ -503,69 +503,90 @@ prova de leitura.
 
 ### Bradesco (cartão Amazon)
 
-Aqui o documento **não é uma fatura fechada** — é um extrato em aberto, e ele
-avisa: *"Valores sujeitos a alteração até o fechamento da fatura."*
+Três páginas: a primeira é cabeçalho, resumo e boleto; a segunda tem **todos** os
+lançamentos; a terceira é só a vitrine de opções de parcelamento, sem lançamento
+nenhum.
+
+A página 2 é de **duas colunas**, e elas se achatam juntas no texto — a mesma
+armadilha do Itaú:
+
+```
+21/03 AMAZONMKTPLC*VOOLTINDU SAO PAULO(06/06) 21,65 Demais faturas R$ 1.360,26
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                    isto é da coluna da direita
+```
+
+Aqui, porém, separar é fácil: **todos** os 29 valores de lançamento ficam em
+x1=288, e nada da coluna da direita aparece antes de x≈410. Um corte em 310
+resolve, sem precisar do agrupamento por cluster que o Itaú exigiu.
 
 | diferença | consequência |
 |---|---|
-| **não existe data de vencimento** em nenhuma página | quebra a chave `UNIQUE(cartao, data_vencimento)` |
-| `Situação do Extrato: EM ABERTO` | o número pode mudar amanhã: a tela precisa dizer isso |
-| seis colunas, várias zeradas de câmbio | o valor em R$ é a **última**, x1≈549 — não a primeira que casa |
-| valor negativo (`-11,98`) | crédito legítimo, não erro de leitura |
-| página 2 completamente vazia | 0 caracteres: iterar páginas sem checar quebra |
+| parcela **entre parênteses e colada na cidade**: `PAULO(04/17)` | nem o `PP/TT` do Itaú nem o "Parcela N de M" do Mercado Pago casam |
+| **sinal de menos no fim**: `1.224,70-` | é pagamento recebido; lido como positivo, inverteria o saldo |
+| sufixo `BRA` | marca de país, não parte do nome |
+| cidade embutida na descrição | sem separador confiável — ver abaixo |
+| nenhuma categoria do emissor | regras e IA fazem todo o trabalho |
 
-> **O nome do estabelecimento se parte acima e abaixo da linha do valor.** Em
-> `AMAZONMKTPLC*CMCOMERCI` os `top` são 602 (início do nome), 609 (data e valor)
-> e 615 (`SA 3/12`, o resto do nome mais a parcela). Agrupar por linha, como no
-> Itaú, despedaçaria o lançamento. Aqui a âncora é o **valor**: para cada valor
-> em x1≈549, o nome se monta com as palavras da faixa da coluna Histórico cujo
-> `top` esteja a ±12px dele.
+> **A cidade fica dentro do `estabelecimento`, de propósito.** Não há como
+> separá-la com segurança: o espaço entre nome e cidade varia de 2px
+> (`AMAZONMKTPLC*VOOLTINDU SAO`) a 25px (`G LUCCO    SAO`), então qualquer
+> heurística de distância erraria. O campo guarda o texto cru, como o resto do
+> doc manda, e quem produz o nome legível é a normalização da IA — que não se
+> incomoda com a cidade sobrando.
 
-A conferência também fecha ao centavo, por um invariante que o PDF permite
-montar:
+#### Duas provas independentes, e a segunda valida uma suposição
 
-```
-soma dos 10 lançamentos listados      =   706,99
-Total para RAFAEL INHASZ  5.016,24
-Total da Fatura em Real   4.309,25
-                          ---------
-diferença                   706,99   <- igual à soma. Fecha.
-```
-
-### A decisão sobre extrato em aberto
-
-Importar ou recusar? Recusar seria perder o cartão inteiro. Importar com data de
-vencimento inventada seria pior: um campo que mente.
-
-A solução tem três partes:
-
-1. **`situacao`** (`fechada` | `aberta`) na fatura, para a tela nunca apresentar
-   número provisório como definitivo.
-2. **`data_extrato`**, que é o que o documento realmente traz.
-3. **Índice único em `(cartao, mes_ref)`**, porque `mes_ref` é estável nos dois
-   casos — enquanto `data_vencimento` pode ser nula, e em SQLite dois `NULL` não
-   colidem, de modo que reimportar duplicaria a fatura silenciosamente.
-
-O `mes_ref` do extrato em aberto sai do **mês seguinte ao da extração**: um
-extrato tirado em 30/09 é a fatura que vence em outubro, e é assim que ele fica
-comparável com as outras quatro, todas em `2026-10`.
-
-E uma quarta parte, que só apareceu quando as cinco faturas ficaram na mesma
-tela: **o total de um extrato aberto não é comparável com o das faturas
-fechadas.** O do cartão Amazon soma R$ 5.016,24, mas R$ 4.309,25 disso é saldo
-anterior que o PDF **não detalha lançamento a lançamento** — só os R$ 706,99 de
-consumo do período entram na análise. Exibir 5.016,24 na lista de faturas
-enquanto a análise conta 706,99 seria o mesmo defeito do IOF: um total que não
-fecha com o resto da tela. Então para `situacao='aberta'` a lista mostra o
-**consumo**, com o total da fatura no tooltip.
-
-O teste disso é uma soma: a coluna que a lista exibe tem de dar exatamente
-`gasto + encargos` da análise.
+A primeira é o total, e o resumo da página 1 a monta:
 
 ```
-20.323,67 + 5.166,19 + 1.166,61 + 216,74 + 706,99 = 27.580,20
-gasto 27.518,38 + encargos 61,82              = 27.580,20
+Saldo anterior              1.224,70
+(-) Créditos/Pagamentos     1.224,70-
+(+) Compras/Débitos         3.602,26
+(=) Total                   3.602,26
 ```
+
+A soma dos lançamentos **sem o pagamento** tem de dar 3.602,26.
+
+A segunda é a mais valiosa de todo o documento. As parcelas em andamento são
+`(06/06)`, `(04/17)` e `(02/12)`; supondo **parcelas iguais**, faltam
+`13 × 93,48 + 10 × 26,50 = 1.480,24` — exatamente o `Total para as próximas
+faturas` que o banco publica. E a soma das próximas parcelas,
+`93,48 + 26,50 = 119,98`, bate com o `Próxima fatura` dele.
+
+Isso importa além desta fatura: a estimativa de parcelas iguais, que o doc até
+aqui rotulava como suposição, está **conferida contra o emissor**.
+
+> Esta fatura não traz lista itemizada de parcelas futuras, só os totais — por
+> isso não há itens `secao='proxima_fatura'` aqui, e essa conferência é feita
+> contra os parcelamentos derivados dos próprios lançamentos.
+
+### O extrato em aberto, e por que a máquinaria ficou
+
+Houve uma volta falsa aqui, e ela vale registro porque moldou o schema. A
+primeira amostra do cartão Amazon era um **extrato em aberto** — não uma fatura
+— baixado por engano: sem data de vencimento em página nenhuma, avisando
+*"Valores sujeitos a alteração até o fechamento"*, e com o total trazendo saldo
+anterior não detalhado. O arquivo foi substituído pela fatura de verdade e já não
+existe em disco, então o parser dele **foi removido**: manter código que não se
+pode mais testar é pior que não tê-lo.
+
+O que ficou, porque continua certo por mérito próprio:
+
+1. **Índice único em `(cartao, mes_ref)`** em vez de
+   `(cartao, data_vencimento)`. Mesmo cartão, mesmo mês é a mesma fatura — e
+   `mes_ref` não pode ser nulo, enquanto `data_vencimento` pode; em SQLite dois
+   `NULL` não colidem, e reimportar duplicaria em silêncio.
+2. **`situacao`** (`fechada` | `aberta`) e **`data_extrato`**, hoje sempre
+   `fechada`. Extrato em aberto é um documento real que o usuário pode baixar de
+   novo; quando acontecer, precisa de um ramo próprio no parser — e a tela já
+   sabe avisar que número provisório não é definitivo.
+3. **`emissor`** na fatura, que é o que torna a lista de faturas legível quando
+   há cinco cartões de três bancos.
+
+A lição é a mesma do PU e do pagamento mínimo: **o documento manda, não a
+suposição sobre ele.** Um parser inteiro foi escrito para um layout que o usuário
+nunca quis importar.
 
 ## O que esta fase deliberadamente não faz
 
