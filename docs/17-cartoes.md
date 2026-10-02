@@ -569,6 +569,66 @@ aqui rotulava como suposição, está **conferida contra o emissor**.
 > isso não há itens `secao='proxima_fatura'` aqui, e essa conferência é feita
 > contra os parcelamentos derivados dos próprios lançamentos.
 
+### Porto Seguro (PORTOSEG)
+
+Duas páginas, e a segunda é só boleto — os lançamentos cabem todos na primeira,
+num `DEMONSTRATIVO DE DESPESAS` que é a coluna da direita. A coluna da esquerda
+(resumo e encargos) se achata junto no texto, como em Itaú e Bradesco:
+
+```
+Saldo 3.071,20 27/07/2 PORTO SEGURO AUTO PA/03 412,32
+      ^^^^^^^^ coluna esquerda      lançamento ^^^^^^
+```
+
+A geometria é rígida e idêntica nas seis linhas:
+
+| | x |
+|---|---|
+| data | x0 = **290,0** |
+| descrição | x0 = **324,0** |
+| parcela | x0 ≈ 403–449 |
+| valor | x1 = **553,0** |
+| (resumo da esquerda) | valor em x1 = 282 |
+
+#### Quatro coisas que nenhum outro emissor tinha
+
+| achado | consequência |
+|---|---|
+| **duas notações de parcela na mesma fatura**: `PA/03` e `09/12` | `PA/NN` traz o número **sem o total** — `parcela_total` fica nulo, e esses papéis legitimamente não entram no "ainda vai chegar", porque não se sabe quantas faltam |
+| **data truncada**: `27/07/2` | o ano vem cortado em um dígito; lê-se `DD/MM` e o ano sai do vencimento, como nos outros |
+| valores **sem `R$`** no cabeçalho (`3.019,90`) | padrões que exigem `R$` não casam nada aqui |
+| **menos à esquerda**: `-2.693,62` | o Bradesco põe à direita (`1.224,70-`); as duas convenções agora coexistem |
+
+> **`09/12` é indistinguível de uma data pelo formato.** O que as separa é só a
+> coordenada: a parcela fica em x0≈429, a data em x0=290. Um parser de linha de
+> texto confundiria as duas — foi o exame das coordenadas que evitou isso.
+
+> **`PORTO SEGURO AUTO` é compra de seguro**, e casa a palavra-chave
+> `porto ?seg` → Seguros, sem precisar de IA. Mas isso proíbe usar `SEGURO` como
+> marca de encargo: a compra viraria encargo. Encargo aqui é só
+> `ANUIDADE|TARIFA|IOF|JUROS|MULTA|MORA|ENCARGO` — e `ANUIDADE DIFERENCIADA`,
+> cobrada em 12 parcelas, é encargo, não compra.
+
+#### Conferência: três números concordam, um não
+
+As despesas, sem o pagamento, somam **3.071,20** — e o PDF confirma isso por
+três caminhos independentes:
+
+```
+Despesas/Debitos (+)              3.071,20
+PAGAMENTO TOTAL                   3.071,20
+RAFAEL INHASZ - NR.3151:      R$  3.071,20
+```
+
+O quarto número **não fecha e fica registrado como inexplicado**:
+`Total Nacional -2.316,04`. A hipótese é que subtraia o pagamento duas vezes
+(`3.071,20 − 2.693,62 − 2.693,62 = −2.316,04`), mas é hipótese, não leitura — e
+por isso a conferência se apoia nos três que concordam, nunca nele.
+
+> O PDF também vem com **mojibake** em parte do texto (`perÃ odo`, `4Âº`): UTF-8
+> lido como Latin-1. Não afeta estes seis lançamentos, mas afetaria um
+> estabelecimento com acento.
+
 ### O extrato em aberto, e por que a máquinaria ficou
 
 Houve uma volta falsa aqui, e ela vale registro porque moldou o schema. A

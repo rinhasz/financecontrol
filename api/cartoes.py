@@ -220,6 +220,8 @@ def detectar(conteudo: bytes) -> str:
     parser do Itaú num documento que não é dele e produzir uma leitura vazia.
     """
     texto = ' '.join(extrair_texto(conteudo)[:60])
+    if re.search(r'PORTOSEG|PORTO\s*SEGURO', texto, re.I):
+        return 'porto'
     if re.search(r'Bradesco\s*Cart[õo]es|Situa[çc][ãa]o\s*do\s*Extrato', texto, re.I):
         return 'bradesco'
     if re.search(r'Mercado\s*Pago|Detalhes\s*de\s*consumo', texto, re.I):
@@ -241,7 +243,10 @@ def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
     fecharia um ciclo.
     """
     emissor = detectar(conteudo)
-    if emissor == 'mercadopago':
+    if emissor == 'porto':
+        from .cartoes_porto import parse as parse_porto
+        dados = parse_porto(conteudo, arquivo)
+    elif emissor == 'mercadopago':
         from .cartoes_mp import parse as parse_mp
         dados = parse_mp(conteudo, arquivo)
     elif emissor == 'bradesco':
@@ -250,8 +255,8 @@ def parse_fatura(conteudo: bytes, arquivo: str = '') -> dict:
     elif emissor == 'itau':
         dados = parse_itau(conteudo, arquivo)
     else:
-        raise ValueError('Não reconheci o emissor desta fatura. '
-                         'Hoje leio Itaú, Mercado Pago e Bradesco (Amazon).')
+        raise ValueError('Não reconheci o emissor desta fatura. Hoje leio Itaú, '
+                         'Mercado Pago, Bradesco (Amazon) e Porto Seguro.')
     dados['cabecalho']['emissor'] = emissor
     dados['cabecalho'].setdefault('situacao', 'fechada')
     dados['cabecalho'].setdefault('data_extrato', None)
