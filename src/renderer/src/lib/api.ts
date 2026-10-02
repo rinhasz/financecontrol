@@ -168,7 +168,10 @@ export const api = {
     // valor null apaga a meta
     salvarMeta: (m: {
       categoria: string; segmento: string; tipo: string; valor: number | null
+      tatica?: string | null
     }) => post('/api/cartoes/metas', m),
+    salvarLocal: (l: { padrao: string; local: string | null; evidencia?: string }) =>
+      post('/api/cartoes/locais', l),
     // corrigir a categoria ensina uma regra que vale nas próximas faturas
     recategorizar: (id: number, categoria: string, aprender = true) =>
       post(`/api/cartoes/itens/${id}/categoria`, { categoria, aprender })

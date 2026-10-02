@@ -26,6 +26,10 @@ interface Item {
   categoria_fatura: string | null
   origem_categoria: string | null
   cartao?: string
+  /** Estampado pelo servidor. A regra de segmento depende de marcação de local,
+   *  flags da categoria e corte de ticket — reimplementá-la aqui faria a mesma
+   *  regra existir em duas linguagens, e divergir na primeira correção. */
+  segmento?: string | null
 }
 
 interface Grupo { chave: string; valor: number; n: number }
@@ -62,9 +66,19 @@ interface Segmento {
   alavanca: string
   segmentacao: string
   observacao: string | null
+  /** O que o % morde: média dos meses anteriores, ou o próprio mês enquanto não
+   *  há histórico. A tela mostra qual das duas — um percentual sem a base à
+   *  vista não quer dizer nada. */
+  baseline: number
+  baseline_origem: string
+  corte_sugerido: number
+  taticas: string[]
+  tatica: string | null
+  tatica_salva: boolean
   meta_tipo: string | null
   meta_bruta: number | null
   meta_valor: number | null
+  economia: number | null
   meta_indisponivel: string | null
   excedeu: number | null
 }
@@ -241,6 +255,21 @@ export function Cartoes({ active }: { active?: boolean }): JSX.Element {
     } finally { setOcupado(false) }
   }
 
+  /** Grava a meta de redução de um segmento. Mexer na tática ou no % salva os
+   *  dois juntos, usando o % vigente — assim qualquer dos dois controles
+   *  produz um orçamento válido, sem obrigar a preencher o outro primeiro. */
+  async function salvarMeta(s: Segmento, pct: number, tatica: string | null) {
+    try {
+      await api.cartoes.salvarMeta({
+        categoria: s.categoria, segmento: s.segmento,
+        tipo: 'percentual', valor: pct, tatica
+      })
+      await carregar(mes)
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function mudarCategoria(item: Item, categoria: string) {
     if (!item.id) return
     setItens(prev => prev.map(i => i.id === item.id
@@ -285,7 +314,8 @@ export function Cartoes({ active }: { active?: boolean }): JSX.Element {
 
       <div className="flex-1 overflow-auto">
         {aba === 'analise' && (
-          <AbaAnalise analise={analise} itens={itens} carregando={carregando} />
+          <AbaAnalise analise={analise} itens={itens} carregando={carregando}
+                      onSalvarMeta={salvarMeta} />
         )}
 
         {aba === 'economizar' && (
@@ -389,28 +419,10 @@ export function Cartoes({ active }: { active?: boolean }): JSX.Element {
 
 /* ── onde gastei ─────────────────────────────────────────────────────────── */
 
-function AbaAnalise({ analise, itens, carregando }: {
+function AbaAnalise({ analise, itens, carregando, onSalvarMeta }: {
   analise: Analise | null; itens: Item[]; carregando: boolean
+  onSalvarMeta: (s: Segmento, pct: number, tatica: string | null) => void
 }): JSX.Element {
-  const [aberta, setAberta] = useState<string | null>(null)
-  const [abertoEst, setAbertoEst] = useState<string | null>(null)
-
-  /** categoria → estabelecimento → lançamentos. A categoria é o resumo; a
-   *  decisão acontece no estabelecimento, e a prova está no lançamento. */
-  const arvore = useMemo(() => {
-    const m = new Map<string, Map<string, Item[]>>()
-    for (const i of itens) {
-      if (i.secao !== 'lancamento') continue
-      const cat = i.categoria || '—'
-      const est = i.estabelecimento_norm || i.estabelecimento
-      if (!m.has(cat)) m.set(cat, new Map())
-      const sub = m.get(cat)!
-      if (!sub.has(est)) sub.set(est, [])
-      sub.get(est)!.push(i)
-    }
-    return m
-  }, [itens])
-
   if (carregando) return <div className="text-sm text-zinc-500">Carregando…</div>
   if (!analise || analise.vazio) {
     return (
@@ -420,7 +432,6 @@ function AbaAnalise({ analise, itens, carregando }: {
     )
   }
 
-  const maxCat = Math.max(1, ...analise.por_categoria.map(g => g.valor))
   const d = analise.decisao
   const terminando = analise.parcelamentos.filter(p => p.termina_agora)
 
@@ -525,104 +536,11 @@ function AbaAnalise({ analise, itens, carregando }: {
         </div>
       </section>
 
-      <SecaoSegmentos segmentos={analise.segmentos || []} />
-
-      <section>
-        <h2 className="text-sm font-medium mb-2">
-          Onde estou gastando <span className="text-xs text-zinc-500 font-normal">— clique para abrir</span>
-        </h2>
-        <div className="space-y-1">
-          {analise.por_categoria.map(g => {
-            const sub = arvore.get(g.chave)
-            const abertaAqui = aberta === g.chave
-            const ests = sub ? [...sub.entries()]
-              .map(([nome, its]) => ({
-                nome, n: its.length,
-                valor: its.reduce((s, i) => s + (i.valor || 0), 0), its
-              }))
-              .sort((a, b) => b.valor - a.valor) : []
-            return (
-              <div key={g.chave}>
-                <button
-                  onClick={() => { setAberta(abertaAqui ? null : g.chave); setAbertoEst(null) }}
-                  className="w-full flex items-center gap-3 text-sm hover:bg-zinc-900/40 rounded px-1 py-0.5"
-                >
-                  <span className="w-4 text-zinc-600 text-xs">{abertaAqui ? '▾' : '▸'}</span>
-                  <span className="w-40 shrink-0 text-left text-zinc-300">{g.chave}</span>
-                  <div className="flex-1 h-4 bg-zinc-900 rounded overflow-hidden">
-                    <div className="h-full bg-sky-600/60" style={{ width: `${(g.valor / maxCat) * 100}%` }} />
-                  </div>
-                  <span className="w-12 text-right text-xs text-zinc-600">{g.n}x</span>
-                  <span className="w-28 text-right tabular-nums">{formatBRL(g.valor)}</span>
-                </button>
-
-                {abertaAqui && (
-                  <div className="ml-8 mt-1 mb-2 border-l border-zinc-800 pl-3 space-y-0.5">
-                    {ests.map(e => (
-                      <div key={e.nome}>
-                        <button
-                          onClick={() => setAbertoEst(abertoEst === g.chave + e.nome ? null : g.chave + e.nome)}
-                          className="w-full flex items-center gap-2 text-sm hover:bg-zinc-900/40 rounded px-1"
-                        >
-                          <span className="w-3 text-zinc-700 text-xs">
-                            {abertoEst === g.chave + e.nome ? '▾' : '▸'}
-                          </span>
-                          <span className="text-left text-zinc-300 truncate">{e.nome}</span>
-                          <span className="ml-auto text-xs text-zinc-600">{e.n}x</span>
-                          <span className="w-20 text-right text-xs text-zinc-500 tabular-nums">
-                            méd {formatBRL(e.valor / e.n)}
-                          </span>
-                          <span className="w-24 text-right tabular-nums">{formatBRL(e.valor)}</span>
-                        </button>
-                        {abertoEst === g.chave + e.nome && (
-                          <div className="ml-6 border-l border-zinc-800 pl-3 py-1">
-                            {e.its.slice().sort((a, b) => (b.data_compra || '').localeCompare(a.data_compra || ''))
-                              .map(i => (
-                                <div key={i.id} className="flex gap-3 text-xs text-zinc-400 py-0.5">
-                                  <span className="w-12 shrink-0 tabular-nums">
-                                    {(i.data_compra || '').slice(8, 10)}/{(i.data_compra || '').slice(5, 7)}
-                                  </span>
-                                  <span className="truncate">{i.estabelecimento}</span>
-                                  {i.parcela_n && (
-                                    <span className="shrink-0 text-zinc-600">{i.parcela_n}/{i.parcela_total}</span>
-                                  )}
-                                  {/* De qual cartão saiu. Com cinco faturas de três emissores no
-                                      mesmo mês, "onde gastei" fica incompleto sem isto — e o final
-                                      separa entre si os 10 adicionais do The One. O portador é
-                                      condicional porque Mercado Pago e Bradesco não trazem nenhum,
-                                      e um span vazio abriria um vão na linha. */}
-                                  <span
-                                    className="ml-auto shrink-0 text-zinc-500"
-                                    title={`${i.cartao || ''}`
-                                      + (i.cartao_final ? ` · final ${i.cartao_final}` : '')
-                                      + (i.portador ? ` · ${i.portador}` : '')}
-                                  >
-                                    {i.cartao}
-                                    {i.cartao_final && (
-                                      <span className="text-zinc-600"> ·{i.cartao_final}</span>
-                                    )}
-                                  </span>
-                                  {i.portador && (
-                                    <span className="shrink-0 truncate max-w-[9rem] text-zinc-600">
-                                      {i.portador}
-                                    </span>
-                                  )}
-                                  <span className="w-24 shrink-0 text-right tabular-nums text-zinc-300">
-                                    {formatBRL(i.valor)}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </section>
+      <SecaoEconomia
+        segmentos={analise.segmentos || []}
+        itens={itens}
+        onSalvarMeta={onSalvarMeta}
+      />
 
       <section>
         <h2 className="text-sm font-medium mb-2">
@@ -706,50 +624,245 @@ const SEGMENTO_LABEL: Record<string, string> = {
   grande: 'compra grande', pequeno: 'reposição'
 }
 
-function SecaoSegmentos({ segmentos }: { segmentos: Segmento[] }): JSX.Element {
-  if (!segmentos.length) return <div />
-  const max = Math.max(1, ...segmentos.map(s => s.valor))
+/** Onde gastei e onde cortar, numa coisa só.
+ *
+ *  Só aparecem categorias com alavanca: Saúde, Encargos e Pagamento saem porque
+ *  não há o que cortar ali, e manter linha de zero economia só gastaria atenção.
+ *
+ *  Cada linha é um (categoria, segmento) com dois controles — tática e % de
+ *  redução — e dois expansores: `⊕` junta os segmentos da categoria num só, e
+ *  `▸` abre os lançamentos daquela linha. O segmento de cada lançamento vem
+ *  **estampado pelo servidor**, para a regra não existir em duas linguagens.
+ */
+function SecaoEconomia({ segmentos, itens, onSalvarMeta }: {
+  segmentos: Segmento[]
+  itens: Item[]
+  onSalvarMeta: (s: Segmento, pct: number, tatica: string | null) => void
+}): JSX.Element {
+  const [juntas, setJuntas] = useState<Set<string>>(new Set())
+  const [aberta, setAberta] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+
+  const comAlavanca = useMemo(
+    () => segmentos.filter(s => s.alavanca !== 'nenhum'), [segmentos])
+
+  /** categoria → suas linhas, para saber quem tem segmento para juntar */
+  const porCategoria = useMemo(() => {
+    const m = new Map<string, Segmento[]>()
+    for (const s of comAlavanca) {
+      if (!m.has(s.categoria)) m.set(s.categoria, [])
+      m.get(s.categoria)!.push(s)
+    }
+    return m
+  }, [comAlavanca])
+
+  /** Junta os segmentos de uma categoria numa linha. A meta de uma linha junta
+   *  é gravada com segmento vazio — a chave da categoria inteira, que o servidor
+   *  já usa como herança para os segmentos. */
+  function agregar(cat: string, rs: Segmento[]): Segmento {
+    const valor = rs.reduce((a, s) => a + s.valor, 0)
+    const n = rs.reduce((a, s) => a + s.n, 0)
+    const base = rs.reduce((a, s) => a + s.baseline, 0)
+    const p = rs[0]
+    const pct = p.meta_bruta
+    return {
+      ...p, categoria: cat, segmento: '', n, valor: Math.round(valor * 100) / 100,
+      ticket_medio: n ? Math.round((valor / n) * 100) / 100 : 0,
+      baseline: Math.round(base * 100) / 100,
+      meta_valor: pct !== null ? Math.round(base * (1 - pct / 100) * 100) / 100 : null,
+      economia: pct !== null ? Math.round(base * (pct / 100) * 100) / 100 : null,
+      excedeu: null
+    }
+  }
+
+  const linhas: Segmento[] = []
+  for (const [cat, rs] of porCategoria) {
+    if (rs.length > 1 && !juntas.has(cat)) linhas.push(...rs)
+    else linhas.push(rs.length > 1 ? agregar(cat, rs) : rs[0])
+  }
+  linhas.sort((a, b) => b.valor - a.valor)
+
+  if (!linhas.length) return <div />
+  const max = Math.max(1, ...linhas.map(s => s.valor))
+  const pctDe = (s: Segmento) =>
+    s.meta_bruta !== null ? s.meta_bruta : s.corte_sugerido
+  const chave = (s: Segmento) => `${s.categoria}|${s.segmento}`
+
+  // O orçamento: só conta o que você já cravou, não as sugestões — senão a tela
+  // prometeria uma economia que ninguém decidiu.
+  const orcamento = linhas.reduce(
+    (a, s) => a + (s.meta_bruta !== null ? (s.economia || 0) : 0), 0)
+  const potencial = linhas.reduce(
+    (a, s) => a + (s.meta_bruta === null ? s.baseline * (s.corte_sugerido / 100) : 0), 0)
+
   return (
     <section>
-      <h2 className="text-sm font-medium">Onde gastei, por estratégia</h2>
+      <div className="flex items-baseline gap-3">
+        <h2 className="text-sm font-medium">Onde gastei, e onde cortar</h2>
+        <span className="text-xs text-zinc-500">
+          ⊕ junta os segmentos · ▸ abre os lançamentos
+        </span>
+        <span className="ml-auto text-sm">
+          <span className="text-zinc-500 text-xs uppercase mr-2">orçamento de redução</span>
+          <strong className="tabular-nums text-emerald-300">{formatBRL(orcamento)}</strong>
+          <span className="text-zinc-500">/mês</span>
+          {potencial > 0.01 && (
+            <span className="text-xs text-zinc-600 ml-2">
+              (+{formatBRL(potencial)} nas sugestões que você ainda não cravou)
+            </span>
+          )}
+        </span>
+      </div>
       <p className="text-xs text-zinc-500 mb-2">
-        A alavanca é da categoria; a decisão é do segmento. Almoço de dia útil e jantar
-        de sábado são a mesma categoria e metas diferentes.
+        O % incide sobre a baseline de cada linha. Saúde, Encargos e Pagamento não
+        aparecem: não há alavanca ali.
       </p>
+
       <div className="space-y-1">
-        {segmentos.map((s, n) => {
+        {linhas.map(s => {
           const a = ALAVANCAS[s.alavanca] || ALAVANCAS.volume
+          const k = chave(s)
+          const rs = porCategoria.get(s.categoria) || []
+          const podeJuntar = rs.length > 1
+          const estaJunta = juntas.has(s.categoria)
+          const pct = pctDe(s)
+          const its = itens.filter(i =>
+            i.secao === 'lancamento' && (i.categoria || '—') === s.categoria
+            && (!s.segmento || (i.segmento || '') === s.segmento))
           return (
-            <div key={n} className="flex items-center gap-2 text-sm">
-              <span className="w-40 shrink-0 truncate text-zinc-300" title={s.observacao || ''}>
-                {s.categoria}
-              </span>
-              <span className="w-24 shrink-0 text-xs text-zinc-500">
-                {s.segmento ? SEGMENTO_LABEL[s.segmento] || s.segmento : ''}
-              </span>
-              <span className={cn('shrink-0 text-xs px-1.5 py-0.5 rounded border', a.cor)}
-                    title={a.ajuda}>{a.label}</span>
-              <div className="flex-1 h-4 bg-zinc-900 rounded overflow-hidden">
-                <div className={cn('h-full', s.excedeu ? 'bg-rose-600/60' : 'bg-sky-600/60')}
-                     style={{ width: `${(s.valor / max) * 100}%` }} />
-              </div>
-              <span className="w-10 text-right text-xs text-zinc-600">{s.n}x</span>
-              <span className="w-20 text-right text-xs text-zinc-500 tabular-nums">
-                méd {formatBRL(s.ticket_medio)}
-              </span>
-              <span className="w-24 text-right tabular-nums">{formatBRL(s.valor)}</span>
-              {/* meta: número só quando se sustenta. Percentual sem histórico
-                  mostra o motivo, nunca uma média que é o próprio mês. */}
-              <span className="w-32 text-right text-xs tabular-nums">
-                {s.meta_indisponivel ? (
-                  <span className="text-zinc-600" title={s.meta_indisponivel}>meta s/ base</span>
-                ) : s.meta_valor !== null ? (
-                  <span className={s.excedeu ? 'text-rose-400' : 'text-emerald-400'}>
-                    meta {formatBRL(s.meta_valor)}
-                    {s.excedeu ? ` (+${formatBRL(s.excedeu)})` : ' ✓'}
+            <div key={k}>
+              <div className="flex items-center gap-2 text-sm hover:bg-zinc-900/30 rounded px-1 py-0.5">
+                <button
+                  onClick={() => setAberta(aberta === k ? null : k)}
+                  className="w-4 shrink-0 text-xs text-zinc-600 hover:text-zinc-300"
+                  title="ver os lançamentos desta linha"
+                >{aberta === k ? '▾' : '▸'}</button>
+
+                <span className="w-36 shrink-0 truncate text-zinc-300" title={s.observacao || ''}>
+                  {s.categoria}
+                </span>
+
+                <span className="w-28 shrink-0 text-xs">
+                  {s.segmento
+                    ? <span className="text-zinc-500">{SEGMENTO_LABEL[s.segmento] || s.segmento}</span>
+                    : podeJuntar
+                      ? <span className="text-zinc-600">categoria toda</span>
+                      : null}
+                  {podeJuntar && (
+                    <button
+                      onClick={() => setJuntas(p => {
+                        const n = new Set(p)
+                        if (estaJunta) n.delete(s.categoria); else n.add(s.categoria)
+                        return n
+                      })}
+                      className="ml-1 text-zinc-600 hover:text-zinc-300"
+                      title={estaJunta ? 'separar os segmentos' : 'juntar os segmentos numa linha'}
+                    >{estaJunta ? '⊖' : '⊕'}</button>
+                  )}
+                </span>
+
+                <span className={cn('shrink-0 text-xs px-1.5 py-0.5 rounded border', a.cor)}
+                      title={a.ajuda}>{a.label}</span>
+
+                <div className="flex-1 min-w-[3rem] h-4 bg-zinc-900 rounded overflow-hidden">
+                  <div className="h-full bg-sky-600/60" style={{ width: `${(s.valor / max) * 100}%` }} />
+                </div>
+
+                <span className="w-9 shrink-0 text-right text-xs text-zinc-600">{s.n}x</span>
+                <span className="w-24 shrink-0 text-right tabular-nums">{formatBRL(s.valor)}</span>
+
+                {/* tática: combo, com as opções da alavanca daquele segmento */}
+                <select
+                  value={s.tatica || ''}
+                  onChange={e => onSalvarMeta(s, pct, e.target.value || null)}
+                  className={cn('w-52 shrink-0 bg-transparent border rounded px-1 py-0.5 text-xs',
+                    s.tatica_salva ? 'border-emerald-600/40 text-emerald-300'
+                      : 'border-zinc-800 text-zinc-400')}
+                  title={s.tatica_salva ? 'tática que você escolheu' : 'sugestão — escolha para gravar'}
+                >
+                  {!s.taticas.includes(s.tatica || '') && (
+                    <option value={s.tatica || ''}>{s.tatica || '—'}</option>
+                  )}
+                  {s.taticas.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+
+                {/* % de redução: rascunho local, grava ao sair do campo ou no Enter */}
+                <span className="shrink-0 flex items-center gap-0.5">
+                  <input
+                    value={draft[k] ?? String(pct)}
+                    onChange={e => setDraft(p => ({ ...p, [k]: e.target.value }))}
+                    onBlur={() => {
+                      const v = parseFloat((draft[k] ?? '').replace(',', '.'))
+                      setDraft(p => { const n = { ...p }; delete n[k]; return n })
+                      if (!isNaN(v) && v > 0 && v < 100 && v !== s.meta_bruta) {
+                        onSalvarMeta(s, v, s.tatica)
+                      }
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                    className={cn('w-12 bg-transparent border rounded px-1 py-0.5 text-xs text-right tabular-nums',
+                      s.meta_bruta !== null ? 'border-emerald-600/40 text-emerald-300'
+                        : 'border-zinc-800 text-zinc-500')}
+                    title={s.meta_bruta !== null
+                      ? 'meta que você cravou'
+                      : `sugestão de ${s.corte_sugerido}% — edite para gravar`}
+                  />
+                  <span className="text-xs text-zinc-600">%</span>
+                </span>
+
+                {/* o que a meta vira em reais, e sobre que base */}
+                <span className="w-36 shrink-0 text-right text-xs tabular-nums">
+                  {s.meta_valor !== null ? (
+                    <span className={s.meta_bruta !== null ? 'text-emerald-400' : 'text-zinc-600'}>
+                      {formatBRL(s.meta_valor)}
+                      {s.economia ? <span className="text-zinc-500"> (−{formatBRL(s.economia)})</span> : null}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-700">—</span>
+                  )}
+                  <span className="block text-zinc-700"
+                        title={s.baseline_origem === 'mes_atual'
+                          ? 'sem histórico ainda: a base é o próprio mês'
+                          : 'base = média dos meses anteriores'}>
+                    sobre {formatBRL(s.baseline)}
+                    {s.baseline_origem === 'mes_atual' ? ' (este mês)' : ' (média)'}
                   </span>
-                ) : <span className="text-zinc-700">sem meta</span>}
-              </span>
+                </span>
+              </div>
+
+              {aberta === k && (
+                <div className="ml-6 mb-2 border-l border-zinc-800 pl-3 py-1">
+                  {its.slice()
+                    .sort((x, y) => (y.data_compra || '').localeCompare(x.data_compra || ''))
+                    .map(i => (
+                      <div key={i.id} className="flex gap-3 text-xs text-zinc-400 py-0.5">
+                        <span className="w-12 shrink-0 tabular-nums">
+                          {(i.data_compra || '').slice(8, 10)}/{(i.data_compra || '').slice(5, 7)}
+                        </span>
+                        <span className="truncate">
+                          {i.estabelecimento_norm || i.estabelecimento}
+                        </span>
+                        {i.parcela_n && (
+                          <span className="shrink-0 text-zinc-600">{i.parcela_n}/{i.parcela_total}</span>
+                        )}
+                        <span
+                          className="ml-auto shrink-0 text-zinc-500"
+                          title={`${i.cartao || ''}`
+                            + (i.cartao_final ? ` · final ${i.cartao_final}` : '')
+                            + (i.portador ? ` · ${i.portador}` : '')}
+                        >
+                          {i.cartao}
+                          {i.cartao_final && <span className="text-zinc-600"> ·{i.cartao_final}</span>}
+                        </span>
+                        <span className="w-24 shrink-0 text-right tabular-nums text-zinc-300">
+                          {formatBRL(i.valor)}
+                        </span>
+                      </div>
+                    ))}
+                  {!its.length && (
+                    <div className="text-xs text-zinc-600">nenhum lançamento nesta linha</div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}

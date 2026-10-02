@@ -607,9 +607,17 @@ def init_db():
         segmento  TEXT NOT NULL DEFAULT '',
         tipo      TEXT NOT NULL DEFAULT 'absoluto',     -- absoluto | percentual
         valor     REAL NOT NULL,
+        tatica    TEXT,                                 -- como se pretende cortar
         criado_em TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(categoria, segmento)
       )""")
+    # A tática é por SEGMENTO, não por categoria: em restaurante, "trocar
+    # almoços por marmita" e "cortar uma saída em três" são a mesma alavanca
+    # (`volume`) e ações diferentes. A alavanca continua da categoria; o como
+    # fazer é do segmento.
+    cols_mc = [r[1] for r in conn.execute('PRAGMA table_info(meta_categoria)').fetchall()]
+    if cols_mc and 'tatica' not in cols_mc:
+        conn.execute('ALTER TABLE meta_categoria ADD COLUMN tatica TEXT')
     # Onde fica o estabelecimento, para separar almoço de trabalho de jantar na
     # sexta. A fatura NÃO traz bairro — o campo `cidade` traz cidade
     # (`SAOPAULO` em 158 itens) —, então o lugar é marcado, não inferido.

@@ -436,7 +436,19 @@ def itens():
             args.append(mes)
         sql += ' ORDER BY i.data_compra DESC, i.valor DESC'
         rs = conn.execute(sql, args).fetchall()
-    return jsonify({'ok': True, 'itens': [dict(r) for r in rs], 'categorias': CATEGORIAS})
+        estr = _estrategias(conn)
+        locais = _locais(conn)
+
+    # O SERVIDOR estampa o segmento de cada item. A regra depende de
+    # `estabelecimento_local`, `sexta_por_local`, `discricionario` e do corte de
+    # ticket — reimplementá-la no cliente seria manter a mesma regra em duas
+    # linguagens, e elas divergiriam na primeira correção.
+    itens_ = []
+    for r in rs:
+        d = dict(r)
+        d['segmento'] = _segmento(d, estr, locais)
+        itens_.append(d)
+    return jsonify({'ok': True, 'itens': itens_, 'categorias': CATEGORIAS})
 
 
 @bp.route('/cartoes/itens/<int:iid>/categoria', methods=['POST'])
@@ -1086,6 +1098,70 @@ def _sextas_pendentes(lanc: list, estr: dict, locais: dict) -> dict:
             'valor': round(sum(r['valor'] for r in itens), 2)}
 
 
+# Corte sugerido, em %, por alavanca. É ponto de partida para o usuário mexer,
+# não veredito — e por isso a tela mostra o campo editável, não um número fixo.
+# O balde evitável aceita corte maior justamente porque é onde a decisão existe.
+CORTE_SUGERIDO = {
+    ('volume', 'fim_de_semana'): 30,
+    ('volume', None): 15,
+    ('preco', None): 12,
+    ('substituicao', None): 20,
+    ('requer_detalhe', None): 0,
+    ('nenhum', None): 0,
+}
+
+# Onde eu tenho uma razão concreta para divergir do padrão da alavanca.
+CORTE_POR_CATEGORIA = {
+    'Delivery': 40,       # 8 pedidos, R$ 684,51: é o mais fácil de cortar
+    'Assinaturas': 30,    # plano família e anual em vez de mensal
+    'Viagem': 20,         # 3 compras de ticket alto: não se corta pela metade
+}
+
+TATICAS = {
+    ('volume', 'dia_util'): [
+        'Levar marmita 1 vez por semana',
+        'Cortar o café/lanche intermediário',
+        'Trocar restaurante por opção mais barata perto do trabalho',
+    ],
+    ('volume', 'fim_de_semana'): [
+        'Cortar 1 saída a cada 3',
+        'Cozinhar em casa nos fins de semana',
+        'Definir um teto por saída',
+    ],
+    ('volume', None): [
+        'Reduzir a frequência',
+        'Definir um teto mensal',
+        'Comprar só o planejado',
+    ],
+    ('preco', None): [
+        'Trocar para atacarejo ou rede mais barata',
+        'Comprar a granel ou em volume',
+        'Usar cupom e cashback do app',
+    ],
+    ('substituicao', None): [
+        'Cotar com 3 concorrentes',
+        'Trocar plano mensal por anual',
+        'Migrar para plano família',
+        'Cancelar o que está ocioso',
+    ],
+    ('requer_detalhe', None): [
+        'Aguardando a nota item a item para decidir',
+    ],
+}
+
+
+def _sugestao_de_corte(categoria: str, alavanca: str, segmento: str):
+    """Quanto cortar, e como — como ponto de partida editável."""
+    pct = CORTE_POR_CATEGORIA.get(categoria)
+    if pct is None:
+        pct = CORTE_SUGERIDO.get((alavanca, segmento))
+        if pct is None:
+            pct = CORTE_SUGERIDO.get((alavanca, None), 0)
+    taticas = (TATICAS.get((alavanca, segmento))
+               or TATICAS.get((alavanca, None)) or [])
+    return pct, taticas
+
+
 def _avaliar_segmentos(lanc: list, hist: list, estr: dict, metas: dict,
                        n_meses_hist: int, locais: dict = None) -> list:
     """Realizado por (categoria, segmento), com a meta ao lado.
@@ -1114,27 +1190,47 @@ def _avaliar_segmentos(lanc: list, hist: list, estr: dict, metas: dict,
         est = estr.get(cat) or {}
         # meta do segmento; se não houver, a da categoria inteira
         m = metas.get(k) or (metas.get((cat, '')) if seg else None)
-        meta_valor = motivo = None
+        valor = round(e['valor'], 2)
+        alav = est.get('alavanca', 'volume')
+
+        # A baseline é o que o % morde. Com histórico, a média dos meses
+        # anteriores; sem histórico, o próprio mês — e a tela DIZ qual das duas,
+        # porque um percentual sem a base à vista não quer dizer nada.
+        if n_meses_hist and base.get(k):
+            baseline = round(base.get(k, 0.0) / n_meses_hist, 2)
+            baseline_origem = 'media_meses_anteriores'
+        else:
+            baseline = valor
+            baseline_origem = 'mes_atual'
+
+        pct_sug, taticas = _sugestao_de_corte(cat, alav, seg)
+        meta_valor = None
         if m:
             if m['tipo'] == 'absoluto':
                 meta_valor = m['valor']
-            elif n_meses_hist:
-                media = base.get(k, 0.0) / n_meses_hist
-                meta_valor = round(media * (1 - (m['valor'] or 0) / 100.0), 2)
             else:
-                motivo = ('meta percentual precisa de histórico: só há um mês '
-                          'importado, e a média seria o próprio mês')
-        valor = round(e['valor'], 2)
+                meta_valor = round(baseline * (1 - (m['valor'] or 0) / 100.0), 2)
+
         saida.append({
             'categoria': cat, 'segmento': seg, 'n': e['n'], 'valor': valor,
             'ticket_medio': round(valor / e['n'], 2) if e['n'] else 0,
-            'alavanca': est.get('alavanca', 'volume'),
+            'alavanca': alav,
             'segmentacao': est.get('segmentacao', 'nenhuma'),
             'observacao': est.get('observacao'),
+            'baseline': baseline,
+            'baseline_origem': baseline_origem,
+            # sugestão: ponto de partida editável, nunca imposição
+            'corte_sugerido': pct_sug,
+            'taticas': taticas,
+            'tatica': (m.get('tatica') if m else None) or (taticas[0] if taticas else None),
+            'tatica_salva': bool(m and m.get('tatica')),
             'meta_tipo': m['tipo'] if m else None,
             'meta_bruta': m['valor'] if m else None,
             'meta_valor': meta_valor,
-            'meta_indisponivel': motivo,
+            # quanto se economiza se a meta for cumprida
+            'economia': (round(baseline - meta_valor, 2)
+                         if meta_valor is not None and baseline > meta_valor else None),
+            'meta_indisponivel': None,
             'excedeu': (round(valor - meta_valor, 2)
                         if meta_valor is not None and valor > meta_valor else None),
         })
@@ -1203,8 +1299,9 @@ def salvar_meta():
             return jsonify({'ok': False,
                             'msg': 'Meta percentual é o corte desejado, entre 0 e 100'}), 400
         conn.execute(
-            'INSERT INTO meta_categoria (categoria, segmento, tipo, valor) VALUES (?,?,?,?) '
+            'INSERT INTO meta_categoria (categoria, segmento, tipo, valor, tatica) '
+            'VALUES (?,?,?,?,?) '
             'ON CONFLICT(categoria, segmento) DO UPDATE SET tipo=excluded.tipo, '
-            ' valor=excluded.valor',
-            (cat, seg, tipo, float(valor)))
+            ' valor=excluded.valor, tatica=excluded.tatica',
+            (cat, seg, tipo, float(valor), d.get('tatica')))
     return jsonify({'ok': True})

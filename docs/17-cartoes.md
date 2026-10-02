@@ -871,6 +871,81 @@ A validação ganha dente novo: sugestão cujo tipo não corresponde à alavanca
 categoria é **descartada**, do mesmo modo que já se descarta alvo inexistente e
 economia maior que o gasto.
 
+## Uma tela só: onde gastei e onde cortar
+
+Pedido do usuário: juntar "onde gastei" com "onde estou gastando por
+estratégia", mostrar **só as categorias que fazem sentido para economia**, e em
+cada linha ter uma estratégia e uma meta de redução editáveis — *"por ora
+fazemos assim para eu testar um orçamento de redução"*.
+
+Cada linha é um `(categoria, segmento)` com **dois controles** e **dois
+expansores**:
+
+| controle | o que faz |
+|---|---|
+| combo de **tática** | como se pretende cortar, com as opções da alavanca daquele segmento |
+| campo de **%** | quanto cortar; grava ao sair do campo ou no Enter |
+| `⊕` | junta os segmentos da categoria numa linha só (e `⊖` separa de novo) |
+| `▸` | abre os lançamentos **daquela linha** |
+
+Categorias com `alavanca='nenhum'` não aparecem: manter uma linha de zero
+economia só gastaria atenção. A API continua devolvendo-as — é o cliente que
+filtra —, porque a seção "o que ficou fora, e por quê" precisa delas.
+
+> **Juntar é definir meta da categoria.** A linha junta grava com segmento
+> vazio, que é a chave da categoria inteira e já funciona como herança para os
+> segmentos. Não é um modo de exibição separado: é a mesma meta num nível acima.
+
+### O segmento é estampado pelo servidor
+
+Para abrir "os lançamentos deste segmento" o cliente precisaria saber em que
+segmento cada lançamento caiu — e a regra depende de `estabelecimento_local`,
+`sexta_por_local`, `discricionario` e do corte de ticket. Reimplementá-la em
+TypeScript seria manter a **mesma regra em duas linguagens**, e elas divergiriam
+na primeira correção. Então `/cartoes/itens` devolve `segmento` em cada item, e
+o cliente só agrupa.
+
+### A baseline, e por que ela aparece na tela
+
+O % morde uma base, e a base muda conforme haja histórico:
+
+| situação | baseline | rótulo |
+|---|---|---|
+| há meses anteriores | média deles | `(média)` |
+| só este mês | o próprio mês | `(este mês)` |
+
+A tela escreve **sobre qual valor** o percentual está incidindo, sempre. Um
+percentual sem a base à vista não quer dizer nada — e foi por isso que a versão
+anterior, que recusava meta percentual sem histórico, estava certa no diagnóstico
+e errada na conclusão: o certo não é esconder a meta, é mostrar a base.
+
+### Corte sugerido: ponto de partida, não veredito
+
+Por alavanca, com o balde evitável aceitando mais porque é onde a decisão existe:
+
+| alavanca | sugestão |
+|---|---|
+| `volume` em segmento evitável | 30% |
+| `volume` no resto | 15% |
+| `substituicao` | 20% |
+| `preco` | 12% |
+| `requer_detalhe` | 0% — a conta espera o dado |
+
+Com três exceções que têm razão concreta: **Delivery 40%** (8 pedidos, R$ 684,51
+— o mais fácil de cortar), **Assinaturas 30%** (plano família e anual) e
+**Viagem 20%** (3 compras de ticket alto não se cortam pela metade).
+
+E as táticas acompanham o par (alavanca, segmento), porque *"levar marmita 1 vez
+por semana"* e *"cortar 1 saída a cada 3"* são a mesma alavanca (`volume`) e
+ações diferentes — daí a tática morar no segmento, não na categoria.
+
+### O orçamento soma só o que foi cravado
+
+O total no cabeçalho conta **apenas as metas que o usuário gravou**. O que ainda
+é sugestão aparece à parte, como *"+R$ X nas sugestões que você ainda não
+cravou"*. Somar os dois num número só seria prometer uma economia que ninguém
+decidiu — o mesmo erro dos R$ 48 mil/ano da primeira versão das sugestões.
+
 ## O que esta fase deliberadamente não faz
 
 - **Não lança no Mês Atual.** A fatura já entra lá como uma despesa só; duplicar
