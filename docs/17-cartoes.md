@@ -656,6 +656,221 @@ A lição é a mesma do PU e do pagamento mínimo: **o documento manda, não a
 suposição sobre ele.** Um parser inteiro foi escrito para um layout que o usuário
 nunca quis importar.
 
+## Estratégia por categoria: a alavanca é da categoria, não do lançamento
+
+Pedido do usuário, e ele está certo de um jeito que conserta um defeito meu: *"em
+dias de semana eu preciso almoçar fora, e finais de semana não necessariamente…
+em Saúde não dá para economizar… em Farmácia eu não vou conseguir comprar menos,
+mas podemos olhar os produtos e comprar no atacado"*.
+
+O motor de sugestões até aqui aplicava **um único modelo mental** a tudo — corte
+a frequência ou troque de fornecedor. Foi isso que produziu "pausar aquisições"
+num parcelamento já contratado e "moratória de maquiagem" numa compra única. A
+correção não é um prompt melhor: é declarar, por categoria, **qual alavanca
+existe** — e só deixar a IA propor daquele tipo.
+
+### As cinco alavancas
+
+| alavanca | pergunta que ela autoriza | exemplo |
+|---|---|---|
+| `volume` | precisava gastar isso? | restaurante no fim de semana |
+| `preco` | dava para pagar menos pela mesma coisa? | supermercado, combustível |
+| `substituicao` | dava para trocar de fornecedor ou plano? | assinaturas, seguros |
+| `nenhum` | **nenhuma** — a categoria sai das sugestões | Saúde, Encargos, Pagamento |
+| `requer_detalhe` | a alavanca existe, mas falta dado | Farmácia |
+
+`nenhum` é o mais valioso dos cinco. Saúde são 7 compras, todas acima de R$ 200,
+mediana R$ 541,74 — dentista, Invisalign, clínica. Qualquer sugestão ali é ruído
+que gasta a atenção do usuário. **A categoria simplesmente não entra no dossiê.**
+
+`requer_detalhe` é o segundo. Em Farmácia a alavanca é de preço (atacado,
+genérico, outra rede), mas exercê-la exige saber **quais produtos** — e isso só
+vem da nota item a item. Até chegar, o app diz "aguardando dado" em vez de
+inventar conselho.
+
+### Segmentação: o mesmo gasto, decisões diferentes
+
+Restaurante e bar, R$ 5.149,99 em 76 compras, parte em dois comportamentos
+distintos:
+
+| | valor | compras | ticket |
+|---|---|---|---|
+| dia útil | R$ 3.990,11 | 66 | R$ 60,46 |
+| fim de semana | R$ 1.159,88 | 10 | **R$ 115,99** |
+
+Dia útil é **alta frequência e ticket baixo** — hábito, 66 ocorrências, e a meta
+razoável é marginal. Fim de semana é **baixa frequência e ticket dobrado** —
+cada um é uma decisão, e a meta pode ser agressiva. Metas iguais para os dois
+seriam erradas nos dois.
+
+A regra é **seg-sex / sáb-dom**, escolhida pelo usuário.
+
+#### Sexta é dois comportamentos no mesmo dia
+
+**Sexta é o maior dia da categoria: R$ 1.182,08 em 16 compras**, mais que sábado
+e domingo somados (R$ 1.159,88). E é o único dia que contém as duas coisas:
+almoço de trabalho, que não se evita, e jantar, que se evita.
+
+O critério, dado pelo usuário, é **o lugar**: estabelecimento nas proximidades do
+Itaim Bibi é almoço de trabalho; fora dali, numa sexta, é jantar — e jantar conta
+no balde do fim de semana.
+
+> **A fatura não traz bairro.** O campo `cidade` existe em 204 dos 243 itens
+> (84%), mas só nas faturas Itaú e com valor de **cidade**: `SAOPAULO` em 158
+> itens, mais Barueri, Osasco, Guarulhos. Para esses 158 não há como distinguir
+> Itaim de Perdizes. A exceção é curiosa e pequena: em **2 itens** o emissor
+> escreveu `Itaim` nesse campo em vez da cidade.
+
+Como o dado não existe, o lugar é **marcado no estabelecimento**, não inferido do
+endereço:
+
+```
+estabelecimento_local(padrao, local, origem)
+   local  = trabalho | outro
+   origem = fatura | ia | manual
+```
+
+Marca-se uma vez e vale para sempre, como a regra de categoria — e o custo é
+pequeno: a categoria inteira tem **34 estabelecimentos distintos**, 11 deles
+aparecendo em sextas.
+
+| origem | quem decidiu |
+|---|---|
+| `fatura` | o emissor escreveu `Itaim` no campo cidade — evidência, não palpite |
+| `pesquisa` | busca na web pelo nome, com o endereço guardado em `evidencia` |
+| `ia` | o modelo propôs de memória; vale até o usuário dizer o contrário |
+| `manual` | o usuário marcou, e isso vence tudo |
+
+Toda marcação guarda **`evidencia`**: o endereço achado e de onde veio. Sem
+rastro, ninguém sabe em seis meses por que Burdog está `outro`, e uma marcação
+sem rastro é palpite com aparência de dado.
+
+#### O que a busca resolveu
+
+Pesquisar o nome do estabelecimento funcionou melhor que qualquer inferência —
+os nomes são de lugares reais e o endereço é público:
+
+| estabelecimento | achado | veredito | confiança |
+|---|---|---|---|
+| Arboretto Café e Cozinha | R. Prof. Atílio Innocenti, 29 — **Itaim Bibi** | `trabalho` | alta, unidade única |
+| Xico Gastronomia | R. Joaquim Floriano, 1053 — **Itaim Bibi** | `trabalho` | alta |
+| Homem de Mello | Panificadora, R. Dr. Homem de Melo, 626 — **Perdizes** | `outro` | alta |
+| L.G.A. Estúdio Gourmet | **Perdizes** e Água Branca | `outro` | alta no bairro, duas unidades |
+| Burdog | **Pacaembu** e Brooklin | `outro` | média: rede, nenhuma unidade no Itaim |
+| `IFD*AlemaoSp-Itaim` | o emissor escreveu `Itaim` | `trabalho` | alta |
+| Nutricar | o emissor escreveu `SANTANADEPA` | `outro` | alta |
+| Restaurante e Pizzaria | nada — nome genérico | sem marca | — |
+
+> **Os dois maiores da categoria ficam perto de casa, não do trabalho.** Homem de
+> Mello (16 compras) e L.G.A. (13) estão em Perdizes, e o endereço do próprio
+> usuário no boleto do Bradesco é Perdizes. São a padaria e o restaurante do
+> bairro — não almoço de trabalho, e portanto gasto discricionário numa sexta.
+
+> **Rede com várias unidades não se resolve por bairro.** Burdog tem Pacaembu e
+> Brooklin; a marcação diz `outro` porque nenhuma delas é Itaim, mas a confiança
+> é menor que a de um endereço único, e fica registrada como média.
+
+#### A regra de sexta, e o que acontece com o não marcado
+
+```
+sáb, dom                      -> fim_de_semana
+sexta + local = 'outro'       -> fim_de_semana   (jantar, evitável)
+sexta + local = 'trabalho'    -> dia_util        (almoço, inevitável)
+sexta + sem marcação          -> dia_util        (conservador)
+seg a qui                     -> dia_util
+```
+
+Sexta sem marcação cai em `dia_util` de propósito: **o default conservador não
+infla o balde evitável**, que é onde a meta é agressiva. Mas um default não pode
+virar silêncio — a análise devolve quanto dinheiro de sexta ainda está sem
+marcação, para o número ser lido como provisório e não como verdade.
+
+> **A regra de sexta vale só onde o ato é comer fora.** A primeira versão a
+> aplicou a toda categoria segmentada por dia, e o erro apareceu no resultado:
+> um **hotel** (Deville, R$ 398,74, categoria Viagem) e um **iFood**
+> (`ARCOS DOURADOS`, R$ 175,39) entraram na fila de "sexta sem marcação". Em
+> hotel o bairro não diz nada; em delivery o que importa é o endereço de
+> entrega, não o do restaurante. Agora é uma propriedade declarada da categoria,
+> `sexta_por_local`, ligada só em Restaurante e bar — e as pendências caíram de
+> R$ 802,73 para **R$ 228,60**, que é o número honesto.
+
+### Categoria evitável por natureza
+
+Correção do usuário, que vale mais que a regra de dia: *"quando for ifood ou
+hotel, é final de semana, com ctz"*. iFood e hotel não são almoço de trabalho em
+dia nenhum — o dia da semana simplesmente não entra na conta.
+
+Isso é uma propriedade da categoria, `discricionario`, ligada em **Delivery** e
+**Viagem**: tudo nelas cai no balde evitável, qualquer que seja o dia.
+
+> **Daí em diante, `fim_de_semana` quer dizer "evitável", não "sábado e
+> domingo".** O balde passa a conter sábado, domingo, jantar de sexta fora do
+> Itaim e categoria discricionária em qualquer dia — então um iFood de terça
+> aparece ali, e isso está certo. O nome ficou por continuidade; o significado é
+> este.
+
+O efeito é grande, porque move categorias inteiras:
+
+| categoria | antes (dia útil / evitável) | depois |
+|---|---|---|
+| Delivery | 441,04 (3) / 243,47 (5) | **0 / 684,51 (8)** |
+| Viagem | 1.048,54 (2) / 1.105,11 (1) | **0 / 2.153,65 (3)** |
+
+Somando ao fim de semana de Restaurante (R$ 1.858,36), são **R$ 4.696,52** de
+gasto declaradamente evitável em três categorias — e é sobre esse número que a
+meta agressiva faz sentido, não sobre o total da fatura.
+
+#### O efeito medido
+
+A reclassificação move dinheiro real, e exatamente o previsto:
+
+| | antes | depois | delta |
+|---|---|---|---|
+| dia útil | R$ 3.990,11 (66) | R$ 3.291,63 (55) | **−698,48** |
+| fim de semana | R$ 1.159,88 (10) | R$ 1.858,36 (21) | **+698,48** |
+
+São as sextas em Homem de Mello, L.G.A., Burdog e Nutricar — todas fora do
+Itaim. O balde evitável cresceu 60%, e é sobre ele que a meta agressiva passa a
+incidir.
+
+> **O mesmo lugar tem textos diferentes em emissores diferentes**, e a conferência
+> de padrões antes de gravar foi o que revelou: `HOMEMDEMELLO` (16 itens, cru do
+> Itaú) e `HOMEM DE MELLO` (1 item, cru do Bradesco) são a mesma padaria;
+> `L.G.A.ESTUDIOGOURM`, `CAPPTA*L.G.A.ESTUDIO`, `L.G.A.EST-CTGOURM` e
+> `LGAESTUDIOGOURMETCO` são o mesmo restaurante. O casamento é por **substring
+> sobre o texto cru**, e por isso um lugar pode precisar de mais de um padrão.
+
+O corte não é exclusividade de restaurante: **Vestuário 64%** no fim de semana,
+Beleza 55%, Viagem 51%. E não serve em Educação, Filhos, Lazer e Casa, que têm
+**0%** — ali a segmentação só adicionaria uma linha vazia.
+
+Para Supermercado o corte útil é outro: **faixa de ticket**, separando a compra
+grande do mês da reposição (mediana R$ 108,75, 5 compras acima de R$ 200).
+
+### Metas
+
+Por `(categoria, segmento)`, e aceitam duas formas, à escolha em cada linha:
+
+- **`absoluto`** — "restaurante fim de semana: R$ 800/mês". Funciona desde o
+  primeiro mês.
+- **`percentual`** — "−20% sobre a média dos meses anteriores". Se adapta, mas
+  **exige histórico**: com um mês importado a média é o próprio mês e a meta
+  nasce circular. Nesse caso o app mostra a meta como indisponível e diz por quê,
+  em vez de devolver um número que se autoconfirma.
+
+### O que isso muda no motor
+
+| antes | agora |
+|---|---|
+| a IA propunha qualquer coisa sobre qualquer categoria | recebe a alavanca declarada e só pode propor daquele tipo |
+| Saúde recebia sugestões | sai do dossiê |
+| Farmácia recebia conselho genérico | marcada como aguardando o dado item a item |
+| uma meta implícita por categoria | meta explícita por segmento, absoluta ou relativa |
+
+A validação ganha dente novo: sugestão cujo tipo não corresponde à alavanca da
+categoria é **descartada**, do mesmo modo que já se descarta alvo inexistente e
+economia maior que o gasto.
+
 ## O que esta fase deliberadamente não faz
 
 - **Não lança no Mês Atual.** A fatura já entra lá como uma despesa só; duplicar

@@ -578,6 +578,87 @@ def init_db():
         conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ix_fatura_cartao_mes '
                      'ON fatura_cartao(cartao, mes_ref)')
 
+    # A alavanca de economia é propriedade da CATEGORIA, não do lançamento: em
+    # Saúde não há alavanca nenhuma, em Farmácia há de preço mas falta o dado
+    # item a item, em restaurante há de volume só sobre parte do gasto. Declarar
+    # isso é o que impede a IA de propor corte onde não existe decisão.
+    #
+    # Chaveia por NOME porque as categorias de cartão são uma constante em
+    # Python (`cartoes_api.CATEGORIAS`), não linhas de tabela — a tabela
+    # `categoria` guarda as 7 categorias de despesa, que são outra coisa.
+    conn.execute("""
+      CREATE TABLE IF NOT EXISTS categoria_estrategia (
+        categoria     TEXT PRIMARY KEY,
+        alavanca      TEXT NOT NULL DEFAULT 'volume',   -- volume | preco | substituicao | nenhum | requer_detalhe
+        segmentacao   TEXT NOT NULL DEFAULT 'nenhuma',  -- nenhuma | dia_semana | ticket
+        limite_ticket REAL,                             -- corte de `ticket`, quando usado
+        observacao    TEXT,
+        criado_em     TEXT NOT NULL DEFAULT (datetime('now'))
+      )""")
+
+    # Meta por (categoria, segmento). `segmento` vazio = a categoria inteira.
+    # `percentual` precisa de histórico: com um mês só importado a média é o
+    # próprio mês e a meta nasceria circular — quem resolve isso é a API, que
+    # devolve a meta como indisponível em vez de um número que se autoconfirma.
+    conn.execute("""
+      CREATE TABLE IF NOT EXISTS meta_categoria (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        categoria TEXT NOT NULL,
+        segmento  TEXT NOT NULL DEFAULT '',
+        tipo      TEXT NOT NULL DEFAULT 'absoluto',     -- absoluto | percentual
+        valor     REAL NOT NULL,
+        criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(categoria, segmento)
+      )""")
+    # Onde fica o estabelecimento, para separar almoço de trabalho de jantar na
+    # sexta. A fatura NÃO traz bairro — o campo `cidade` traz cidade
+    # (`SAOPAULO` em 158 itens) —, então o lugar é marcado, não inferido.
+    conn.execute("""
+      CREATE TABLE IF NOT EXISTS estabelecimento_local (
+        padrao    TEXT PRIMARY KEY,
+        local     TEXT NOT NULL,                      -- trabalho | outro
+        origem    TEXT NOT NULL DEFAULT 'manual',     -- fatura | pesquisa | ia | manual
+        evidencia TEXT,                               -- o endereço achado, e onde
+        criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+      )""")
+    # `evidencia` nasceu depois: sem ela ninguém sabe, em seis meses, por que
+    # Burdog está marcado como `outro` — e uma marcação sem rastro é palpite
+    # com aparência de dado.
+    cols_el = [r[1] for r in conn.execute('PRAGMA table_info(estabelecimento_local)').fetchall()]
+    if cols_el and 'evidencia' not in cols_el:
+        conn.execute('ALTER TABLE estabelecimento_local ADD COLUMN evidencia TEXT')
+
+    # A regra "sexta perto do trabalho é almoço" só significa algo onde o ato é
+    # COMER FORA. Aplicá-la a toda categoria segmentada por dia foi um erro de
+    # desenho: puxava um hotel (Deville, R$ 398,74) e um iFood para a fila de
+    # "sexta sem marcação", quando em hotel o bairro não diz nada e em delivery
+    # o que importa é o endereço de entrega, não o do restaurante.
+    cols_ce = [r[1] for r in conn.execute('PRAGMA table_info(categoria_estrategia)').fetchall()]
+    if cols_ce and 'sexta_por_local' not in cols_ce:
+        conn.execute('ALTER TABLE categoria_estrategia '
+                     'ADD COLUMN sexta_por_local INTEGER NOT NULL DEFAULT 0')
+        # Ligado uma única vez, aqui, e só onde a distinção almoço/jantar existe.
+        # Fora deste bloco o usuário manda: se ele desligar, fica desligado.
+        conn.execute("UPDATE categoria_estrategia SET sexta_por_local=1 "
+                     "WHERE categoria='Restaurante e bar'")
+
+    # Categoria evitável POR NATUREZA, em qualquer dia: iFood e hotel não são
+    # almoço de trabalho em nenhuma hipótese. Aqui o dia da semana é irrelevante
+    # e tudo cai no balde evitável — decisão do usuário, e editável por ele.
+    if cols_ce and 'discricionario' not in cols_ce:
+        conn.execute('ALTER TABLE categoria_estrategia '
+                     'ADD COLUMN discricionario INTEGER NOT NULL DEFAULT 0')
+        conn.execute("UPDATE categoria_estrategia SET discricionario=1 "
+                     "WHERE categoria IN ('Delivery','Viagem')")
+    # Semeia só o que o PRÓPRIO emissor afirmou: nos itens em que ele escreveu
+    # `Itaim` no campo cidade. É evidência, não palpite — e por isso entra como
+    # origem 'fatura'. O resto fica para a IA propor e o usuário confirmar.
+    conn.execute("""
+      INSERT OR IGNORE INTO estabelecimento_local (padrao, local, origem)
+      SELECT DISTINCT estabelecimento, 'trabalho', 'fatura' FROM fatura_item
+       WHERE cidade IS NOT NULL AND lower(cidade) LIKE '%itaim%'""")
+    _seed_estrategias(conn)
+
     cols_mov = [r[1] for r in conn.execute('PRAGMA table_info(movimento_investimento)').fetchall()]
     for coluna, tipo in (
             ('emissor', 'TEXT'), ('indexador', 'TEXT'), ('ativo', 'TEXT'),
@@ -591,6 +672,60 @@ def init_db():
     _seed_regras_transacao(conn)
     conn.close()
     print(f'[db] initialized at {DB_PATH}')
+
+
+def _seed_estrategias(conn):
+    """Semeia a alavanca de cada categoria uma única vez.
+
+    É uma **proposta**, não um veredito: o usuário edita na tela, e o seed só
+    roda quando a tabela está vazia. Dois valores vêm do que ele disse
+    explicitamente — Saúde não tem alavanca, Farmácia depende do detalhe item a
+    item — e o resto do comportamento medido nas faturas: segmentação por dia da
+    semana onde o fim de semana pesa (Vestuário 64%, Beleza 55%, Viagem 51%,
+    Restaurante 23% mas com ticket dobrado) e nenhuma onde ele é zero (Educação,
+    Filhos, Lazer, Casa).
+    """
+    # `[0]` em vez de `['n']`: esta conexão não necessariamente tem row_factory
+    if conn.execute('SELECT COUNT(*) FROM categoria_estrategia').fetchone()[0]:
+        return
+    # (categoria, alavanca, segmentacao, limite_ticket, observacao)
+    seed = [
+        ('Restaurante e bar', 'volume', 'dia_semana', None,
+         'Dia útil é hábito de 66 compras com ticket R$ 60; fim de semana são 10 '
+         'compras com ticket R$ 116. Metas diferentes.'),
+        ('Delivery', 'volume', 'dia_semana', None, 'Substituível por compra no mercado.'),
+        ('Supermercado', 'preco', 'ticket', 200.0,
+         'Compra grande do mês contra reposição. A alavanca é onde se compra, não quanto.'),
+        ('Farmácia', 'requer_detalhe', 'nenhuma', None,
+         'Não dá para comprar menos. A alavanca é preço e atacado, e exige a nota '
+         'item a item — pedido LGPD em curso.'),
+        ('Saúde', 'nenhum', 'nenhuma', None,
+         'Dentista, Invisalign, clínica: 7 compras, mediana R$ 542. Não há alavanca.'),
+        ('Seguros', 'substituicao', 'nenhuma', None, 'Cotar na renovação, não cortar.'),
+        ('Assinaturas', 'substituicao', 'nenhuma', None,
+         'Plano família, anual em vez de mensal, cancelar o ocioso.'),
+        ('Combustível', 'preco', 'nenhuma', None, 'Posto e forma de pagamento.'),
+        ('Transporte', 'substituicao', 'nenhuma', None, 'App contra carro contra estacionamento.'),
+        ('Vestuário', 'volume', 'dia_semana', None, '64% do gasto cai no fim de semana.'),
+        ('Beleza', 'volume', 'dia_semana', None, '55% no fim de semana.'),
+        ('Viagem', 'volume', 'dia_semana', None, '51% no fim de semana.'),
+        ('Lazer', 'volume', 'nenhuma', None, 'Fim de semana é 0% — segmentar não agrega.'),
+        ('Esporte', 'volume', 'dia_semana', None, None),
+        ('Presentes', 'volume', 'nenhuma', None, None),
+        ('Eletrônicos', 'preco', 'nenhuma', None, None),
+        ('Casa', 'preco', 'nenhuma', None, 'Fim de semana é 0%.'),
+        ('Educação', 'preco', 'nenhuma', None, 'Livro e material dão para comprar mais barato.'),
+        ('Filhos', 'volume', 'nenhuma', None, 'Fim de semana é 0%.'),
+        ('Outros', 'preco', 'nenhuma', None, None),
+        # Estas três não são escolha de ninguém: ficam fora das sugestões.
+        ('Encargos', 'nenhum', 'nenhuma', None, 'IOF, juros e multa não são decisão.'),
+        ('Pagamento', 'nenhum', 'nenhuma', None, 'Quitar a fatura anterior não é consumo.'),
+        ('Não classificado', 'nenhum', 'nenhuma', None, 'Classifique antes de definir alavanca.'),
+    ]
+    conn.executemany(
+        'INSERT OR IGNORE INTO categoria_estrategia '
+        '(categoria, alavanca, segmentacao, limite_ticket, observacao) VALUES (?,?,?,?,?)',
+        seed)
 
 
 def _seed_regras_transacao(conn):

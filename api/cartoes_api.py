@@ -26,6 +26,7 @@ fica em `Não classificado`, visível, em vez de virar um chute invisível.
 import json
 import re
 import unicodedata
+from datetime import date
 
 from flask import Blueprint, jsonify, request
 
@@ -488,10 +489,15 @@ def analise():
         itens = [dict(r) for r in conn.execute(
             'SELECT i.*, f.cartao, f.mes_ref FROM fatura_item i '
             'JOIN fatura_cartao f ON f.id=i.fatura_id WHERE f.mes_ref=?', (mes,)).fetchall()]
+        # `data_compra` entra aqui porque a segmentação por dia da semana
+        # precisa dela também no histórico, para a base da meta percentual
         hist = [dict(r) for r in conn.execute(
-            'SELECT i.categoria, i.estabelecimento, i.valor, f.mes_ref FROM fatura_item i '
-            "JOIN fatura_cartao f ON f.id=i.fatura_id WHERE f.mes_ref<? AND i.secao='lancamento'",
-            (mes,)).fetchall()]
+            'SELECT i.categoria, i.estabelecimento, i.valor, i.data_compra, f.mes_ref '
+            'FROM fatura_item i JOIN fatura_cartao f ON f.id=i.fatura_id '
+            "WHERE f.mes_ref<? AND i.secao='lancamento'", (mes,)).fetchall()]
+        estr = _estrategias(conn)
+        metas_cfg = _metas(conn)
+        locais = _locais(conn)
         meses = [r['mes_ref'] for r in conn.execute(
             'SELECT DISTINCT mes_ref FROM fatura_cartao ORDER BY mes_ref DESC').fetchall()]
         # Quais faturas compõem o mês, e se alguma é extrato **aberto**: valor
@@ -594,7 +600,49 @@ def analise():
         'parcelamentos': parc,
         'total_a_chegar': round(sum(p['resta'] for p in parc), 2),
         'decisao': _decisao(lanc),
+        # A alavanca é da categoria e a decisão é do segmento: almoço de dia
+        # útil e jantar de sábado são o mesmo "Restaurante e bar" e metas
+        # completamente diferentes.
+        'segmentos': _avaliar_segmentos(lanc, hist, estr, metas_cfg,
+                                        n_meses if hist else 0, locais),
+        'estrategias': list(estr.values()),
+        # sexta é o único dia com os dois comportamentos; o que falta marcar
+        # torna o número provisório, e isso tem de aparecer
+        'sextas_pendentes': _sextas_pendentes(lanc, estr, locais),
+        'locais': [dict(r) for r in locais.values()],
     })
+
+
+@bp.route('/cartoes/locais', methods=['POST'])
+def salvar_local():
+    """Marca onde fica um estabelecimento. `local` nulo apaga a marcação.
+
+    Marcar é o que separa almoço de trabalho de jantar numa sexta — a fatura não
+    traz bairro, então esta é a única fonte confiável.
+    """
+    d = request.get_json(force=True) or {}
+    padrao = (d.get('padrao') or '').strip()
+    local = d.get('local')
+    if not padrao:
+        return jsonify({'ok': False, 'msg': 'Estabelecimento é obrigatório'}), 400
+    with db() as conn:
+        if local is None:
+            conn.execute('DELETE FROM estabelecimento_local WHERE padrao=?', (padrao,))
+            return jsonify({'ok': True, 'apagada': True})
+        if local not in ('trabalho', 'outro'):
+            return jsonify({'ok': False, 'msg': f'Local inválido: {local}'}), 400
+        origem = d.get('origem') or 'manual'
+        if origem not in ('fatura', 'pesquisa', 'ia', 'manual'):
+            return jsonify({'ok': False, 'msg': f'Origem inválida: {origem}'}), 400
+        # `evidencia` guarda o endereço achado e de onde veio. Uma marcação sem
+        # rastro não se audita depois, e o usuário não tem como julgar se
+        # confia nela.
+        conn.execute(
+            'INSERT INTO estabelecimento_local (padrao, local, origem, evidencia) '
+            'VALUES (?,?,?,?) ON CONFLICT(padrao) DO UPDATE SET local=excluded.local, '
+            ' origem=excluded.origem, evidencia=excluded.evidencia',
+            (padrao, local, origem, d.get('evidencia')))
+    return jsonify({'ok': True})
 
 
 def _parcelamentos(lanc: list) -> list:
@@ -752,6 +800,11 @@ def _gemini_sugestoes(dossie: dict) -> list:
         'volta quando as parcelas terminarem.\n'
         'Gasto que aconteceu 1 ou 2 vezes no mês é pontual: a economia dele NÃO '
         'se repete todo mês, e o diagnóstico deve dizer isso com clareza.\n'
+        'ATENÇÃO às alavancas: o campo "alavancas" diz, por categoria, que tipo '
+        'de economia existe ali. "volume" só admite sugestão do tipo '
+        '"necessidade" (gastar menos vezes); "preco" e "substituicao" só admitem '
+        '"preco" (mesma coisa mais barata, outro fornecedor, outro plano). '
+        'Propor o tipo errado para a categoria faz a sugestão ser descartada.\n'
         'Priorize o que economiza mais dinheiro com menos sacrifício. '
         'Não sugira cortar saúde, educação ou seguro sem uma alternativa clara '
         'de mesmo serviço por menos. Entre 6 e 12 sugestões.\n\n'
@@ -793,6 +846,8 @@ def _validar_sugestoes(brutas: list, dossie: dict) -> tuple:
     Um conselho com alvo inventado ou economia maior que o próprio gasto é pior
     que nenhum conselho: parece análise e é chute.
     """
+    # a alavanca vem no dossiê, para prompt e validação lerem a mesma fonte
+    alavanca_do = dossie.get('alavancas') or {}
     gasto, perfil = {}, {}
     for e in dossie['por_categoria'] + dossie['por_estabelecimento']:
         gasto[e['nome']] = e['total']
@@ -815,6 +870,19 @@ def _validar_sugestoes(brutas: list, dossie: dict) -> tuple:
             continue
         if not (s.get('diagnostico') or '').strip() or not (s.get('acao') or '').strip():
             recusadas.append({'alvo': alvo, 'motivo': 'sem diagnóstico ou sem ação'})
+            continue
+        # Dente novo da validação: a alavanca é da categoria, então uma sugestão
+        # de cortar frequência numa categoria cujo único caminho é preço não é
+        # conselho, é ruído com cara de análise.
+        alav = alavanca_do.get(alvo)
+        if alav == 'nenhum':
+            recusadas.append({'alvo': alvo, 'motivo': 'categoria sem alavanca de economia'})
+            continue
+        esperado = TIPO_DA_ALAVANCA.get(alav)
+        if esperado and s.get('tipo') != esperado:
+            recusadas.append({'alvo': alvo,
+                              'motivo': f"alavanca da categoria é '{alav}', "
+                                        f"que só admite sugestão de '{esperado}'"})
             continue
         if (s.get('tipo'), alvo) in vistos:
             continue
@@ -871,7 +939,19 @@ def sugestoes():
         media[h['categoria']] = media.get(h['categoria'], 0.0) + (h['valor'] or 0)
     media = {k: v / n_meses for k, v in media.items()}
 
-    dossie = _dossie(itens, _parcelamentos(itens), media)
+    with db() as conn:
+        estr = _estrategias(conn)
+
+    # Categoria sem alavanca não entra no dossiê: a IA não vê, não opina, e o
+    # usuário não gasta atenção lendo sugestão sobre dentista.
+    sem_alavanca = {c for c, e in estr.items() if e['alavanca'] == 'nenhum'}
+    visiveis = [i for i in itens if (i.get('categoria') or '') not in sem_alavanca]
+    aguardando = sorted({(i.get('categoria') or '') for i in itens
+                         if estr.get(i.get('categoria') or '', {}).get('alavanca')
+                         == 'requer_detalhe'})
+
+    dossie = _dossie(visiveis, _parcelamentos(visiveis), media)
+    dossie['alavancas'] = {c: e['alavanca'] for c, e in estr.items()}
     brutas = _gemini_sugestoes(dossie)
     sug, recusadas = _validar_sugestoes(brutas, dossie)
     return jsonify({
@@ -883,4 +963,248 @@ def sugestoes():
         'economia_recorrente_mes': round(sum(s['economia_mes'] or 0 for s in sug), 2),
         'ganho_pontual': round(sum(s['ganho_unico'] or 0 for s in sug), 2),
         'a_liberar_parcelas': round(sum(s['resta_parcelas'] or 0 for s in sug), 2),
+        # o que ficou deliberadamente fora, e por quê — melhor dizer que omitir
+        'sem_alavanca': sorted(sem_alavanca),
+        'aguardando_detalhe': aguardando,
     })
+
+
+# ── estratégia por categoria ──────────────────────────────────────────────────
+#
+# A alavanca autoriza **um** tipo de sugestão, e só ele. Sem este mapa a IA
+# propunha corte de frequência em categoria cujo único caminho é preço.
+TIPO_DA_ALAVANCA = {
+    'volume': 'necessidade',
+    'preco': 'preco',
+    'substituicao': 'preco',
+}
+
+ALAVANCAS = ('volume', 'preco', 'substituicao', 'nenhum', 'requer_detalhe')
+SEGMENTACOES = ('nenhuma', 'dia_semana', 'ticket')
+LIMITE_TICKET_PADRAO = 200.0
+
+
+def _estrategias(conn) -> dict:
+    return {r['categoria']: dict(r)
+            for r in conn.execute('SELECT * FROM categoria_estrategia').fetchall()}
+
+
+def _metas(conn) -> dict:
+    return {(r['categoria'], r['segmento']): dict(r)
+            for r in conn.execute('SELECT * FROM meta_categoria').fetchall()}
+
+
+def _locais(conn) -> dict:
+    """Onde fica cada estabelecimento marcado. Padrão mais longo primeiro.
+
+    A ordem importa: casando por substring, um padrão curto venceria um longo e
+    mais específico — e os textos crus diferem entre emissores (`GLUCCO` no Itaú
+    contra `G LUCCO SAO PAULO` no Bradesco), que é justamente por que o
+    casamento é por substring e não por igualdade.
+    """
+    rs = conn.execute(
+        'SELECT padrao, local, origem, evidencia FROM estabelecimento_local').fetchall()
+    return {r['padrao']: dict(r)
+            for r in sorted(rs, key=lambda r: -len(r['padrao'] or ''))}
+
+
+def _local_do(estab: str, locais: dict):
+    alvo = _sem_acento(estab)
+    for padrao, r in locais.items():
+        if _sem_acento(padrao) in alvo:
+            return r['local']
+    return None
+
+
+def _segmento(item: dict, estr: dict, locais: dict = None) -> str:
+    """Em que segmento da categoria este lançamento cai.
+
+    Vazio quando a categoria não é segmentada, e aí a meta vale para ela inteira.
+
+    Sexta é o caso difícil, e o único dia que contém os dois comportamentos:
+    almoço de trabalho, que não se evita, e jantar, que se evita. O critério é o
+    **lugar** — perto do Itaim Bibi é almoço; fora dali, numa sexta, é jantar, e
+    jantar conta no balde do fim de semana.
+
+    Sexta **sem marcação** cai em `dia_util` de propósito: o default conservador
+    não infla o balde evitável, onde a meta é agressiva. Quem conta quanto ainda
+    está sem marcar é `_sextas_pendentes`, para o número ser lido como
+    provisório.
+    """
+    e = estr.get(item.get('categoria') or '')
+    if not e:
+        return ''
+    # Evitável por natureza: iFood e hotel não são almoço de trabalho em dia
+    # nenhum, então o dia da semana não entra na conta.
+    if e.get('discricionario'):
+        return 'fim_de_semana'
+    if e.get('segmentacao') == 'dia_semana':
+        d = item.get('data_compra')
+        if not d:
+            return ''
+        wd = date.fromisoformat(d).weekday()
+        if wd >= 5:
+            return 'fim_de_semana'
+        # Só onde o ato é comer fora. Em hotel o bairro não diz nada, e em
+        # delivery o que importa é o endereço de entrega, não o do restaurante.
+        if (wd == 4 and e.get('sexta_por_local')
+                and _local_do(item.get('estabelecimento') or '', locais or {}) == 'outro'):
+            return 'fim_de_semana'
+        return 'dia_util'
+    if e.get('segmentacao') == 'ticket':
+        lim = e.get('limite_ticket') or LIMITE_TICKET_PADRAO
+        return 'grande' if (item.get('valor') or 0) >= lim else 'pequeno'
+    return ''
+
+
+def _sextas_pendentes(lanc: list, estr: dict, locais: dict) -> dict:
+    """Quanto de sexta ainda está sem marcação de lugar.
+
+    O default conservador manda a sexta não marcada para `dia_util`, o que está
+    certo como default e errado como silêncio: sem este número o usuário leria
+    como definitivo um valor que uma marcação pode mover de balde.
+    """
+    pend = {}
+    for i in lanc:
+        e = estr.get(i.get('categoria') or '')
+        # pendência só existe onde a marcação muda alguma coisa
+        if (not e or e.get('segmentacao') != 'dia_semana'
+                or not e.get('sexta_por_local') or not i.get('data_compra')):
+            continue
+        if date.fromisoformat(i['data_compra']).weekday() != 4:
+            continue
+        if _local_do(i.get('estabelecimento') or '', locais):
+            continue
+        k = i.get('estabelecimento_norm') or i['estabelecimento']
+        r = pend.setdefault(k, {'estabelecimento': k, 'bruto': i['estabelecimento'],
+                                'categoria': i.get('categoria'), 'n': 0, 'valor': 0.0})
+        r['n'] += 1
+        r['valor'] += i['valor'] or 0
+    itens = sorted(({**r, 'valor': round(r['valor'], 2)} for r in pend.values()),
+                   key=lambda x: -x['valor'])
+    return {'itens': itens, 'n': sum(r['n'] for r in itens),
+            'valor': round(sum(r['valor'] for r in itens), 2)}
+
+
+def _avaliar_segmentos(lanc: list, hist: list, estr: dict, metas: dict,
+                       n_meses_hist: int, locais: dict = None) -> list:
+    """Realizado por (categoria, segmento), com a meta ao lado.
+
+    A meta percentual **não é calculada sem histórico**: com um mês importado a
+    média é o próprio mês e a meta se autoconfirmaria. Nesse caso devolve o
+    motivo em vez de um número — mesma regra do resto da tela, onde um número
+    que não se sustenta é pior que nenhum.
+    """
+    atual = {}
+    for i in lanc:
+        cat = i.get('categoria') or '—'
+        k = (cat, _segmento(i, estr, locais))
+        e = atual.setdefault(k, {'categoria': cat, 'segmento': k[1], 'n': 0, 'valor': 0.0})
+        e['n'] += 1
+        e['valor'] += i['valor'] or 0
+
+    base = {}
+    for h in hist:
+        k = (h.get('categoria') or '—', _segmento(h, estr, locais))
+        base[k] = base.get(k, 0.0) + (h['valor'] or 0)
+
+    saida = []
+    for k, e in atual.items():
+        cat, seg = k
+        est = estr.get(cat) or {}
+        # meta do segmento; se não houver, a da categoria inteira
+        m = metas.get(k) or (metas.get((cat, '')) if seg else None)
+        meta_valor = motivo = None
+        if m:
+            if m['tipo'] == 'absoluto':
+                meta_valor = m['valor']
+            elif n_meses_hist:
+                media = base.get(k, 0.0) / n_meses_hist
+                meta_valor = round(media * (1 - (m['valor'] or 0) / 100.0), 2)
+            else:
+                motivo = ('meta percentual precisa de histórico: só há um mês '
+                          'importado, e a média seria o próprio mês')
+        valor = round(e['valor'], 2)
+        saida.append({
+            'categoria': cat, 'segmento': seg, 'n': e['n'], 'valor': valor,
+            'ticket_medio': round(valor / e['n'], 2) if e['n'] else 0,
+            'alavanca': est.get('alavanca', 'volume'),
+            'segmentacao': est.get('segmentacao', 'nenhuma'),
+            'observacao': est.get('observacao'),
+            'meta_tipo': m['tipo'] if m else None,
+            'meta_bruta': m['valor'] if m else None,
+            'meta_valor': meta_valor,
+            'meta_indisponivel': motivo,
+            'excedeu': (round(valor - meta_valor, 2)
+                        if meta_valor is not None and valor > meta_valor else None),
+        })
+    saida.sort(key=lambda x: -x['valor'])
+    return saida
+
+
+@bp.route('/cartoes/estrategias')
+def estrategias():
+    with db() as conn:
+        estr = _estrategias(conn)
+    return jsonify({'ok': True, 'estrategias': list(estr.values()),
+                    'categorias': CATEGORIAS, 'alavancas': list(ALAVANCAS),
+                    'segmentacoes': list(SEGMENTACOES),
+                    'tipo_da_alavanca': TIPO_DA_ALAVANCA})
+
+
+@bp.route('/cartoes/estrategias', methods=['POST'])
+def salvar_estrategia():
+    d = request.get_json(force=True) or {}
+    cat = (d.get('categoria') or '').strip()
+    alav = d.get('alavanca')
+    seg = d.get('segmentacao') or 'nenhuma'
+    if not cat:
+        return jsonify({'ok': False, 'msg': 'Categoria é obrigatória'}), 400
+    if alav not in ALAVANCAS:
+        return jsonify({'ok': False, 'msg': f'Alavanca inválida: {alav}'}), 400
+    if seg not in SEGMENTACOES:
+        return jsonify({'ok': False, 'msg': f'Segmentação inválida: {seg}'}), 400
+    lim = d.get('limite_ticket')
+    # `sexta_por_local` só faz sentido junto de `dia_semana`: fora dali a
+    # marcação de lugar não reclassifica nada.
+    sexta = 1 if (d.get('sexta_por_local') and seg == 'dia_semana') else 0
+    disc = 1 if d.get('discricionario') else 0
+    with db() as conn:
+        conn.execute(
+            'INSERT INTO categoria_estrategia '
+            '(categoria, alavanca, segmentacao, limite_ticket, observacao, '
+            ' sexta_por_local, discricionario) VALUES (?,?,?,?,?,?,?) '
+            'ON CONFLICT(categoria) DO UPDATE SET alavanca=excluded.alavanca, '
+            ' segmentacao=excluded.segmentacao, limite_ticket=excluded.limite_ticket, '
+            ' observacao=excluded.observacao, sexta_por_local=excluded.sexta_por_local, '
+            ' discricionario=excluded.discricionario',
+            (cat, alav, seg, lim, d.get('observacao'), sexta, disc))
+    return jsonify({'ok': True})
+
+
+@bp.route('/cartoes/metas', methods=['POST'])
+def salvar_meta():
+    """Grava a meta de um (categoria, segmento). `valor` nulo apaga."""
+    d = request.get_json(force=True) or {}
+    cat = (d.get('categoria') or '').strip()
+    seg = d.get('segmento') or ''
+    tipo = d.get('tipo') or 'absoluto'
+    valor = d.get('valor')
+    if not cat:
+        return jsonify({'ok': False, 'msg': 'Categoria é obrigatória'}), 400
+    if tipo not in ('absoluto', 'percentual'):
+        return jsonify({'ok': False, 'msg': f'Tipo inválido: {tipo}'}), 400
+    with db() as conn:
+        if valor is None:
+            conn.execute('DELETE FROM meta_categoria WHERE categoria=? AND segmento=?',
+                         (cat, seg))
+            return jsonify({'ok': True, 'apagada': True})
+        if tipo == 'percentual' and not (0 < float(valor) < 100):
+            return jsonify({'ok': False,
+                            'msg': 'Meta percentual é o corte desejado, entre 0 e 100'}), 400
+        conn.execute(
+            'INSERT INTO meta_categoria (categoria, segmento, tipo, valor) VALUES (?,?,?,?) '
+            'ON CONFLICT(categoria, segmento) DO UPDATE SET tipo=excluded.tipo, '
+            ' valor=excluded.valor',
+            (cat, seg, tipo, float(valor)))
+    return jsonify({'ok': True})

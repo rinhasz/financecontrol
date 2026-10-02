@@ -47,6 +47,28 @@ interface Decisao {
   parcela_antiga: number; parcela_antiga_n: number
 }
 
+/** Realizado de um (categoria, segmento), com a meta ao lado.
+ *
+ *  A alavanca é da categoria e a decisão é do segmento: almoço de dia útil e
+ *  jantar de sábado são o mesmo "Restaurante e bar" e metas completamente
+ *  diferentes — 66 compras de ticket R$ 60 contra 10 de ticket R$ 116.
+ */
+interface Segmento {
+  categoria: string
+  segmento: string
+  n: number
+  valor: number
+  ticket_medio: number
+  alavanca: string
+  segmentacao: string
+  observacao: string | null
+  meta_tipo: string | null
+  meta_bruta: number | null
+  meta_valor: number | null
+  meta_indisponivel: string | null
+  excedeu: number | null
+}
+
 interface FaturaResumo {
   cartao: string
   emissor: string | null
@@ -69,6 +91,7 @@ interface Analise {
   total_encargos: number
   total_a_chegar: number
   decisao: Decisao
+  segmentos: Segmento[]
   parcelamentos: Parcelamento[]
   por_categoria: Grupo[]
   por_estabelecimento: Grupo[]
@@ -99,6 +122,8 @@ interface Sugestoes {
   economia_recorrente_mes: number
   ganho_pontual: number
   a_liberar_parcelas: number
+  sem_alavanca: string[]
+  aguardando_detalhe: string[]
 }
 
 interface Conferencia {
@@ -500,6 +525,8 @@ function AbaAnalise({ analise, itens, carregando }: {
         </div>
       </section>
 
+      <SecaoSegmentos segmentos={analise.segmentos || []} />
+
       <section>
         <h2 className="text-sm font-medium mb-2">
           Onde estou gastando <span className="text-xs text-zinc-500 font-normal">— clique para abrir</span>
@@ -660,6 +687,77 @@ function AbaAnalise({ analise, itens, carregando }: {
   )
 }
 
+/** A alavanca de cada categoria, e o que ela autoriza. */
+const ALAVANCAS: Record<string, { label: string; cor: string; ajuda: string }> = {
+  volume: { label: 'volume', cor: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+    ajuda: 'Dá para gastar menos vezes.' },
+  preco: { label: 'preço', cor: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    ajuda: 'Mesma coisa, mais barata.' },
+  substituicao: { label: 'substituição', cor: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+    ajuda: 'Trocar de fornecedor ou de plano.' },
+  nenhum: { label: 'sem alavanca', cor: 'bg-zinc-700/40 text-zinc-400 border-zinc-600',
+    ajuda: 'Não há o que cortar aqui — a categoria sai das sugestões.' },
+  requer_detalhe: { label: 'aguarda detalhe', cor: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    ajuda: 'A alavanca existe, mas depende do dado item a item da nota.' }
+}
+
+const SEGMENTO_LABEL: Record<string, string> = {
+  dia_util: 'dia útil', fim_de_semana: 'fim de semana',
+  grande: 'compra grande', pequeno: 'reposição'
+}
+
+function SecaoSegmentos({ segmentos }: { segmentos: Segmento[] }): JSX.Element {
+  if (!segmentos.length) return <div />
+  const max = Math.max(1, ...segmentos.map(s => s.valor))
+  return (
+    <section>
+      <h2 className="text-sm font-medium">Onde gastei, por estratégia</h2>
+      <p className="text-xs text-zinc-500 mb-2">
+        A alavanca é da categoria; a decisão é do segmento. Almoço de dia útil e jantar
+        de sábado são a mesma categoria e metas diferentes.
+      </p>
+      <div className="space-y-1">
+        {segmentos.map((s, n) => {
+          const a = ALAVANCAS[s.alavanca] || ALAVANCAS.volume
+          return (
+            <div key={n} className="flex items-center gap-2 text-sm">
+              <span className="w-40 shrink-0 truncate text-zinc-300" title={s.observacao || ''}>
+                {s.categoria}
+              </span>
+              <span className="w-24 shrink-0 text-xs text-zinc-500">
+                {s.segmento ? SEGMENTO_LABEL[s.segmento] || s.segmento : ''}
+              </span>
+              <span className={cn('shrink-0 text-xs px-1.5 py-0.5 rounded border', a.cor)}
+                    title={a.ajuda}>{a.label}</span>
+              <div className="flex-1 h-4 bg-zinc-900 rounded overflow-hidden">
+                <div className={cn('h-full', s.excedeu ? 'bg-rose-600/60' : 'bg-sky-600/60')}
+                     style={{ width: `${(s.valor / max) * 100}%` }} />
+              </div>
+              <span className="w-10 text-right text-xs text-zinc-600">{s.n}x</span>
+              <span className="w-20 text-right text-xs text-zinc-500 tabular-nums">
+                méd {formatBRL(s.ticket_medio)}
+              </span>
+              <span className="w-24 text-right tabular-nums">{formatBRL(s.valor)}</span>
+              {/* meta: número só quando se sustenta. Percentual sem histórico
+                  mostra o motivo, nunca uma média que é o próprio mês. */}
+              <span className="w-32 text-right text-xs tabular-nums">
+                {s.meta_indisponivel ? (
+                  <span className="text-zinc-600" title={s.meta_indisponivel}>meta s/ base</span>
+                ) : s.meta_valor !== null ? (
+                  <span className={s.excedeu ? 'text-rose-400' : 'text-emerald-400'}>
+                    meta {formatBRL(s.meta_valor)}
+                    {s.excedeu ? ` (+${formatBRL(s.excedeu)})` : ' ✓'}
+                  </span>
+                ) : <span className="text-zinc-700">sem meta</span>}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 /* ── onde economizar ─────────────────────────────────────────────────────── */
 
 function AbaEconomizar({ sug, carregando, onAtualizar }: {
@@ -714,6 +812,29 @@ function AbaEconomizar({ sug, carregando, onAtualizar }: {
           própria fatura, não medido entre meses. Importe outra fatura e a distinção entre
           hábito e evento fica muito mais firme.
         </p>
+      )}
+
+      {/* Dizer o que ficou de fora é parte do conselho. Saúde não recebe
+          sugestão porque não há alavanca — 7 compras, mediana R$ 542, dentista
+          e clínica —, e omitir isso em silêncio pareceria esquecimento. */}
+      {(!!(sug.sem_alavanca || []).length || !!(sug.aguardando_detalhe || []).length) && (
+        <section className="text-sm space-y-1">
+          <h2 className="font-medium">O que ficou fora, e por quê</h2>
+          {!!(sug.sem_alavanca || []).length && (
+            <p className="text-zinc-400">
+              <span className="text-zinc-300">Sem alavanca de economia:</span>{' '}
+              {sug.sem_alavanca.join(', ')} — não há o que cortar nem onde trocar,
+              então não entram no dossiê.
+            </p>
+          )}
+          {!!(sug.aguardando_detalhe || []).length && (
+            <p className="text-zinc-400">
+              <span className="text-amber-300">Aguardando o detalhe item a item:</span>{' '}
+              {sug.aguardando_detalhe.join(', ')} — a alavanca é de preço (atacado,
+              genérico, outra rede), e exercê-la exige saber <em>quais produtos</em>.
+            </p>
+          )}
+        </section>
       )}
 
       {(['necessidade', 'preco'] as const).map(tipo => {

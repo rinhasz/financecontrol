@@ -159,6 +159,16 @@ export const api = {
     // monta o dossiê e pede conselho à IA: passa dos 20s padrão com folga
     sugestoes: (mesRef?: string) =>
       get('/api/cartoes/sugestoes' + (mesRef ? `?mes_ref=${mesRef}` : ''), 180_000),
+    // a alavanca de economia de cada categoria, e as metas por segmento
+    estrategias: () => get('/api/cartoes/estrategias'),
+    salvarEstrategia: (e: {
+      categoria: string; alavanca: string; segmentacao: string
+      limite_ticket?: number | null; observacao?: string | null
+    }) => post('/api/cartoes/estrategias', e),
+    // valor null apaga a meta
+    salvarMeta: (m: {
+      categoria: string; segmento: string; tipo: string; valor: number | null
+    }) => post('/api/cartoes/metas', m),
     // corrigir a categoria ensina uma regra que vale nas próximas faturas
     recategorizar: (id: number, categoria: string, aprender = true) =>
       post(`/api/cartoes/itens/${id}/categoria`, { categoria, aprender })
