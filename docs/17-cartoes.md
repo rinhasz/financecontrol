@@ -939,6 +939,37 @@ E as táticas acompanham o par (alavanca, segmento), porque *"levar marmita 1 ve
 por semana"* e *"cortar 1 saída a cada 3"* são a mesma alavanca (`volume`) e
 ações diferentes — daí a tática morar no segmento, não na categoria.
 
+### "Manter como está" é uma decisão, não a ausência de uma
+
+Pedido do usuário, e a distinção é fina e importante: **decidir não cortar não é
+o mesmo que não ter decidido.** A opção entra em **toda** lista de tática, por
+último — é saída de escape, não sugestão — e vale **0%**.
+
+Isso tem três consequências, e as três são o motivo de valer a pena:
+
+| estado | `meta_bruta` | no orçamento | no "potencial" |
+|---|---|---|---|
+| sem meta | `null` | não entra | **entra** — é economia não aproveitada |
+| mantido | `0` | não entra | **não entra** — você já decidiu |
+| meta de N% | `N` | entra | não entra |
+
+A linha mantida sai do potencial de propósito: continuar cobrando uma economia
+que o usuário já recusou é o jeito mais rápido de a tela perder credibilidade.
+
+> Gravar 0% exigiu afrouxar a validação, que recusava `percentual` fora de
+> `0 < v < 100`. Sem isso "manter como está" seria indistinguível de "não
+> decidi" — e o estado mais informativo da tela seria justamente o impossível
+> de salvar.
+
+### Ordenação: sempre do maior para o menor
+
+Vale para todas as listas da tela. A que estava errada era a de **faturas do
+mês**, em ordem alfabética (`ORDER BY cartao`), e a correção tem uma sutileza:
+ordena-se pelo **valor que aparece na linha**, não pelo total da fatura. No
+extrato aberto a tela mostra o consumo do período (R$ 706,99), não o total com
+saldo anterior (R$ 5.016,24) — ordenar pelo total deixaria a lista visivelmente
+fora de ordem em relação ao que se lê.
+
 ### O orçamento soma só o que foi cravado
 
 O total no cabeçalho conta **apenas as metas que o usuário gravou**. O que ainda

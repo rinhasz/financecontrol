@@ -624,6 +624,11 @@ const SEGMENTO_LABEL: Record<string, string> = {
   grande: 'compra grande', pequeno: 'reposição'
 }
 
+/** Decidir não cortar também é decidir: vale 0%, e é isso que a distingue de
+ *  "ainda não decidi". A string tem de ser idêntica à do servidor
+ *  (`cartoes_api.TATICA_MANTER`), que a inclui em toda lista de tática. */
+const TATICA_MANTER = 'Manter como está'
+
 /** Onde gastei e onde cortar, numa coisa só.
  *
  *  Só aparecem categorias com alavanca: Saúde, Encargos e Pagamento saem porque
@@ -726,6 +731,8 @@ function SecaoEconomia({ segmentos, itens, onSalvarMeta }: {
           const podeJuntar = rs.length > 1
           const estaJunta = juntas.has(s.categoria)
           const pct = pctDe(s)
+          // decisão de não cortar: 0% gravado, diferente de não ter meta
+          const mantido = s.meta_bruta === 0
           const its = itens.filter(i =>
             i.secao === 'lancamento' && (i.categoria || '—') === s.categoria
             && (!s.segmento || (i.segmento || '') === s.segmento))
@@ -774,10 +781,18 @@ function SecaoEconomia({ segmentos, itens, onSalvarMeta }: {
                 {/* tática: combo, com as opções da alavanca daquele segmento */}
                 <select
                   value={s.tatica || ''}
-                  onChange={e => onSalvarMeta(s, pct, e.target.value || null)}
+                  onChange={e => {
+                    const t = e.target.value
+                    // "manter como está" crava 0%; qualquer outra tática volta
+                    // ao % vigente, ou à sugestão se o vigente era zero
+                    const p = t === TATICA_MANTER ? 0
+                      : (s.meta_bruta && s.meta_bruta > 0 ? s.meta_bruta : s.corte_sugerido)
+                    onSalvarMeta(s, p, t || null)
+                  }}
                   className={cn('w-52 shrink-0 bg-transparent border rounded px-1 py-0.5 text-xs',
-                    s.tatica_salva ? 'border-emerald-600/40 text-emerald-300'
-                      : 'border-zinc-800 text-zinc-400')}
+                    mantido ? 'border-zinc-700 text-zinc-400'
+                      : s.tatica_salva ? 'border-emerald-600/40 text-emerald-300'
+                        : 'border-zinc-800 text-zinc-400')}
                   title={s.tatica_salva ? 'tática que você escolheu' : 'sugestão — escolha para gravar'}
                 >
                   {!s.taticas.includes(s.tatica || '') && (
@@ -794,8 +809,9 @@ function SecaoEconomia({ segmentos, itens, onSalvarMeta }: {
                     onBlur={() => {
                       const v = parseFloat((draft[k] ?? '').replace(',', '.'))
                       setDraft(p => { const n = { ...p }; delete n[k]; return n })
-                      if (!isNaN(v) && v > 0 && v < 100 && v !== s.meta_bruta) {
-                        onSalvarMeta(s, v, s.tatica)
+                      // `>= 0` porque 0 é decisão válida: manter como está
+                      if (!isNaN(v) && v >= 0 && v < 100 && v !== s.meta_bruta) {
+                        onSalvarMeta(s, v, v === 0 ? TATICA_MANTER : s.tatica)
                       }
                     }}
                     onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -811,7 +827,11 @@ function SecaoEconomia({ segmentos, itens, onSalvarMeta }: {
 
                 {/* o que a meta vira em reais, e sobre que base */}
                 <span className="w-36 shrink-0 text-right text-xs tabular-nums">
-                  {s.meta_valor !== null ? (
+                  {mantido ? (
+                    <span className="text-zinc-400" title="você decidiu não cortar esta linha">
+                      mantido
+                    </span>
+                  ) : s.meta_valor !== null ? (
                     <span className={s.meta_bruta !== null ? 'text-emerald-400' : 'text-zinc-600'}>
                       {formatBRL(s.meta_valor)}
                       {s.economia ? <span className="text-zinc-500"> (−{formatBRL(s.economia)})</span> : null}

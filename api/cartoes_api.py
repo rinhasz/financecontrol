@@ -520,10 +520,14 @@ def analise():
         # R$ 4.309,25 são saldo anterior que o PDF não detalha — só os R$ 706,99
         # de consumo entram na análise. Mostrar 5.016,24 na tabela enquanto a
         # análise conta 706,99 seria um total que não reconcilia.
+        # Ordenado pelo valor QUE APARECE na linha — no extrato aberto a tela
+        # mostra o consumo, não o total da fatura, e ordenar pelo total deixaria
+        # a lista visivelmente fora de ordem.
         faturas = [dict(r) for r in conn.execute(
             'SELECT cartao, emissor, situacao, data_vencimento, data_extrato, '
-            ' total_fatura, total_lancamentos FROM fatura_cartao '
-            'WHERE mes_ref=? ORDER BY cartao', (mes,)).fetchall()]
+            ' total_fatura, total_lancamentos FROM fatura_cartao WHERE mes_ref=? '
+            "ORDER BY CASE WHEN situacao='aberta' THEN total_lancamentos "
+            '            ELSE total_fatura END DESC', (mes,)).fetchall()]
 
     lanc = [i for i in itens if i['secao'] == 'lancamento']
     fut = [i for i in itens if i['secao'] == 'proxima_fatura']
@@ -1150,6 +1154,11 @@ TATICAS = {
 }
 
 
+# Decidir não cortar também é decidir. Entra em TODA lista de tática, sempre,
+# e vale 0% — o que a distingue de "ainda não decidi".
+TATICA_MANTER = 'Manter como está'
+
+
 def _sugestao_de_corte(categoria: str, alavanca: str, segmento: str):
     """Quanto cortar, e como — como ponto de partida editável."""
     pct = CORTE_POR_CATEGORIA.get(categoria)
@@ -1157,8 +1166,10 @@ def _sugestao_de_corte(categoria: str, alavanca: str, segmento: str):
         pct = CORTE_SUGERIDO.get((alavanca, segmento))
         if pct is None:
             pct = CORTE_SUGERIDO.get((alavanca, None), 0)
-    taticas = (TATICAS.get((alavanca, segmento))
-               or TATICAS.get((alavanca, None)) or [])
+    taticas = list(TATICAS.get((alavanca, segmento))
+                   or TATICAS.get((alavanca, None)) or [])
+    # por último: é a saída de escape, não a sugestão
+    taticas.append(TATICA_MANTER)
     return pct, taticas
 
 
@@ -1295,9 +1306,12 @@ def salvar_meta():
             conn.execute('DELETE FROM meta_categoria WHERE categoria=? AND segmento=?',
                          (cat, seg))
             return jsonify({'ok': True, 'apagada': True})
-        if tipo == 'percentual' and not (0 < float(valor) < 100):
+        # Zero é permitido de propósito: "manter como está" é uma DECISÃO, e
+        # precisa ser gravável. Sem isso ela ficaria indistinguível de não ter
+        # decidido nada — que é outra coisa.
+        if tipo == 'percentual' and not (0 <= float(valor) < 100):
             return jsonify({'ok': False,
-                            'msg': 'Meta percentual é o corte desejado, entre 0 e 100'}), 400
+                            'msg': 'Meta percentual é o corte desejado, de 0 a 100'}), 400
         conn.execute(
             'INSERT INTO meta_categoria (categoria, segmento, tipo, valor, tatica) '
             'VALUES (?,?,?,?,?) '
