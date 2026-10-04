@@ -17,3 +17,4 @@ verdade que o app consulta é o banco.
 | `conta@safra.com.br` | parcela wey |
 | `nao-responder@mercadopago.com.br` | Cartao Mercado Pago |
 | `no-reply@mercadopago.com.br` | Cartao Mercado Pago |
+| `rafael.inhasz@icloud.com` | cartao porto |
