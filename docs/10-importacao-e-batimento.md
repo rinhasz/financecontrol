@@ -136,6 +136,51 @@ têm seção de futuros e trazem só o que já foi lançado.
 > Reimportar o mesmo arquivo com a regra nova corrigiu as cinco para efetivadas,
 > as três despesas para pagas, e preservou as 42 associações.
 
+### O saldo: pela data, mas só dentro dos realizados
+
+Parece contradizer a regra acima — e não contradiz. São perguntas diferentes:
+**"isto já debitou?"** se responde pela *seção*; **"isto já está dentro do
+saldo?"** se responde pela *data*. O saldo precisa das duas.
+
+O Itaú fecha cada dia com `SALDO TOTAL DISPONÍVEL DIA`, mas imprime **abaixo**
+dessa linha lançamentos do mesmo dia que o fechamento **já reflete**. E num
+extrato de domingo o banco estampa com a data do próximo dia útil tanto o que
+já debitou hoje quanto o que só vai sair.
+
+Extrato real de domingo 04/10/2026:
+
+```
+01/10  PAG BOLETO CCM ...             -510,00
+01/10  SALDO TOTAL DISPONÍVEL DIA              4.955,34   <- fechamento
+01/10  CARTAO ITAU THE ONE         -20.323,67             <- MESMA data:
+01/10  INT PERS BLACK               -5.166,19             <- já está dentro
+01/10  ITAU VISA 0703-7489          -1.166,61             <- do 4.955,34
+05/10  PIX QRS BOM NEGOCIO03/10        -48,09             <- posterior: soma
+05/10  PIX QRS MERCADO PAG04/10       -216,74             <- soma
+05/10  RESGATE COFRINHOS             2.924,95             <- soma
+lançamentos / saídas futuras                              <- corte
+05/10  PAG TIT 662992535000         -5.197,31             <- NÃO debitou
+                                             7.615,46     <- saldo correto
+```
+
+Somar por **posição** — tudo que vem depois da linha de saldo — dava
+**−19.041,01**: as três faturas de cartão de 01/10 contadas duas vezes. O
+correto é 4.955,34 + (−48,09 − 216,74 + 2.924,95) = **7.615,46**.
+
+| condição | o que exclui |
+|---|---|
+| data **estritamente** posterior ao fechamento | o lançamento do próprio dia, já embutido no saldo |
+| parar no marcador "lançamentos futuros" | o agendado, que ainda não saiu da conta |
+
+> **A data devolvida nunca é futura.** O que já saiu hoje vem rotulado com o
+> próximo dia útil, e gravar `saldo_data = 05/10` faria a linha do tempo do
+> resgate (doc 15) começar amanhã, pulando hoje. Fica no máximo em hoje.
+
+Conferido nos três extratos baixados no mesmo domingo: o de 18:00, que ainda não
+tinha o PIX do Mercado Pago nem o resgate, dá 4.907,25; os de 18:28 e 18:39 dão
+7.615,46. O critério é a data dentro dos realizados, não o arquivo. E nos 18
+extratos anteriores nada mudou — o de 30/09 segue devolvendo 41.186,37.
+
 ---
 
 ## Importação substitui o período (reimportar é o fluxo normal)

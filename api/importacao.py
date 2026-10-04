@@ -211,18 +211,37 @@ def _extrair_saldo(rows):
     saldo de ontem: os movimentos de hoje já aparecem e ainda não têm linha de
     saldo fechando.
 
-    Então o saldo é o último fechamento **mais** o que veio depois dele:
+    Então o saldo é o último fechamento **mais** o que veio depois dele — e
+    "depois" é por **data**, não por posição na planilha. São duas condições, e
+    as duas são necessárias:
 
-        21/08  PIX ...            -272,50
-        21/08  SALDO DO DIA                 -111,21   <- último fechamento
-        22/08  PIX ...             -50,00              <- ainda sem fechamento
-                                             -161,21   <- saldo de verdade
+        01/10  PAG BOLETO ...      -510,00
+        01/10  SALDO DO DIA                4.955,34   <- último fechamento
+        01/10  CARTAO ITAU THE ONE -20.323,67         <- (1) MESMA data: já está
+        01/10  INT PERS BLACK       -5.166,19         <-     dentro do saldo
+        01/10  ITAU VISA            -1.166,61         <-     acima. NÃO soma.
+        05/10  PIX QRS ...             -48,09         <- data posterior: soma
+        05/10  PIX QRS ...            -216,74         <- soma
+        05/10  RESGATE COFRINHOS    2.924,95          <- soma
+        lançamentos / saídas futuras                  <- (2) daqui em diante
+        05/10  PAG TIT ...          -5.197,31         <-     ainda não debitou
+                                    7.615,46          <- saldo de verdade
+
+    **(1) Data, não posição.** O extrato imprime abaixo do fechamento do dia
+    lançamentos daquele mesmo dia que o fechamento já reflete. Somá-los conta o
+    mesmo dinheiro duas vezes: foi o que levou o saldo a −19.041,01 quando o
+    correto era 7.615,46.
+
+    **(2) Só a seção de realizados.** Num extrato de domingo o banco estampa
+    com a data do próximo dia útil (05/10) tanto o que já debitou hoje quanto o
+    que só vai sair — a data é a mesma nos dois, e o que os separa é a seção.
+    Por isso o corte é a marca "lançamentos futuros", nunca a data.
 
     Ler só o último fechamento deixaria a calculadora um dia atrasada, e um dia
     de movimento pode ser justamente o que decide quanto resgatar.
 
-    Para de contar na marca "lançamentos futuros": dali em diante são
-    agendamentos, que ainda não saíram da conta.
+    A data devolvida nunca é futura: o banco rotula de 05/10 o que já saiu hoje,
+    e "saldo em 05/10" leria como promessa. Fica no máximo em hoje.
     """
     from datetime import datetime as _dt, date as _date
 
@@ -264,13 +283,25 @@ def _extrair_saldo(rows):
             continue
 
         movimento = _numero(row, 'valor')
-        if movimento is not None and saldo_valor is not None:
-            posteriores += movimento
-            data_posterior = _data_da(row) or data_posterior
+        if movimento is None or saldo_valor is None:
+            continue
+        data_mov = _data_da(row)
+        # Posterior por DATA. Lançamento com a data do próprio fechamento,
+        # impresso abaixo dele, já está dentro do saldo — somá-lo conta o mesmo
+        # dinheiro duas vezes.
+        if not data_mov or data_mov <= saldo_data:
+            continue
+        posteriores += movimento
+        data_posterior = max(data_posterior, data_mov) if data_posterior else data_mov
 
     if saldo_valor is None:
         return None, None
-    return (data_posterior or saldo_data), round(saldo_valor + posteriores, 2)
+    # A data nunca é futura: o que já debitou hoje vem estampado com o próximo
+    # dia útil, e devolver essa data faria a linha do tempo do resgate começar
+    # amanhã, pulando hoje.
+    data_ref = max(saldo_data, data_posterior) if data_posterior else saldo_data
+    hoje = _date.today().isoformat()
+    return (min(data_ref, hoje), round(saldo_valor + posteriores, 2))
 
 
 def parse_excel_content(content: bytes, ext: str):
