@@ -10,7 +10,7 @@ import msal
 import requests
 from flask import Blueprint, jsonify, request
 
-from .db import get_db, parse_number
+from .db import get_db, parse_number, get_config_value, competencia_da_data
 from .importacao import normalize_text, tem_palavra
 
 bp = Blueprint('email_busca', __name__)
@@ -754,6 +754,11 @@ def _rodar_busca(token, dias):
     conn = get_db()
     despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
     regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}
+    # O mês de destino da associação é competência, não mês de calendário — e
+    # essa regra mora no servidor. A tela derivava o mês do fim do período
+    # pesquisado, o que arquivava um boleto de outubro em setembro quando a
+    # busca terminava em 30/09.
+    dia_corte = int(get_config_value(conn, 'dia_recebimento_salario', '26'))
     conn.close()
     despesas_por_nome = {d['nome']: d for d in despesas}
     despesas_por_id = {d['id']: d for d in despesas}
@@ -780,6 +785,14 @@ def _rodar_busca(token, dias):
             with _lock:
                 _busca_job['erro'] = f'Falha inesperada ao buscar {dia}: {e}'
             break
+
+        # Competência sugerida de cada achado, pela regra do servidor. É
+        # sugestão: a tela ainda deixa trocar, mas o padrão deixa de ser um
+        # recorte de calendário feito no cliente.
+        for b in boletos_dia:
+            recebido = (b.get('data') or '')[:10]
+            b['mes_ref_sugerido'] = (competencia_da_data(recebido, dia_corte)
+                                     if len(recebido) == 10 else None)
 
         with _lock:
             _busca_job['boletos'].extend(boletos_dia)

@@ -11,6 +11,10 @@ interface Boleto {
   valor_encontrado: string | null
   linha_digitavel: string | null
   tipo_codigo: 'boleto' | 'pix' | null
+  /** Competência sugerida pelo servidor, pela regra do dia de corte. A tela
+   *  não recalcula isso: derivar do calendário aqui já arquivou boleto no mês
+   *  errado. */
+  mes_ref_sugerido?: string | null
   despesa_sugerida_id: number | null
   despesa_sugerida_nome: string | null
   origem_sugestao: 'regra' | 'ia' | 'palavra_chave' | null
@@ -155,7 +159,8 @@ export function EmailBusca({ active }: { active: boolean }) {
           boletoId: b.id,
           despesaId: b.despesa_sugerida_id as number,
           despesaNome: b.despesa_sugerida_nome || '',
-          mesRef: mesAlvoRepeticaoRef.current,
+          // competência do servidor primeiro; o alvo da repetição é só reserva
+          mesRef: b.mes_ref_sugerido || mesAlvoRepeticaoRef.current,
           linhaDigitavel: b.linha_digitavel,
           tipoCodigo: b.tipo_codigo,
           valor: b.valor_encontrado,
@@ -268,6 +273,9 @@ export function EmailBusca({ active }: { active: boolean }) {
     const novaFim = addMonths(ultimaBusca.fim, 1)
     setDataIni(novaIni)
     setDataFim(novaFim)
+    // Reserva, não fonte: o mês de cada boleto vem de `mes_ref_sugerido`, pela
+    // regra de competência do servidor. Recortar o fim do período em YYYY-MM
+    // ignora o dia de corte e arquivava boleto de outubro em setembro.
     mesAlvoRepeticaoRef.current = novaFim.slice(0, 7)
     buscar(novaIni, novaFim, true)
   }

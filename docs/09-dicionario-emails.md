@@ -15,3 +15,5 @@ verdade que o app consulta é o banco.
 | `faturadigital@itaupersonnalite.com.br` | cartao black |
 | `grp-sousulamerica@sulamerica.com.br` | convenio sogra |
 | `conta@safra.com.br` | parcela wey |
+| `nao-responder@mercadopago.com.br` | Cartao Mercado Pago |
+| `no-reply@mercadopago.com.br` | Cartao Mercado Pago |

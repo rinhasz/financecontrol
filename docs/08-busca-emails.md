@@ -305,6 +305,68 @@ achado no email, e grava/atualiza a regra remetente→despesa.
 **Desfazer só existe antes de confirmar.** Depois de gravado, vira
 lançamento normal; para reverter, edita-se em Mês Atual.
 
+## Três coisas que o uso real revelou
+
+### Reconhecer não é gravar — e a tela não deixava isso óbvio
+
+Relato do usuário: *"a da porto reconheceu, mas não associou o código de uma
+maneira que eu possa copiar na aba de mês atual"*. Não era defeito de código.
+
+O Porto aparece reconhecido porque o remetente já estava mapeado, e com
+"Repetir mês anterior" ele entra **sozinho em pendentes**. Mas pendente não é
+gravado: só `POST /email/associar/lote` persiste. O usuário foi ao Mês Atual
+esperando o botão de copiar, e o lançamento de outubro estava com
+`linha_digitavel` nulo — o de **setembro** tinha código, de uma confirmação
+anterior.
+
+A lição é de produto, não de implementação: **reconhecimento se parece com
+conclusão.** O represamento é deliberado (preview→confirmar, como no batimento),
+mas precisa ser inescapável na tela.
+
+### O mês de destino vinha do calendário, não da competência
+
+Bug real, e pior que o sintoma relatado. A tela derivava o mês da associação do
+**fim do período pesquisado** (`novaFim.slice(0, 7)`). Uma busca terminando em
+30/09 arquivaria o boleto de **outubro dentro de setembro**.
+
+Agora cada boleto carrega **`mes_ref_sugerido`**, calculado no servidor por
+`competencia_da_data()` com o dia de corte configurado. A tela usa isso e mantém
+o alvo da repetição apenas como reserva.
+
+> **Bug latente, medido e ainda aberto:** `currentMesRef()` no frontend devolve
+> `YYYY-MM` do calendário e **ignora o corte de competência**. Com corte no dia
+> 26, ela erra em **6 dias de cada mês** (26 a 31) — em 28/10 diz `2026-10`
+> quando a competência já é `2026-11`. Hoje a regra de competência existe em
+> dois lugares, e um deles está errado. Consertar exige levar o dia de corte até
+> um `useState` de inicialização (`MesAtual.tsx`), que roda antes do config
+> carregar — é mudança própria, não um remendo.
+
+### Mercado Pago: reconhecido agora, mas sem código para copiar
+
+O e-mail do Mercado Pago **não tinha remetente mapeado**, e por isso dependia só
+do classificador de primeira passada. A linha de corte é implacável: se o
+classificador não marca o e-mail como fatura **e** o remetente é desconhecido, o
+e-mail é descartado sem nem ser lido.
+
+E o classificador tinha motivo para errar — os assuntos reais são *"Você já pode
+pagar seu cartão de crédito"* e *"Pague seu cartão, a fatura vence amanhã"*,
+enquanto o único que diz "fatura" claramente é *"Você **pagou** a fatura"*, um
+recibo que o prompt manda ignorar.
+
+Mapeados os **dois** remetentes que o emissor usa:
+
+| remetente | despesa |
+|---|---|
+| `nao-responder@mercadopago.com.br` | Cartao Mercado Pago |
+| `no-reply@mercadopago.com.br` | Cartao Mercado Pago |
+
+> **Mas não haverá código para copiar.** O diagnóstico é categórico:
+> `corpo: {"boleto": null, "tem_boleto": false, "tem_pix": false}` e
+> `anexos: []` nos dois avisos de cobrança. O único caminho de pagamento é um
+> link `onlinepayments/universal-link` rotulado "pagar fatura", que abre o app
+> atrás de login. **É limitação do emissor, não do app** — e a tela deve dizer
+> isso em vez de deixar o usuário esperando um botão que não pode existir.
+
 ## Repetir mês anterior
 
 Depois de uma busca com pelo menos uma associação confirmada, o período é
