@@ -172,6 +172,36 @@ correto é 4.955,34 + (−48,09 − 216,74 + 2.924,95) = **7.615,46**.
 | data **estritamente** posterior ao fechamento | o lançamento do próprio dia, já embutido no saldo |
 | parar no marcador "lançamentos futuros" | o agendado, que ainda não saiu da conta |
 
+#### A ordem das linhas não é confiável
+
+Terceira armadilha, e a que custou mais uma rodada: **o mesmo banco exporta nas
+duas ordens.**
+
+| arquivo | ordem | primeira linha | fechamento mais recente |
+|---|---|---|---|
+| 04/10 | antigo → novo | 19/09 `SALDO ANTERIOR` | linha 58: 01/10 = 4.955,34 |
+| 06/10 | **novo → antigo** | 05/10 `DA CLARO` | **linha 11**: 05/10 = 18.951,52 |
+
+A versão que varria decidindo na marcha — sobrescrevendo o fechamento a cada um
+que encontrava — terminava no último **lido**. No arquivo invertido isso é o mais
+**antigo**: o `SALDO ANTERIOR` de 21/09, R$ 3.761,14. E nenhum movimento era
+somado, porque descendo as linhas as datas só ficam mais velhas e o teste
+"posterior ao fechamento" rejeitava tudo.
+
+Por isso o algoritmo é em **duas passagens**, e a primeira não decide nada:
+
+1. recolhe todos os fechamentos e todos os movimentos até o marcador;
+2. escolhe o fechamento de **data máxima**, e soma os movimentos de data
+   estritamente maior que ela.
+
+Assim o resultado é o mesmo nas duas ordens. No arquivo de 06/10 o fechamento de
+05/10 já é 4.955,34 + os dez movimentos daquele dia (+13.996,18), e **não há
+realizado depois dele** — saldo R$ 18.951,52.
+
+> **A lição repetida três vezes:** posição na planilha não significa nada. Nem
+> para saber se um lançamento já está no saldo (é a data), nem para saber se já
+> debitou (é a seção), nem para achar o fechamento mais recente (é a data).
+
 > **A data devolvida nunca é futura.** O que já saiu hoje vem rotulado com o
 > próximo dia útil, e gravar `saldo_data = 05/10` faria a linha do tempo do
 > resgate (doc 15) começar amanhã, pulando hoje. Fica no máximo em hoje.

@@ -262,8 +262,13 @@ def _extrair_saldo(rows):
         valor = float(bruto) if isinstance(bruto, (int, float)) else parse_br_number(str(bruto))
         return None if valor != valor else valor  # NaN = cabeçalho
 
-    saldo_data, saldo_valor = None, None
-    posteriores, data_posterior = 0.0, None
+    # Duas passagens, e a primeira NÃO decide nada. O extrato vem em qualquer
+    # ordem: o arquivo de 04/10 veio do mais antigo para o mais novo, o de
+    # 06/10 veio ao contrário. Varrer decidindo na marcha terminava no último
+    # fechamento *lido*, que no arquivo invertido é o mais ANTIGO — foi assim
+    # que o saldo virou 3.761,14 (o SALDO ANTERIOR de 21/09) em vez de
+    # 18.951,52. Posição não diz nada; só data diz.
+    fechamentos, movimentos = [], []
 
     for row in rows[header_idx + 1:]:
         if row is None:
@@ -273,33 +278,31 @@ def _extrair_saldo(rows):
         if 'futur' in rotulo:
             break
 
+        data = _data_da(row)
+        if not data:
+            continue
+
         fechamento = _numero(row, 'saldo')
         if fechamento is not None:
-            data = _data_da(row)
-            if data:
-                # novo fechamento: o que foi acumulado já está dentro dele
-                saldo_data, saldo_valor = data, fechamento
-                posteriores, data_posterior = 0.0, None
+            fechamentos.append((data, fechamento))
             continue
 
         movimento = _numero(row, 'valor')
-        if movimento is None or saldo_valor is None:
-            continue
-        data_mov = _data_da(row)
-        # Posterior por DATA. Lançamento com a data do próprio fechamento,
-        # impresso abaixo dele, já está dentro do saldo — somá-lo conta o mesmo
-        # dinheiro duas vezes.
-        if not data_mov or data_mov <= saldo_data:
-            continue
-        posteriores += movimento
-        data_posterior = max(data_posterior, data_mov) if data_posterior else data_mov
+        if movimento is not None:
+            movimentos.append((data, movimento))
 
-    if saldo_valor is None:
+    if not fechamentos:
         return None, None
+
+    # o fechamento mais recente, não o último lido
+    saldo_data, saldo_valor = max(fechamentos, key=lambda f: f[0])
+    depois = [(d, v) for d, v in movimentos if d > saldo_data]
+    posteriores = sum(v for _, v in depois)
+
     # A data nunca é futura: o que já debitou hoje vem estampado com o próximo
     # dia útil, e devolver essa data faria a linha do tempo do resgate começar
     # amanhã, pulando hoje.
-    data_ref = max(saldo_data, data_posterior) if data_posterior else saldo_data
+    data_ref = max(d for d, _ in depois) if depois else saldo_data
     hoje = _date.today().isoformat()
     return (min(data_ref, hoje), round(saldo_valor + posteriores, 2))
 
