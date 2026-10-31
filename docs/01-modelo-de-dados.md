@@ -128,7 +128,7 @@ Espelho de `despesa` para o lado da entrada. Ver [14](14-receitas-e-esporadicas.
 | nome | TEXT UNIQUE | |
 | categoria_id | INTEGER FK → categoria | Mesma tabela de categorias das despesas |
 | dia_recebimento | INTEGER (nullable) | Espelho de `dia_vencimento` |
-| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` |
+| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `aluguel` \| `contas_a_receber` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` |
 | tipo_valor | TEXT | `fixo` \| `variavel` |
 | padrao_variabilidade | TEXT | Mesmos valores de `despesa` |
 | valor_padrao | REAL | |

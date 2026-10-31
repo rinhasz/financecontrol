@@ -18,7 +18,9 @@ bp = Blueprint('receitas', __name__)
 # campo próprio: dois campos que precisam concordar acabam discordando.
 TIPOS_SEM_RENDA = {'resgate_mensal', 'resgate_esporadico', 'estorno', 'transferencia'}
 
-TIPOS = ['salario', 'juros', 'reembolso', 'outra',
+# Ordem = ordem dos combos na tela: primeiro o que é renda, `outra` fechando o
+# grupo por ser o curinga; depois o que entra na conta mas não é renda nova.
+TIPOS = ['salario', 'juros', 'reembolso', 'aluguel', 'contas_a_receber', 'outra',
          'resgate_mensal', 'resgate_esporadico', 'estorno', 'transferencia']
 
 REGRAS_PADRAO = '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}'

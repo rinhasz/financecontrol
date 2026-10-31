@@ -45,7 +45,8 @@ interface DetalheMatch {
  *  pedir o alvo do estorno. Um item chamado "estorno" mas tipado como
  *  "reembolso" não estorna nada, e sem exibir o tipo isso é invisível. */
 const TIPO_RECEITA_LABEL: Record<string, string> = {
-  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
+  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso',
+  aluguel: 'Aluguel', contas_a_receber: 'Contas a receber', outra: 'Outra',
   resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
   estorno: 'Estorno', transferencia: 'Transferência'
 }

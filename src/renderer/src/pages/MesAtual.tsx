@@ -59,7 +59,8 @@ interface Resumo {
 }
 
 const TIPO_LABEL: Record<string, string> = {
-  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso', outra: 'Outra',
+  salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso',
+  aluguel: 'Aluguel', contas_a_receber: 'Contas a receber', outra: 'Outra',
   resgate_mensal: 'Resgate mensal', resgate_esporadico: 'Resgate esporádico',
   estorno: 'Estorno', transferencia: 'Transferência'
 }

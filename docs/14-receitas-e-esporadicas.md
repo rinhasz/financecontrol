@@ -124,6 +124,8 @@ mesmo caminho de sempre: casa com um item do catálogo, e o item diz o que ele �
 | `salario` | **sim** | `FOLHA PAGAMENTO MENSAL` |
 | `juros` | **sim** | `COR JSCP ITUB4`, `REMUNER BASICA POUP AUT` |
 | `reembolso` | **sim** | `PIX TRANSF THALITA27/07` |
+| `aluguel` | **sim** | aluguel recebido de imóvel próprio |
+| `contas_a_receber` | **sim** | valor devido por terceiro, recebido |
 | `outra` | **sim** | `TED 237.0001.BRADESCO S` |
 | `resgate_mensal` | não | `RESGATE CDB DI` para cobrir o mês |
 | `resgate_esporadico` | não | `RESGATE LCI DI` para comprar um carro |
@@ -191,7 +193,7 @@ Espelha `despesa` campo a campo.
 | padrao_variabilidade | TEXT | Mesmos valores de `despesa` |
 | valor_padrao | REAL | |
 | regras_match | JSON | Mesmo formato de `despesa` |
-| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` — ver §2 |
+| **tipo** | TEXT | `salario` \| `juros` \| `reembolso` \| `aluguel` \| `contas_a_receber` \| `outra` \| `resgate_mensal` \| `resgate_esporadico` \| `estorno` \| `transferencia` — ver §2 |
 | recorrencia | TEXT | `fixa` \| `esporadica` |
 | ativo | BOOLEAN | |
 
