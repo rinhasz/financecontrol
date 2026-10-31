@@ -403,6 +403,29 @@ Regras de exibição, herdadas do que já vale para despesas (doc 10):
   lançamento (§1), a lista do mês é a **união** de `lancamento_receita` (fixas)
   com as `transacao` que têm `receita_id` de item esporádico.
 
+### O cabeçalho é caixa, partido por recorrência
+
+Três blocos, cada um com o total do mês e as duas parcelas que o compõem:
+
+| Bloco | O que soma |
+|---|---|
+| **Renda do mês** | receita cujo `tipo` conta como renda — tudo que não é resgate, estorno ou transferência |
+| **Resgates e estornos** | o complemento: entra na conta, mas não é renda nova |
+| **Despesas** | saídas do mês |
+
+Cada bloco se parte em **recorrente** (`recorrencia = 'fixa'`) e **não
+recorrente** (`esporadica`), e as duas parcelas sempre somam o total exibido.
+
+**As despesas aqui são brutas, sem abater estorno.** `realizado_do_mes` entrega
+o `pago` já líquido, que é o certo para saldo e calculadora — mas neste
+cabeçalho o estorno tem bloco próprio, e descontá-lo também da despesa o
+contaria duas vezes: somando de um lado e reduzindo do outro. Por isso os
+números saem de query própria sobre `transacao`, e vale a invariante
+`despesa_bruta = pago + agendado + estornado`.
+
+Os totais vêm somados de `/api/resumo` (chave `blocos`). A tela não recalcula:
+dois lugares somando a mesma coisa acabam discordando.
+
 ### Calculadora de resgate
 
 Passa a ser um ciclo fechado:

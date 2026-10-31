@@ -56,7 +56,13 @@ interface Resumo {
   movimentacao: Record<string, number>
   saldoMes: number
   resgateNecessario: number; resgateJaFeito: number; faltaResgatar: number
+  blocos: { renda: Bloco; movimentacao: Bloco; despesas: Bloco }
 }
+
+/** Um bloco do cabeçalho: o total do mês e como ele se parte por recorrência.
+ *  Vem somado do backend — repetir a conta aqui criaria dois números que podem
+ *  discordar (doc 14). */
+type Bloco = { recorrente: number; naoRecorrente: number; total: number }
 
 const TIPO_LABEL: Record<string, string> = {
   salario: 'Salário', juros: 'Juros', reembolso: 'Reembolso',
@@ -467,15 +473,17 @@ export function MesAtual({ onPlanejarResgates }: { onPlanejarResgates?: () => vo
         </div>
       </div>
 
-      {/* Resumo cards */}
+      {/* Resumo cards — o caixa do mês: o que entrou como renda, o que entrou
+          sem ser renda, e o que saiu. Cada um partido entre o que se repete
+          todo mês e o que não. */}
       {resumo && (
-        <div className="px-6 pb-4 grid grid-cols-6 gap-3 flex-none">
-          <Card label="Renda do mês"  value={resumo.renda}        color="emerald" />
-          <Card label="Total do mês"  value={resumo.total}        color="zinc" />
-          <Card label="Pago"          value={resumo.pago}         color="emerald" />
-          <Card label="Agendado"      value={resumo.agendado}     color="blue" />
-          <Card label="A realizar"    value={resumo.aRealizar}    color="amber" />
-          <Card label="Recebido − pago" value={resumo.saldoMes}   color={resumo.saldoMes >= 0 ? 'emerald' : 'amber'} />
+        <div className="px-6 pb-4 grid grid-cols-3 gap-3 flex-none">
+          <CardBloco label="Renda do mês" bloco={resumo.blocos.renda} color="emerald"
+            title="Toda receita que não é resgate, estorno ou transferência entre contas próprias" />
+          <CardBloco label="Resgates e estornos" bloco={resumo.blocos.movimentacao} color="blue"
+            title="Entra na conta, mas não é renda nova: resgate de investimento, estorno e transferência entre contas próprias" />
+          <CardBloco label="Despesas" bloco={resumo.blocos.despesas} color="zinc"
+            title="Saídas do mês, sem abater estorno — o estorno aparece inteiro no bloco ao lado" />
         </div>
       )}
 
@@ -1104,12 +1112,46 @@ function BlocoReceitas({ titulo, itens, esmaecido, onLimparProjecao, onCorrigir 
 }
 
 
+const CARD_COLORS: Record<string, string> = {
+  zinc: 'text-zinc-200', emerald: 'text-emerald-400',
+  blue: 'text-blue-400', amber: 'text-amber-400'
+}
+
 function Card({ label, value, color }: { label: string; value: number; color: string }) {
-  const colors: Record<string, string> = { zinc: 'text-zinc-200', emerald: 'text-emerald-400', blue: 'text-blue-400', amber: 'text-amber-400' }
   return (
     <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/60 px-4 py-3">
       <p className="text-xs text-zinc-500 mb-1">{label}</p>
-      <p className={cn('text-lg font-bold tabular-nums', colors[color])}>{formatBRL(value)}</p>
+      <p className={cn('text-lg font-bold tabular-nums', CARD_COLORS[color])}>{formatBRL(value)}</p>
+    </div>
+  )
+}
+
+/** Total do bloco e as duas parcelas que o compõem.
+ *
+ *  As parcelas ficam visíveis sempre, mesmo zeradas: "não teve nada não
+ *  recorrente" é informação, e esconder a linha faria o total parecer vir de
+ *  lugar nenhum. */
+function CardBloco({ label, bloco, color, title }: {
+  label: string; bloco: Bloco; color: string; title?: string
+}) {
+  const linha = (rot: string, v: number) => (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-xs text-zinc-500">{rot}</span>
+      <span className={cn('text-xs tabular-nums', v ? 'text-zinc-300' : 'text-zinc-600')}>
+        {formatBRL(v)}
+      </span>
+    </div>
+  )
+  return (
+    <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/60 px-4 py-3" title={title}>
+      <p className="text-xs text-zinc-500 mb-1">{label}</p>
+      <p className={cn('text-lg font-bold tabular-nums mb-2', CARD_COLORS[color])}>
+        {formatBRL(bloco.total)}
+      </p>
+      <div className="space-y-0.5 border-t border-zinc-800/60 pt-1.5">
+        {linha('Recorrente', bloco.recorrente)}
+        {linha('Não recorrente', bloco.naoRecorrente)}
+      </div>
     </div>
   )
 }

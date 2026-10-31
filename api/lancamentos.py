@@ -466,6 +466,45 @@ def resumo():
         if not conta_como_renda(tipo):
             movimentacao[tipo] = round(movimentacao.get(tipo, 0.0) + v['pago'] + v['agendado'], 2)
 
+    # --- blocos do cabeçalho: entrada e saída, cada um partido por recorrência -
+    #
+    # Somados **brutos**, direto da transação, e não a partir de `real_d`: ali o
+    # `pago` da despesa já vem com o estorno abatido (ver realizado_do_mes). Como
+    # aqui o estorno tem bloco próprio, descontá-lo também das despesas o faria
+    # contar duas vezes — uma somando na movimentação, outra reduzindo a saída.
+    # Este cabeçalho é caixa: o que entrou de um lado, o que saiu do outro.
+    #
+    # `agendado` entra junto do `efetivada` pelo mesmo motivo do card "Renda do
+    # mês", que sempre somou os dois: o mês é o que aconteceu mais o que já está
+    # marcado para acontecer.
+    ini_c, fim_c = periodo_competencia(
+        mes_ref, int(get_config_value(conn, 'dia_recebimento_salario', '26')))
+
+    def _vazio():
+        return {'recorrente': 0.0, 'naoRecorrente': 0.0, 'total': 0.0}
+
+    b_renda, b_movimentacao, b_despesas = _vazio(), _vazio(), _vazio()
+
+    def _acumular(bloco, recorrencia, valor):
+        chave = 'recorrente' if recorrencia == 'fixa' else 'naoRecorrente'
+        bloco[chave] = round(bloco[chave] + valor, 2)
+        bloco['total'] = round(bloco['total'] + valor, 2)
+
+    for r in conn.execute(
+            'SELECT d.recorrencia AS rec, SUM(ABS(t.valor)) AS v '
+            'FROM transacao t JOIN despesa d ON d.id = t.despesa_id '
+            "WHERE t.tipo = 'debito' AND t.data BETWEEN ? AND ? "
+            'GROUP BY d.recorrencia', (ini_c, fim_c)):
+        _acumular(b_despesas, r['rec'], r['v'] or 0.0)
+
+    for r in conn.execute(
+            'SELECT x.recorrencia AS rec, x.tipo AS tipo, SUM(ABS(t.valor)) AS v '
+            'FROM transacao t JOIN receita x ON x.id = t.receita_id '
+            "WHERE t.tipo = 'credito' AND t.data BETWEEN ? AND ? "
+            'GROUP BY x.recorrencia, x.tipo', (ini_c, fim_c)):
+        destino = b_renda if conta_como_renda(r['tipo']) else b_movimentacao
+        _acumular(destino, r['rec'], r['v'] or 0.0)
+
     # só as chaves numéricas: `config` também guarda texto (a data do saldo),
     # e converter tudo para float quebrava a tela inteira
     def _num(chave, padrao):
@@ -507,6 +546,9 @@ def resumo():
         'resgateNecessario': resgate_necessario,
         'resgateJaFeito': resgate_ja_feito,
         'faltaResgatar': falta_resgatar,
+        # cabeçalho do mês: caixa bruto, cada bloco partido por recorrência
+        'blocos': {'renda': b_renda, 'movimentacao': b_movimentacao,
+                   'despesas': b_despesas},
         # nomes antigos, mantidos para não quebrar quem ainda os leia
         'naoEncontrado': a_realizar, 'receitas': renda, 'resgate': resgate_necessario,
     })
