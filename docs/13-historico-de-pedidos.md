@@ -243,6 +243,18 @@ reusando `conta_como_renda` — nenhuma lista nova de tipos para sair de sincron
 Despesa é somada **bruta**: como o estorno ganhou bloco próprio, mantê-lo
 abatido da despesa o contaria duas vezes.
 
+**"Despesa/receita nova devia nascer esporádica e aceitando mais de uma por
+mês"** (`5945edb`)
+Reverte a decisão do doc 14 §12. Ela fazia sentido com o catálogo pela metade;
+com os recorrentes já cadastrados, o que se cria agora é quase sempre evento
+isolado — e o padrão `fixa` fazia cada um abrir previsão mensal e cobrar
+atenção em "não encontrei" para sempre.
+
+Só na criação: no UPDATE o padrão continua `fixa`, senão uma edição que
+omitisse o campo reclassificaria em silêncio um item recorrente. A importação
+por planilha também segue `fixa`, agora explícita no INSERT — ela monta a lista
+de contas do mês, e herdar o DEFAULT da tabela a teria mudado junto.
+
 ---
 
 ## Busca em emails
