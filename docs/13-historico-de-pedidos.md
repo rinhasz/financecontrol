@@ -223,6 +223,15 @@ filtro vale no `/resumo`, senão o total não bate com as linhas exibidas.
 Aproveitado: o batimento também passou a ignorar despesas inativas, que podiam
 roubar transação de despesas em uso.
 
+**"Crie um tipo de receita Aluguel e outro Contas a receber"** (`bee17cb`)
+Os dois caíam em `outra`, o curinga: somavam na renda, mas não dava para
+separá-los do resto em nenhuma tela. Como ambos **são** renda, ficaram fora de
+`TIPOS_SEM_RENDA` e `conta_como_renda` seguiu derivado, sem regra nova.
+
+Não houve migração: `receita.tipo` é TEXT sem CHECK, e quem valida é a lista em
+`api/receitas.py` — que é também a ordem dos combos, por isso os dois entraram
+junto do grupo de renda, antes de `outra`.
+
 ---
 
 ## Busca em emails
