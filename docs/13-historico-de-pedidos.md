@@ -232,6 +232,17 @@ Não houve migração: `receita.tipo` é TEXT sem CHECK, e quem valida é a list
 `api/receitas.py` — que é também a ordem dos combos, por isso os dois entraram
 junto do grupo de renda, antes de `outra`.
 
+**"Mude o header do mês: renda, resgates/estornos e despesas, cada um separado
+em recorrente e não recorrente"** (`6b403aa`)
+Os seis cards antigos respondiam perguntas diferentes entre si e nenhum dizia o
+que se repete todo mês. Viraram três blocos de caixa, cada um com total e as
+duas parcelas.
+
+Renda ficou definida como o complemento de resgate + estorno + transferência,
+reusando `conta_como_renda` — nenhuma lista nova de tipos para sair de sincronia.
+Despesa é somada **bruta**: como o estorno ganhou bloco próprio, mantê-lo
+abatido da despesa o contaria duas vezes.
+
 ---
 
 ## Busca em emails
