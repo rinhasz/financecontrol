@@ -63,8 +63,13 @@ def _gravar(conn, data):
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (data['nome'], data.get('categoria_id'), data.get('dia_vencimento'),
               data.get('tipo_valor', 'variavel'), data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
-              data.get('valor_padrao'), data.get('recorrencia', 'fixa'),
-              1 if data.get('varios_por_mes') else 0,
+              data.get('valor_padrao'),
+              # Item novo nasce esporádico e aceitando mais de um no mês. Só no
+              # INSERT: no UPDATE acima o padrão continua 'fixa', porque uma
+              # edição que omitisse o campo reclassificaria em silêncio um item
+              # recorrente já cadastrado.
+              data.get('recorrencia', 'esporadica'),
+              1 if data.get('varios_por_mes', True) else 0,
               data.get('tipo_projecao', 'media_movel_6'),
               float(data.get('valor_projecao') or 0),
               data.get('regras_match', '{"palavras_chave":[],"faixa_valor":null,"janela_dias":5,"banco":null}')))
@@ -258,9 +263,14 @@ def importar_catalogo_confirmar():
         categoria_id = categorias.get(_norm_nome(item['categoria'])) if item.get('categoria') else None
         keywords = [w for w in re.split(r'[\s/,()\[\]]+', item['nome']) if len(w) >= 3]
         regras = json.dumps({'palavras_chave': keywords, 'faixa_valor': None, 'janela_dias': 5, 'banco': None})
+        # `recorrencia` e `varios_por_mes` explícitos: planilha de catálogo é a
+        # lista de contas que se repetem todo mês, então aqui o certo continua
+        # sendo 'fixa' — ao contrário do item avulso criado na tela. Antes isso
+        # vinha do DEFAULT da tabela, e mudar o padrão de criação teria mudado
+        # a importação junto, sem ninguém pedir.
         conn.execute(
-            'INSERT INTO despesa (nome, categoria_id, tipo_valor, padrao_variabilidade, valor_padrao, regras_match, ativo) '
-            'VALUES (?,?,?,?,?,?,1)',
+            'INSERT INTO despesa (nome, categoria_id, tipo_valor, padrao_variabilidade, valor_padrao, regras_match, recorrencia, varios_por_mes, ativo) '
+            "VALUES (?,?,?,?,?,?,'fixa',0,1)",
             (item['nome'], categoria_id, 'variavel', 'variavel_nao_sazonal', item.get('valor'), regras)
         )
 

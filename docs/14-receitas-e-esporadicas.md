@@ -532,6 +532,17 @@ despesa recorrente criada a partir do batimento nasceria sem previsão nenhuma,
 e o usuário não teria como perceber. Fica `fixa`, e marcar esporádica é um
 gesto explícito no Catálogo.
 
+> **Revertido depois do catálogo pronto.** Com os 71 itens recorrentes já
+> cadastrados, a premissa do §7 passou a valer: o que se cria agora costuma ser
+> evento isolado, e o padrão `fixa` fazia cada item ocasional abrir previsão
+> mensal e cobrar atenção em "não encontrei" para sempre. O formulário passou a
+> nascer **`esporadica` + `varios_por_mes`**, e marcar "recorrente" virou o
+> gesto explícito. Vale só na **criação**: no UPDATE o padrão continua `fixa`,
+> porque uma edição que omitisse o campo reclassificaria em silêncio um item
+> recorrente. A importação de catálogo por planilha também segue `fixa`, agora
+> explícito no INSERT em vez de herdado do DEFAULT da tabela — é a lista de
+> contas do mês, não item avulso.
+
 **Virar esporádica não apaga lançamento nenhum.** A primeira versão apagava os
 lançamentos vazios da despesa — e o teste mostrou que apagava os de **todos os
 meses**, não só o corrente, destruindo a série histórica que alimenta

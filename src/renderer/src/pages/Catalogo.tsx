@@ -147,7 +147,12 @@ export function Catalogo() {
     setErro('')
     setEditando(null)
     setCriando(c => !c)
-    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'fixa', varios_por_mes: false, tipo_projecao: 'media_movel_6', valor_projecao: '', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
+    // Nasce esporádica e aceitando mais de um por mês: com o catálogo de
+    // recorrentes já montado, o que se cadastra agora costuma ser evento
+    // isolado. Marcar "recorrente" é o gesto explícito, e não o contrário —
+    // antes todo item ocasional entrava gerando previsão mensal e ficava
+    // cobrando atenção em "não encontrei" todo mês.
+    setForm({ nome: '', categoria_id: '', tipo_valor: 'variavel', padrao_variabilidade: 'variavel_nao_sazonal', recorrencia: 'esporadica', varios_por_mes: true, tipo_projecao: 'media_movel_6', valor_projecao: '', tipo: 'outra', valor_padrao: '', dia: '', palavras_chave: '' })
   }
 
   async function salvar(id: number | null) {

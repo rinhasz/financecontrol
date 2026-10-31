@@ -60,12 +60,19 @@ def upsert_catalogo():
     if tipo not in TIPOS:
         return jsonify({'ok': False, 'msg': f'Tipo inválido: {tipo}'}), 400
 
+    # Item novo nasce esporádico e aceitando mais de um no mês. Numa edição o
+    # padrão continua o antigo: `campos` serve aos dois caminhos, e omitir o
+    # campo num UPDATE não pode reclassificar em silêncio um item recorrente
+    # que já está cadastrado.
+    novo = not data.get('id')
+    recorrencia = data.get('recorrencia', 'esporadica' if novo else 'fixa')
+    varios = 1 if data.get('varios_por_mes', novo) else 0
+
     campos = (nome, data.get('categoria_id'), data.get('dia_recebimento'), tipo,
               data.get('tipo_valor', 'variavel'),
               data.get('padrao_variabilidade', 'variavel_nao_sazonal'),
               data.get('valor_padrao'), data.get('regras_match') or REGRAS_PADRAO,
-              data.get('recorrencia', 'fixa'),
-              1 if data.get('varios_por_mes') else 0,
+              recorrencia, varios,
               data.get('tipo_projecao', 'media_movel_6'),
               float(data.get('valor_projecao') or 0))
 
