@@ -585,3 +585,27 @@ total da tela não bateria com as linhas exibidas.
 `/api/lancamentos` devolve `{despesas: [], receitas: []}` — os dois lados de uma
 vez, cada um já unindo lançamentos (fixas) e transações (esporádicas). Ver
 doc 14 §6 para o layout da tela e a calculadora de resgate fechada.
+
+
+## Transação já casada continua escolhível na seção 2
+
+O combo da seção 2 (item em aberto → procura-se o débito) oferece **todas** as
+transações do período, não só as sem dono. As já casadas vêm rotuladas
+`hoje em "<item>"`.
+
+Sem isso havia um beco sem saída: quando o batimento casava a linha com o item
+errado, ela saía de `transacoes_sobrando` (o motor só carrega `fk IS NULL`) e o
+item certo, que continuava em aberto, não tinha como alcançá-la. Caso real — um
+`PIX TRANSF DEUSA D31/10` foi para "adiantamento deusa" quando era "salário
+deusa final mes"; da seção 2 a linha simplesmente não existia.
+
+Corrigir pela seção 1 (trocar o item do par) sempre funcionou. O que faltava era
+o caminho inverso, partindo do item.
+
+Confirmar a troca libera o dono anterior: o par sai da seção 1, o item liberado
+volta para a seção 2 — a não ser que seja `sem_lancamento`, que não tem previsão
+para onde voltar — e no banco `_persistir_par` reverte o lançamento dele e
+**desaprende** a regra errada, para o erro não se repetir todo mês.
+
+É a mesma decisão já tomada no seletor de estorno, que oferece todos os débitos
+do período pelo mesmo motivo.

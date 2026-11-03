@@ -396,11 +396,28 @@ export function Importacao({ active }: { active: boolean }) {
         ? (natureza === 'receita' ? 'recebido' as const : 'pago' as const)
         : (natureza === 'receita' ? 'previsto' as const : 'agendado' as const)
       const emAberto = r.nao_encontrados.find(x => x.item_id === despesaId)
+
+      // A transação pode estar vindo de outro item (correção de casamento
+      // errado). O par antigo sai da seção 1 — senão a mesma linha do extrato
+      // apareceria duas vezes, com dois donos.
+      const antigo = r.detalhes.find(x => x.transacao_id === t.id)
+      const detalhes = r.detalhes.filter(x => x.transacao_id !== t.id)
+
+      // E o item liberado volta a estar em aberto, a não ser que tenha casado
+      // com outra transação ou que não tenha lançamento para onde voltar
+      // (esporádico / 2ª ocorrência — doc 14).
+      const liberado = antigo && !antigo.sem_lancamento && antigo.item_id !== despesaId
+        && !detalhes.some(x => x.item_id === antigo.item_id)
+        ? [{ lancamento_id: antigo.lancamento_id, item_id: antigo.item_id,
+             item_nome: antigo.item_nome, valor_esperado: antigo.valor_esperado }]
+        : []
+
       return {
         ...r,
-        nao_encontrados: r.nao_encontrados.filter(x => x.item_id !== despesaId),
+        nao_encontrados: [...r.nao_encontrados.filter(x => x.item_id !== despesaId), ...liberado]
+          .sort((a, b) => a.item_nome.localeCompare(b.item_nome, 'pt-BR')),
         transacoes_sobrando: r.transacoes_sobrando.filter(x => x.id !== t.id),
-        detalhes: [...r.detalhes, {
+        detalhes: [...detalhes, {
           lancamento_id: emAberto?.lancamento_id ?? 0, item_id: despesaId,
           item_id_sugerido: null, item_nome: despesaNome,
           valor_esperado: emAberto?.valor_esperado ?? Math.abs(t.valor),
@@ -504,7 +521,17 @@ export function Importacao({ active }: { active: boolean }) {
   }
 
   function aplicarBuscaTx(n: NaoEncontrado) {
-    const tx = lado?.transacoes_sobrando.find(x => String(x.id) === txSelecionada)
+    // A escolha pode ser uma transação sobrando ou uma já casada com outro
+    // item — o combo oferece as duas. No segundo caso montamos o mesmo formato
+    // a partir do detalhe, e `associarPar` cuida de liberar o dono anterior.
+    const sobrando = lado?.transacoes_sobrando.find(x => String(x.id) === txSelecionada)
+    const casada = lado?.detalhes.find(x => String(x.transacao_id) === txSelecionada)
+    const tx = sobrando ?? (casada && {
+      id: casada.transacao_id, data: casada.data,
+      descricao: casada.descricao_transacao, valor: casada.valor,
+      situacao: casada.status === 'pago' || casada.status === 'recebido'
+        ? 'efetivada' : 'agendada',
+    } as TransacaoSobrando)
     if (!tx) return
     associarPar(tx, n.item_id, n.item_nome)
     setBuscandoTx(null)
@@ -573,12 +600,27 @@ export function Importacao({ active }: { active: boolean }) {
   const txAssociadas = new Set((lado?.detalhes ?? []).map(d => d.transacao_id))
   const despesasAssociadas = new Set((lado?.detalhes ?? []).map(d => d.item_id))
 
-  const opcoesTransacao = (lado?.transacoes_sobrando ?? [])
-    .filter(t => !txAssociadas.has(t.id))
-    .map(t => ({
-      id: t.id,
-      nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+  // Oferece **todas** as transações do período, não só as sem dono: quando o
+  // batimento casa a linha com o item errado, a única forma de corrigir pela
+  // seção 2 é poder escolhê-la mesmo já casada. Sem isso a transação some das
+  // três seções para quem parte do item — foi o caso real de um pagamento que
+  // caiu em "adiantamento" quando era "salário final do mês".
+  //
+  // As já casadas vêm marcadas com o dono atual, para a troca ser consciente.
+  // Confirmar libera o dono anterior aqui na tela, e `_persistir_par` faz o
+  // mesmo no banco (reverte o lançamento dele e desaprende a regra errada).
+  const opcoesTransacao = [
+    ...(lado?.transacoes_sobrando ?? [])
+      .filter(t => !txAssociadas.has(t.id))
+      .map(t => ({
+        id: t.id,
+        nome: `${new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${t.descricao}  ·  ${formatBRL(Math.abs(t.valor))}`
+      })),
+    ...(lado?.detalhes ?? []).map(d => ({
+      id: d.transacao_id,
+      nome: `${new Date(d.data + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}  ·  ${d.descricao_transacao}  ·  ${formatBRL(d.valor)}  ·  hoje em "${d.item_nome}"`
     }))
+  ]
   // Débitos que um estorno pode anular: **todos** os do período, não só os sem
   // despesa. Uma cobrança já casada também pode ser estornada — e nesse caso o
   // vínculo dela é desfeito na confirmação, porque o pagamento não aconteceu.
