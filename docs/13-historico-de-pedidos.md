@@ -255,6 +255,16 @@ omitisse o campo reclassificaria em silêncio um item recorrente. A importação
 por planilha também segue `fixa`, agora explícita no INSERT — ela monta a lista
 de contas do mês, e herdar o DEFAULT da tabela a teria mudado junto.
 
+**"Associei errado e o lançamento certo não aparece na lista"** (`2526c09`)
+`PIX TRANSF DEUSA D31/10` tinha casado com "adiantamento deusa" em vez de
+"salário deusa final mes". Como o motor só carrega transação sem dono, a linha
+sumia de `transacoes_sobrando` e o item certo — que continuava em aberto na
+seção 2 — não tinha como alcançá-la.
+
+A seção 2 passou a oferecer também as já casadas, marcadas com o dono atual.
+Confirmar libera o anterior. O backend já fazia a parte dele: `_persistir_par`
+reverte o lançamento antigo e desaprende a regra errada.
+
 ---
 
 ## Busca em emails
