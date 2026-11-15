@@ -248,10 +248,25 @@ _pending = {}  # device flow em andamento — app desktop de 1 usuário, sem ses
 # foi encontrado até ali.
 _busca_job = {
     'rodando': False, 'cancelar': False, 'cancelado': False, 'concluido': False,
-    'erro': None, 'avisos': [], 'emails': [], 'total_codigos': 0,
+    'erro': None, 'avisos_extra': [], 'dias_falha_ia': 0, 'ia_desligada': None,
+    'emails': [], 'total_codigos': 0,
     'total_emails': 0, 'despesas_pesquisadas': 0, 'dia_atual': None,
     'total_dias': 0, 'dias_processados': 0, 'periodo': None,
 }
+
+
+def _avisos_compostos() -> list:
+    """Os avisos da tela, montados a partir do estado — não acumulados linha a
+    linha. A busca roda dia a dia, e guardar uma string por dia fazia a mesma
+    falha aparecer 60 vezes (foi o que o usuário viu na tela)."""
+    saida = list(_busca_job['avisos_extra'])
+    if _busca_job['ia_desligada']:
+        saida.append(_busca_job['ia_desligada'])
+    elif _busca_job['dias_falha_ia']:
+        n = _busca_job['dias_falha_ia']
+        saida.append(f'Falha ao classificar por IA em {n} dia(s) do período — '
+                     'o resultado desses dias pode estar incompleto.')
+    return saida
 
 
 def _dias_no_periodo(ini: str, fim: str):
@@ -745,13 +760,47 @@ def _gemini_client():
     return genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=60_000))
 
 
+def _motivo_para_desistir_da_ia(e) -> str:
+    """Esse erro do Gemini vale repetir no próximo lote, ou não adianta?
+
+    Existe porque a busca roda **dia a dia**: um erro que não se resolve
+    sozinho (sem crédito, chave recusada, cota estourada) era repetido em cada
+    um dos 60 dias do período — 60 chamadas condenadas, 60 avisos iguais
+    empilhados na tela, e a busca inteira mais lenta para nada.
+
+    Pior que o incômodo: com a classificação falhando, `ids_fatura` volta vazio
+    e **só passam emails de remetente já conhecido** — exatamente os emissores
+    novos, que são o motivo de existir a IA aqui, somem da busca. Então quando
+    o erro é terminal a busca desliga a IA e segue por palavra-chave, que é
+    mais limitada mas honesta, dizendo isso na tela.
+
+    Devolve a mensagem para o usuário, ou '' se vale tentar o próximo lote.
+    """
+    codigo = getattr(e, 'code', None)
+    texto = str(e)
+    comum = ' A busca seguiu sem IA, só por palavra-chave do catálogo — emissor que não casa por nome pode não aparecer.'
+
+    if codigo == 402 or 'prepayment credits are depleted' in texto:
+        return ('Os créditos da API do Gemini acabaram. Recarregue em '
+                'ai.studio/projects para voltar a reconhecer emissor fora do catálogo.' + comum)
+    if codigo in (401, 403) or 'API_KEY_INVALID' in texto or 'PERMISSION_DENIED' in texto:
+        return ('A GEMINI_API_KEY foi recusada (inválida, revogada ou sem permissão).' + comum)
+    if codigo == 429:
+        return ('Cota da API do Gemini esgotada por enquanto — tente de novo mais tarde.' + comum)
+    if codigo == 400:
+        return (f'O Gemini recusou a requisição (400): {texto[:200]}' + comum)
+    # rede, timeout, 5xx: transitório, o próximo lote pode dar certo
+    return ''
+
+
 def _gemini_classificar(client, mensagens: list):
     """Descobre quais mensagens parecem fatura/boleto/conta a pagar (barato:
     só assunto+remetente). Processa em lotes de GEMINI_BATCH_SIZE — uma
     caixa de entrada real pode ter milhares de emails num período de 1-2
     meses, e um prompt com tudo de uma vez é frágil (mais chance de estourar
     limite, truncar ou dar timeout); em lotes, uma falha isolada não derruba
-    a busca inteira. Retorna (ids_fatura, lotes_com_falha)."""
+    a busca inteira. Retorna (ids_fatura, lotes_com_falha, motivo_de_desistir)
+    — o terceiro, quando preenchido, manda a busca desligar a IA de vez."""
     from google.genai import types
 
     schema = {
@@ -787,10 +836,13 @@ def _gemini_classificar(client, mensagens: list):
             )
             ids_fatura |= set(json.loads(resp.text).get('ids_fatura', []))
         except Exception as e:
-            falhas += 1
             print(f'[email_busca] falha ao classificar lote {i}-{i + len(lote)} de {len(mensagens)}: {e}')
+            motivo = _motivo_para_desistir_da_ia(e)
+            if motivo:
+                return ids_fatura, falhas, motivo
+            falhas += 1
 
-    return ids_fatura, falhas
+    return ids_fatura, falhas, ''
 
 
 def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
@@ -828,10 +880,12 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
                 },
             ),
         )
-        return json.loads(resp.text)
+        return json.loads(resp.text), ''
     except Exception as e:
         print(f'[email_busca] falha ao extrair dados do email: {e}')
-        return {}
+        # mesma regra da classificação: erro que não se resolve sozinho desliga
+        # a IA no resto da busca em vez de repetir por email
+        return {}, _motivo_para_desistir_da_ia(e)
 
 
 def _marcar_ja_associado(codigo: dict, associados: dict) -> dict:
@@ -863,18 +917,25 @@ def _marcar_ja_associado(codigo: dict, associados: dict) -> dict:
 
 
 def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras,
-                client, associados, dia_corte):
+                ia, associados, dia_corte):
     """Busca e classifica os emails de um único dia. Retorna
     (emails_do_dia, total_emails_do_dia, lotes_de_classificacao_com_falha).
 
     Cada email achado carrega **todos** os códigos de pagamento que tem — um
     carnê de financiamento traz o cronograma inteiro num PDF só.
+
+    `ia` é mutável de propósito (`{'client', 'motivo'}`): um erro terminal do
+    Gemini desliga a IA para o **resto da busca**, não só para este dia.
     """
     mensagens = _mensagens_no_periodo(token, dia, dia)
 
+    client = ia.get('client')
     lotes_com_falha = 0
     if client:
-        ids_fatura, lotes_com_falha = _gemini_classificar(client, mensagens)
+        ids_fatura, lotes_com_falha, motivo = _gemini_classificar(client, mensagens)
+        if motivo:
+            ia['client'], ia['motivo'] = None, motivo
+            client = None
     else:
         ids_fatura = None
 
@@ -918,12 +979,22 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
             if despesa_conhecida and tem_valor_proprio:
                 despesa, origem_sugestao = despesa_conhecida, 'regra'
             else:
-                info = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
-                despesa_ia = despesas_por_nome.get(info.get('despesa_sugerida') or '')
-                despesa = despesa_conhecida or despesa_ia
-                origem_sugestao = 'regra' if despesa_conhecida else ('ia' if despesa_ia else None)
-                bruto = info.get('valor')
-                valor_ia = _fmt_valor(bruto) if isinstance(bruto, (int, float)) else None
+                info, motivo = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
+                if motivo:
+                    # IA caiu de vez no meio do dia: este email ainda é salvo
+                    # pelo caminho sem IA em vez de sair sem sugestão nenhuma
+                    ia['client'], ia['motivo'] = None, motivo
+                    client = None
+                    despesa = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
+                    origem_sugestao = ('regra' if despesa_conhecida
+                                       else ('palavra_chave' if despesa else None))
+                    _, _, valor_ia = _extrair_codigo_regex(texto)
+                else:
+                    despesa_ia = despesas_por_nome.get(info.get('despesa_sugerida') or '')
+                    despesa = despesa_conhecida or despesa_ia
+                    origem_sugestao = 'regra' if despesa_conhecida else ('ia' if despesa_ia else None)
+                    bruto = info.get('valor')
+                    valor_ia = _fmt_valor(bruto) if isinstance(bruto, (int, float)) else None
         else:
             despesa = sugerida_kw
             origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida_kw else None)
@@ -1004,7 +1075,9 @@ def _rodar_busca(token, dias):
     conn.close()
     despesas_por_nome = {d['nome']: d for d in despesas}
     despesas_por_id = {d['id']: d for d in despesas}
-    client = _gemini_client()
+    # mutável: `_buscar_dia` zera o client aqui dentro quando o erro do Gemini
+    # for terminal, e todos os dias seguintes já saem sem IA
+    ia = {'client': _gemini_client(), 'motivo': ''}
 
     with _lock:
         _busca_job['despesas_pesquisadas'] = len(despesas)
@@ -1018,7 +1091,7 @@ def _rodar_busca(token, dias):
         try:
             emails_dia, total_dia, falha_dia = _buscar_dia(
                 token, dia, despesas, despesas_por_nome, despesas_por_id, regras,
-                client, associados, dia_corte
+                ia, associados, dia_corte
             )
         except requests.HTTPError as e:
             with _lock:
@@ -1035,10 +1108,12 @@ def _rodar_busca(token, dias):
             _busca_job['total_codigos'] += sum(len(e['codigos']) for e in emails_dia)
             _busca_job['total_emails'] += total_dia
             _busca_job['dias_processados'] += 1
+            # Contador, não um aviso por dia: a mesma falha repetida em 60 dias
+            # enchia a tela com 60 linhas idênticas e escondia o resto.
             if falha_dia:
-                _busca_job['avisos'].append(
-                    f'Falha ao classificar por IA parte dos emails de {dia} — resultado desse dia pode estar incompleto.'
-                )
+                _busca_job['dias_falha_ia'] += 1
+            if ia['motivo']:
+                _busca_job['ia_desligada'] = ia['motivo']
 
     with _lock:
         _busca_job['cancelado'] = _busca_job['cancelar']
@@ -1206,7 +1281,8 @@ def buscar_iniciar():
             return jsonify({'ok': False, 'msg': 'Já existe uma busca em andamento — aguarde ou cancele antes de iniciar outra.'}), 409
         _busca_job.update({
             'rodando': True, 'cancelar': False, 'cancelado': False, 'concluido': False,
-            'erro': None, 'avisos': [], 'emails': [], 'total_codigos': 0,
+            'erro': None, 'avisos_extra': [], 'dias_falha_ia': 0, 'ia_desligada': None,
+            'emails': [], 'total_codigos': 0,
             'total_emails': 0, 'despesas_pesquisadas': 0, 'dia_atual': dias[0],
             'total_dias': len(dias), 'dias_processados': 0,
             'periodo': {'ini': ini, 'fim': fim},
@@ -1219,7 +1295,7 @@ def buscar_iniciar():
 @bp.route('/email/buscar/status')
 def buscar_status():
     with _lock:
-        return jsonify({'ok': True, **_busca_job})
+        return jsonify({'ok': True, **_busca_job, 'avisos': _avisos_compostos()})
 
 
 @bp.route('/email/buscar/cancelar', methods=['POST'])
