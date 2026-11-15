@@ -160,7 +160,7 @@ vai ser usado para pagar uma conta.
 
 ---
 
-## `docs/07` é escrito mesmo em teste com banco de rascunho
+## `docs/07` e `docs/09` são escritos mesmo em teste com banco de rascunho
 
 `_registrar_dicionario()` grava direto em `docs/07-dicionario-despesas.md`, um
 caminho fixo no repositório — **não** depende de `DB_PATH`. Então um teste que
@@ -175,6 +175,45 @@ próprio teste havia escrito.
 **Ao testar confirmação de batimento:** rode `git diff docs/07-...` no fim e
 remova o que o teste escreveu. E para comparar duas versões do código, garanta
 que o gabarito é o mesmo nas duas rodadas.
+
+**Vale igual para `docs/09`**, pelo mesmo motivo: `_registrar_regra_email()`
+usa `DICIONARIO_EMAILS_PATH`, também fixo no repositório. Um teste que confirma
+associação de email contra uma cópia do banco escreve uma regra
+remetente→despesa **no dicionário de verdade**. Aconteceu num teste do carnê:
+`boletos@safra.com.br → financ imob`, remetente e despesa que nunca foram
+associados de fato, foi parar no arquivo. Confira `git diff docs/09-...` junto
+com `docs/07-...` no fim de qualquer teste que grave.
+
+---
+
+## Gemini sem crédito: a busca degrada, mas não diz isso
+
+Sintoma: a aba "Procurar em Emails" empilha um aviso por dia do período —
+*"Falha ao classificar por IA parte dos emails de 2026-11-10"*, depois 11,
+depois 12... — e a busca acha pouco ou nada.
+
+A causa não aparece em lugar nenhum da tela. Ela está no console:
+
+```
+402 RESOURCE_EXHAUSTED — Your prepayment credits are depleted
+```
+
+Os créditos pré-pagos da `GEMINI_API_KEY` acabaram. Nada a ver com o modelo
+(`gemini-flash-latest` existe) nem com a chave (é válida).
+
+O efeito é maior que o aviso sugere: sem classificação, `ids_fatura` volta
+vazio e **só passam emails de remetente já conhecido** — justamente os
+emissores novos, que são o motivo de a IA existir aqui, somem da busca.
+
+Como diagnosticar em 10 segundos, sem adivinhar: faça uma chamada mínima com a
+chave do `.env` e leia o código HTTP. 402 é saldo, 401/403 é chave, 429 é cota,
+400 é requisição.
+
+**O que o app faz hoje:** erro terminal (402/401/403/429/400) desliga a IA para
+o resto da busca, em vez de repetir uma chamada condenada por dia; o aviso
+passa a ser **um só**, dizendo a causa e o que fazer; e a busca continua por
+palavra-chave, dizendo que está mais limitada. Erro transitório (rede, 5xx,
+timeout) continua sendo tentado no lote seguinte.
 
 ---
 

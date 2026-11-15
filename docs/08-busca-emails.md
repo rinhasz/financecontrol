@@ -44,6 +44,29 @@ passa a usar o Gemini em duas etapas:
 Sem a chave, cai para a lógica antiga (palavra-chave + regex) — sem custo
 de API, mas mais limitada.
 
+### Quando a IA cai no meio da busca
+
+A busca roda **dia a dia**, então um erro que não se resolve sozinho era
+repetido em cada um dos 60 dias do período: 60 chamadas condenadas, 60 avisos
+idênticos empilhados na tela, busca mais lenta para nada. E, pior, degradação
+escondida — sem classificação, `ids_fatura` volta vazio e só passam emails de
+remetente já conhecido; o emissor novo, que é o motivo de a IA existir aqui,
+some da busca.
+
+`_motivo_para_desistir_da_ia()` separa os dois tipos de erro:
+
+| erro | o que a busca faz |
+|---|---|
+| 402 sem crédito, 401/403 chave recusada, 429 cota, 400 requisição | desliga a IA no resto da busca, avisa **uma vez** com a causa e o que fazer, segue por palavra-chave |
+| rede, timeout, 5xx | transitório — tenta o próximo lote normalmente |
+
+Os avisos da tela são **montados a partir do estado** (`_avisos_compostos()`),
+não acumulados um por dia. Guardar uma string por dia foi o que produziu a tela
+cheia de linhas iguais.
+
+Sintoma, diagnóstico e o texto exato do erro 402 ficam em
+[12-armadilhas-e-ambiente.md](12-armadilhas-e-ambiente.md).
+
 ## Boleto **e** Pix
 
 Nem toda cobrança vem como boleto: várias operadoras (SulAmérica, por

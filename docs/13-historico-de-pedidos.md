@@ -360,6 +360,24 @@ grava, o que encerra a armadilha registrada no doc 08 ("reconhecimento se parece
 com conclusão", quando o usuário foi ao Mês Atual achando que estava salvo).
 Principio 1 segue valendo: nada persiste sem clique explícito.
 
+**"Toda hora aparece isso"** (um aviso de falha de IA por dia, empilhado)
+Não era bug de código: a API do Gemini respondia **402, créditos pré-pagos
+esgotados**. Mas o app reagia mal de três jeitos, e os três foram corrigidos.
+
+1. **A causa não aparecia na tela.** Ficava num `print` no console, e o aviso
+   dizia só "falha ao classificar". Agora o erro é traduzido: o que aconteceu,
+   e o que fazer (recarregar em ai.studio/projects).
+2. **Insistia num erro terminal.** A busca roda dia a dia, então repetia a
+   chamada condenada em cada um dos 60 dias. Hoje 402/401/403/429/400 desligam
+   a IA no resto da busca; rede, timeout e 5xx continuam sendo tentados.
+3. **Degradava escondido.** Sem classificação, `ids_fatura` volta vazio e só
+   passam emails de remetente já conhecido — o emissor novo, que é o motivo de
+   a IA existir ali, sumia da busca sem ninguém saber. Agora a busca avisa que
+   seguiu só por palavra-chave e que isso é mais limitado.
+
+Os avisos passaram a ser montados a partir do estado em vez de acumulados: uma
+string por dia era o que enchia a tela com a mesma linha repetida.
+
 **Guarda nova:** `UNIQUE(mes_ref, despesa_id)` significa um código por despesa
 por competência. Confirmar um carnê inteiro poria dezenas de parcelas na mesma
 despesa, e duas na mesma competência fariam a segunda sobrescrever a primeira
