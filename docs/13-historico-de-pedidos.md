@@ -316,6 +316,56 @@ Como quase todo mês já tem lançamento herdado do histórico, o `INSERT OR IGN
 nunca disparava e o valor do email era descartado. Agora a confirmação atualiza
 `valor_esperado`.
 
+**"O email do Safra vem com um PDF com uma série de boletos, de todo o
+financiamento, e você não consegue ler esse PDF"**
+O PDF era lido — o **modelo de dados** não cabia. A busca devolvia
+`linha_digitavel` *singular* por email: achava a primeira parcela e descartava as
+outras **sem nada na tela**, porque do ponto de vista do código tinha dado certo.
+
+→ Cada email passa a carregar uma lista de `codigos`, varrida com `finditer`. O
+pedido completo era "para cada email, liste todos os boletos, já sugerindo a
+despesa, o mês e um botão para confirmar", e é o que a tela faz: um cartão por
+email, a despesa escolhida uma vez para o email, e por parcela o vencimento, o
+valor, o mês sugerido e **Confirmar** (mais "Confirmar os N" do email e
+"Confirmar todos").
+
+Três decisões sustentam isso:
+
+1. **Valor e vencimento saem do próprio código**, não de IA. O campo 5 da linha
+   digitável tem fator de vencimento + valor em centavos. Num carnê de 60
+   parcelas, perguntar a um LLM qual o valor *desta* parcela num texto com 60
+   valores é justamente o que não funciona. De graça, veio o mês certo: a
+   competência é a do **vencimento da parcela**, não a da data do email — pela
+   data do email as 60 parcelas cairiam no mesmo mês.
+2. **Dígito verificador conferido** (mod 10 nos campos, mod 11 no DV geral).
+   Varrendo um PDF inteiro, qualquer sequência no layout certo entraria como
+   boleto, e um código com um dígito trocado é pior que nenhum. Validado contra
+   os 5 boletos reais já gravados no banco: DVs, valor e vencimento conferem nos
+   cinco. Código reprovado aparece com aviso, não desaparece (princípio 3).
+3. **Anexo não precisa se declarar PDF.** Só era lido com
+   `contentType == 'application/pdf'` exato; emissor que manda como
+   `octet-stream` tinha o anexo ignorado em silêncio. Agora decide por tipo,
+   nome ou bytes mágicos.
+
+**"Se a pesquisa for feita de novo e achar despesas já associadas e corretas
+(valores batem), coloca uma indicação de despesa já associada"**
+A busca carrega todos os códigos já gravados, indexados sem pontuação, e marca
+cada achado. Valor igual → só a indicação, sem botão. **Valor diferente → aviso
+em âmbar** com o valor gravado: esse é o caso que precisa de atenção, e tratá-lo
+como "já resolvido" o esconderia.
+
+→ Efeito colateral de produto: o estado intermediário "pendente" deixou de ser
+necessário e foi removido. O resultado da busca **é** o preview e Confirmar
+grava, o que encerra a armadilha registrada no doc 08 ("reconhecimento se parece
+com conclusão", quando o usuário foi ao Mês Atual achando que estava salvo).
+Principio 1 segue valendo: nada persiste sem clique explícito.
+
+**Guarda nova:** `UNIQUE(mes_ref, despesa_id)` significa um código por despesa
+por competência. Confirmar um carnê inteiro poria dezenas de parcelas na mesma
+despesa, e duas na mesma competência fariam a segunda sobrescrever a primeira
+calada. O item é recusado, volta como `conflito` com o código que já estava lá, e
+a troca exige clicar em **Substituir**.
+
 ---
 
 ## Robustez e ambiente

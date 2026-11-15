@@ -81,6 +81,76 @@ Mesmo assim, a tela mostra um aviso pra sempre conferir contra o email
 original antes de pagar. Isso não é garantia absoluta, só reduz bastante o
 risco de um número inventado passar despercebido.
 
+## Um email, vários boletos (carnê de financiamento)
+
+Pedido do usuário: *"o email do banco Safra vem com um PDF com uma série de
+boletos, já de todo o financiamento, e hoje você não consegue ler esse PDF"*.
+
+O PDF era lido; o **modelo de dados** é que não cabia. A busca devolvia
+`linha_digitavel` — singular — por email: `RE_LINHA_DIGITAVEL.search()` achava a
+primeira parcela e as outras 59 iam para o lixo **sem nada na tela**. Nenhum
+aviso, porque da perspectiva do código tinha dado certo: achou um boleto.
+
+Hoje cada email carrega uma lista `codigos`, e `_todos_os_codigos()` varre o
+texto inteiro com `finditer`.
+
+### O código já diz o seu vencimento e o seu valor
+
+Essa é a peça que faz o resto funcionar sem IA. A linha digitável de 47 dígitos
+tem, no campo 5, **fator de vencimento (4 dígitos) + valor em centavos (10)**:
+
+| posições | conteúdo |
+|---|---|
+| 34–37 | fator de vencimento |
+| 38–47 | valor em centavos |
+
+Num carnê com 60 parcelas, perguntar a um LLM "qual o valor desta parcela" num
+texto com 60 valores é exatamente o que não funciona — e não precisa: cada
+parcela nasce com valor e vencimento lidos do próprio código, que não alucina.
+
+**O mês de destino vem do vencimento da parcela**, não da data do email. Todas
+as parcelas do carnê chegam no mesmo email; pela data do email as 60 cairiam na
+mesma competência. Pix, que não tem vencimento, continua usando a competência do
+email.
+
+### Fator de vencimento: duas bases
+
+O fator chegou a 9999 em 21/02/2025 e a FEBRABAN reiniciou a contagem em 1000 =
+**22/02/2025**. Então um mesmo fator tem duas leituras: 1603 é 26/02/2002 na base
+antiga (07/10/1997) e 18/10/2026 na nova. `_vencimento_do_fator` escolhe a
+**mais próxima da data do email** — boleto novo cai na base nova, boleto antigo
+na antiga, sem configuração. Fator abaixo de 1000 significa "sem vencimento" por
+especificação, e vira `None`.
+
+### Dígito verificador, agora obrigatório de conferir
+
+Varrendo um PDF inteiro em busca de *todos* os códigos, qualquer sequência de
+dígitos no layout certo entraria como boleto. Pior: a extração de PDF quebra
+linha em lugar estranho, e um código com um dígito trocado é **pior que nenhum**
+— o pagamento vai para o lugar errado.
+
+`_boleto_dv_ok` confere os quatro DVs: módulo 10 nos campos 1, 2 e 3 e módulo 11
+no DV geral do código de barras. Validado contra os 5 boletos reais que já
+estavam gravados no banco (Porto, Bradesco, SulAmérica): os quatro DVs conferem
+nos cinco, o valor sai exato e o vencimento da SulAmérica dá 08/09/2026 —
+exatamente o que está registrado mais abaixo neste doc.
+
+Código reprovado no DV **não é descartado**: vai para a tela com aviso em
+âmbar. Sumir em silêncio é o que o princípio 4 proíbe, e um emissor fora do
+padrão não pode deixar o usuário sem o boleto.
+
+### Anexo que não se declara PDF
+
+Segundo gargalo do mesmo pedido: o anexo só era lido se
+`contentType == 'application/pdf'` **exato**. Emissor que manda o carnê como
+`application/octet-stream` (ou com o tipo em branco) tinha o anexo ignorado, e
+o email aparecia na busca sem código nenhum — parecendo falha de extração.
+
+`_e_pdf()` decide por três sinais: tipo declarado contendo `pdf`, nome
+terminando em `.pdf`, ou os bytes mágicos `%PDF-`. E quando o anexo é PDF mas
+não rende texto, o email volta com a nota dizendo qual das causas foi (senha que
+não serviu, PDF de imagem escaneada) em vez de aparecer vazio.
+
 ## Fatura atrás de link protegido por senha
 
 Nem todo emissor anexa a fatura. A **SulAmérica** manda um link ("Clique aqui
@@ -239,14 +309,15 @@ A solução foi reescrever para **OAuth2 + Microsoft Graph API**:
    dispara a busca **em thread de fundo, um dia por vez** (ver "Busca
    dia a dia" abaixo). A tela acompanha por polling em
    `GET /api/email/buscar/status`.
-5. Mostra uma lista plana de boletos (não agrupada por despesa, já que
-   cobre despesas sem correspondência óbvia por palavra-chave): assunto,
-   remetente, data, valor, código de pagamento com botão de copiar, e um
-   seletor de despesa + mês pra associar. PDFs escaneados como imagem
-   (sem texto extraível) não são suportados — aparece "código de
-   pagamento não encontrado, abra o email manualmente" em vez de falhar.
-6. Associar **não grava na hora**: entra numa lista de pendentes (ver
-   "Revisão em lote").
+5. Mostra **um cartão por email** (não agrupado por despesa, já que cobre
+   despesas sem correspondência óbvia por palavra-chave): assunto, remetente,
+   data, um seletor de despesa para o email inteiro, e abaixo **todos** os
+   códigos de pagamento que aquele email tem — cada um com tipo, vencimento,
+   valor, botão de copiar, o mês de competência sugerido (editável) e o botão
+   **Confirmar**. PDFs escaneados como imagem (sem texto extraível) não são
+   suportados — o cartão traz a nota dizendo por que não saiu código, em vez
+   de aparecer vazio.
+6. **Confirmar grava.** Até clicar, a busca é só leitura.
 7. Em Mês Atual, qualquer lançamento com código ganha um botão
    "Copiar boleto" ou "Copiar Pix", conforme `tipo_codigo`.
 
@@ -283,27 +354,65 @@ O cliente Gemini tem **timeout de 60s** (`HttpOptions(timeout=60_000)`).
 Sem ele, uma chamada travada ficava pendurada para sempre e a busca nunca
 terminava nem dava erro.
 
-## Revisão em lote (confirmar tudo / cancelar tudo / desfazer)
+## Confirmar em três alcances
 
-Associar um boleto **não grava nada** na hora: cria uma pendência na
-tela. A barra fixa no topo mostra quantas há, com **"Confirmar tudo"** e
-**"Cancelar tudo"**; cada item tem **"Desfazer"** individual. Só
-`POST /email/associar/lote` persiste — mesmo padrão preview→confirmar do
-batimento (doc 10) e da importação de catálogo (doc 11).
+O resultado da busca **é** o preview: nada é gravado enquanto não se clica em
+Confirmar (princípio 1 — e só `POST /email/associar/lote` persiste, mesmo padrão
+do batimento, doc 10, e da importação de catálogo, doc 11). O que muda com o
+carnê é a escala: confirmar 60 parcelas uma a uma não é revisão, é digitação.
 
-A lista fica em duas seções: primeiro os **associados/pendentes**, depois
-os **não associados**, para a revisão seguir de cima para baixo.
+| botão | onde | o que grava |
+|---|---|---|
+| **Confirmar** | na linha do código | aquela parcela, naquele mês |
+| **Confirmar os N** | no cabeçalho do email | todas as parcelas pendentes daquele email |
+| **Confirmar todos (N)** | barra fixa no topo | tudo que já tem despesa definida, de todos os emails |
+
+A despesa é escolhida **por email** e o mês **por código**: todas as parcelas de
+um carnê são da mesma despesa, e o que varia entre elas é a competência. Um
+seletor de despesa por parcela seriam 60 seletores para uma informação só.
 
 Ao confirmar, para cada item: grava `linha_digitavel` + `tipo_codigo` no
 `lancamento` da despesa/mês, **atualiza o `valor_esperado`** com o valor
 achado no email, e grava/atualiza a regra remetente→despesa.
 
+### Já associado antes: indicação, não trabalho de novo
+
+Pedido do usuário: *"se a pesquisa for feita de novo e você achar despesas já
+associadas e corretas (valores batem), simplesmente coloca uma indicação de
+despesa já associada"*.
+
+A busca carrega de uma vez todos os códigos já gravados em `lancamento`,
+indexados pelo código **sem pontuação** — o mesmo boleto reextraído com outro
+espaçamento tem de casar. Cada código achado vem com `ja_associado`:
+
+| situação | na tela |
+|---|---|
+| código gravado, valor igual | *"já associado — despesa / mês ✓"*, sem botão |
+| código gravado, valor diferente | aviso em âmbar com o valor que está gravado |
+| sem valor dos dois lados | indicação sem afirmar que bate (`valor_bate: null`) |
+| nunca visto | fluxo normal de associação |
+
+Valor divergente não é escondido como "já resolvido": é o caso que precisa de
+atenção. Repetir a busca no mesmo período passa a ser indolor, e
+"Repetir mês anterior" só mostra o que de fato é novo.
+
+### Uma despesa só tem um código por competência
+
+`UNIQUE(mes_ref, despesa_id)`: confirmar um carnê inteiro põe dezenas de
+parcelas na mesma despesa, e duas caindo na mesma competência fariam a segunda
+**sobrescrever** a primeira sem ninguém ver. O item é recusado e volta como
+`conflito` na resposta, mostrando o código que já estava lá e um botão
+**Substituir** — a troca existe, mas é decisão explícita (princípio 2).
+
+Conflito não derruba a requisição: o que deu para gravar é gravado, e a resposta
+traz `aplicadas` e `conflitos` separados.
+
 > A atualização do valor foi um bug real: como quase todo mês já tem um
 > lançamento herdado do histórico, o `INSERT OR IGNORE` nunca disparava e
 > o valor do email era descartado — só o código era salvo.
 
-**Desfazer só existe antes de confirmar.** Depois de gravado, vira
-lançamento normal; para reverter, edita-se em Mês Atual.
+**Não há desfazer.** Confirmado é gravado; para reverter, edita-se em Mês Atual,
+como qualquer lançamento.
 
 ## Três coisas que o uso real revelou
 
@@ -322,6 +431,12 @@ anterior.
 A lição é de produto, não de implementação: **reconhecimento se parece com
 conclusão.** O represamento é deliberado (preview→confirmar, como no batimento),
 mas precisa ser inescapável na tela.
+
+> **Resolvido pela reforma do carnê.** O estado intermediário "pendente" não
+> existe mais: o resultado da busca é o preview, e **Confirmar grava**. Some o
+> estado que parecia conclusão sem ser, e com ele a possibilidade de ir ao Mês
+> Atual achando que estava salvo. Um clique a menos por item, e o princípio 1
+> continua honrado — nada persiste sem confirmação explícita.
 
 ### O mês de destino vinha do calendário, não da competência
 
@@ -373,15 +488,14 @@ Depois de uma busca com pelo menos uma associação confirmada, o período é
 guardado em `localStorage` e aparece o botão **"Repetir mês anterior"**.
 Ele desloca o período salvo em +1 mês e refaz a busca.
 
-Durante essa repetição, todo boleto cujo remetente **já foi confirmado
-antes** (`origem_sugestao === 'regra'`) entra automaticamente como
-pendente, já preenchido. Sugestão vinda da IA ou de palavra-chave
-**nunca** entra sozinha — fica em "não associados" para revisão manual.
-Assim o resumo já sai pronto: em cima o que foi reconhecido, embaixo o
-que sobrou. Tudo ainda pode ser desfeito antes de confirmar.
+Cada email carrega `origem_sugestao`: `regra` (remetente já associado antes),
+`ia` (só o Gemini sugeriu) ou `palavra_chave` (fallback sem Gemini). Com regra,
+a despesa já vem escolhida no seletor e **"Confirmar todos"** fecha a revisão do
+mês num clique — que era o pedido original ("no próximo mês trazer tudo
+pré-preenchido só pra eu conferir"), agora sem o estado "pendente" no meio.
 
-Cada boleto carrega `origem_sugestao`: `regra` (remetente já associado),
-`ia` (só o Gemini sugeriu) ou `palavra_chave` (fallback sem Gemini).
+O que já estava gravado aparece como indicação (ver "Já associado antes"), então
+repetir um período que se sobrepõe ao anterior não traz trabalho repetido.
 
 ## Endpoints
 
@@ -391,9 +505,10 @@ Cada boleto carrega `origem_sugestao`: `regra` (remetente já associado),
 | `/api/email/conectar/iniciar` | POST | Inicia device code flow |
 | `/api/email/conectar/finalizar` | POST | Aguarda o login no navegador (bloqueia) |
 | `/api/email/buscar/iniciar` | POST | Dispara a busca em thread de fundo |
-| `/api/email/buscar/status` | GET | Progresso + boletos achados até agora |
+| `/api/email/buscar/status` | GET | Progresso + emails (com seus códigos) achados até agora |
 | `/api/email/buscar/cancelar` | POST | Para ao fim do dia corrente |
-| `/api/email/associar/lote` | POST | Persiste as associações revisadas |
+| `/api/email/associar/lote` | POST | Persiste as associações; devolve `aplicadas` e `conflitos` |
+| `/api/email/diagnostico` | GET | Por que um remetente não rendeu código — inclui **todos** os códigos de cada anexo |
 
 `/email/status` **não pode depender de rede**: ele lê a conta direto do
 arquivo de cache de token, sem instanciar o MSAL. Já foi o contrário, e
