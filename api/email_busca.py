@@ -89,6 +89,147 @@ def _codigo_pix_valido(s) -> bool:
         return False
     return True
 
+# --------------------------------------------- o que o código já diz de si ---
+#
+# A linha digitável de 47 dígitos **carrega o vencimento e o valor**. Isso não é
+# detalhe: num carnê de financiamento (Safra) o mesmo PDF traz dezenas de
+# parcelas, e perguntar a uma IA "qual o valor desta parcela" num texto com 60
+# valores é justamente o que não funciona. Lendo do próprio código, cada parcela
+# nasce com valor e mês certos, sem IA e sem ambiguidade.
+#
+# Campo 5 da linha digitável (posições 34-47): fator de vencimento (4) + valor
+# em centavos (10).
+FATOR_BASE_ANTIGA = datetime.date(1997, 10, 7)
+# Quando o fator de vencimento chegou a 9999 (21/02/2025), a FEBRABAN reiniciou
+# a contagem em 1000 — que vale 22/02/2025. Boleto emitido hoje usa esta base; a
+# antiga ainda aparece em boleto velho. Qual das duas vale sai por proximidade
+# da data do email (ver _vencimento_do_fator).
+FATOR_BASE_NOVA = datetime.date(2025, 2, 22)
+
+
+def _so_digitos(s) -> str:
+    return re.sub(r'\D', '', s or '')
+
+
+def _dv_mod10(bloco: str) -> int:
+    soma, peso = 0, 2
+    for ch in reversed(bloco):
+        p = int(ch) * peso
+        soma += p if p < 10 else p - 9
+        peso = 1 if peso == 2 else 2
+    return (10 - soma % 10) % 10
+
+
+def _dv_mod11_barra(barra43: str) -> int:
+    """DV geral do código de barras (módulo 11, pesos 2..9). Resto 0, 1 ou
+    10 vira DV 1, pela especificação FEBRABAN."""
+    pesos = [2, 3, 4, 5, 6, 7, 8, 9]
+    soma = sum(int(ch) * pesos[i % 8] for i, ch in enumerate(reversed(barra43)))
+    dv = 11 - soma % 11
+    return 1 if dv in (0, 1, 10, 11) else dv
+
+
+def _boleto_dv_ok(d47: str) -> bool:
+    """Os quatro dígitos verificadores de uma linha digitável conferem?
+
+    Vale muito mais que a checagem de formato: varrendo um PDF inteiro em busca
+    de **todos** os códigos, qualquer sequência de dígitos no layout certo
+    entraria como boleto. E um código com um dígito trocado (extração de PDF
+    quebra linha em lugar estranho) é pior que nenhum — pagamento vai para o
+    lugar errado. Código reprovado aqui não é descartado: vai para a tela com
+    aviso, porque sumir em silêncio contraria o princípio 4.
+    """
+    if len(d47) != 47:
+        return False
+    if int(d47[9]) != _dv_mod10(d47[0:9]):
+        return False
+    if int(d47[20]) != _dv_mod10(d47[10:20]):
+        return False
+    if int(d47[31]) != _dv_mod10(d47[21:31]):
+        return False
+    # barra 44 = banco(3) moeda(1) dv(1) fator(4) valor(10) campo livre(25)
+    sem_dv = d47[0:4] + d47[33:47] + d47[4:9] + d47[10:20] + d47[21:31]
+    return int(d47[32]) == _dv_mod11_barra(sem_dv)
+
+
+def _vencimento_do_fator(fator: int, referencia: datetime.date):
+    """Data de vencimento a partir do fator, escolhendo a base por proximidade
+    da data do email. Fator 1603 é 26/02/2002 na base antiga e 18/10/2026 na
+    nova; para um email de 2026 só a segunda faz sentido. Fator < 1000 é
+    "sem vencimento" por especificação."""
+    if fator < 1000:
+        return None
+    candidatas = [FATOR_BASE_ANTIGA + datetime.timedelta(days=fator),
+                  FATOR_BASE_NOVA + datetime.timedelta(days=fator - 1000)]
+    return min(candidatas, key=lambda d: abs((d - referencia).days))
+
+
+def _dados_do_boleto(d47: str, referencia: datetime.date) -> dict:
+    """Vencimento e valor lidos do próprio código."""
+    venc = _vencimento_do_fator(int(d47[33:37]), referencia)
+    centavos = int(d47[37:47])
+    return {
+        'vencimento': venc.isoformat() if venc else None,
+        # valor zerado existe (boleto em branco, a preencher) — null, não 0,00
+        'valor_num': (centavos / 100) if centavos else None,
+        'dv_ok': _boleto_dv_ok(d47),
+    }
+
+
+def _fmt_valor(v) -> str:
+    """Número -> '1.234,56' (o formato que a tela e parse_number já usam)."""
+    return f'{v:,.2f}'.replace(',', '@').replace('.', ',').replace('@', '.')
+
+
+def _formatar_linha_digitavel(d47: str) -> str:
+    return (f'{d47[0:5]}.{d47[5:10]} {d47[10:15]}.{d47[15:21]} '
+            f'{d47[21:26]}.{d47[26:32]} {d47[32]} {d47[33:47]}')
+
+
+def _todos_os_codigos(texto: str, referencia: datetime.date) -> list:
+    """**Todos** os códigos de pagamento do texto, não só o primeiro.
+
+    Era aqui que o carnê do Safra se perdia: `RE_LINHA_DIGITAVEL.search()`
+    devolvia uma parcela e as outras iam para o lixo sem nenhum aviso na tela.
+    Boletos primeiro (ordenados por vencimento), Pix depois — a ordem em que
+    aparecem no PDF não tem relação com a ordem das parcelas.
+    """
+    boletos, pix, vistos = [], [], set()
+
+    for m in RE_LINHA_DIGITAVEL.finditer(texto):
+        d = _so_digitos(m.group())
+        # o último bloco da regex aceita 14-17 dígitos para tolerar
+        # pontuação/colagem; a linha digitável em si tem 47
+        if len(d) > 47:
+            d = d[:47]
+        if len(d) != 47 or d in vistos:
+            continue
+        vistos.add(d)
+        info = _dados_do_boleto(d, referencia)
+        boletos.append({
+            'chave': d,
+            'codigo': _formatar_linha_digitavel(d),
+            'tipo_codigo': 'boleto',
+            'valor': _fmt_valor(info['valor_num']) if info['valor_num'] else None,
+            'valor_num': info['valor_num'],
+            'vencimento': info['vencimento'],
+            'dv_ok': info['dv_ok'],
+        })
+
+    for m in RE_PIX.finditer(texto):
+        codigo = re.sub(r'\s+', '', m.group())
+        if not _codigo_pix_valido(codigo) or codigo in vistos:
+            continue
+        vistos.add(codigo)
+        pix.append({
+            'chave': codigo, 'codigo': codigo, 'tipo_codigo': 'pix',
+            'valor': None, 'valor_num': None, 'vencimento': None, 'dv_ok': True,
+        })
+
+    boletos.sort(key=lambda b: (b['vencimento'] or '9999-12-31', b['chave']))
+    return boletos + pix
+
+
 # Fallback quando nenhuma despesa do catálogo bate por palavra-chave — muitas
 # operadoras (ex: SulAmérica) não aparecem no nome da despesa (ex: "convenio
 # marco antonio"), só no assunto do email. Um assunto com essas palavras já
@@ -107,9 +248,9 @@ _pending = {}  # device flow em andamento — app desktop de 1 usuário, sem ses
 # foi encontrado até ali.
 _busca_job = {
     'rodando': False, 'cancelar': False, 'cancelado': False, 'concluido': False,
-    'erro': None, 'avisos': [], 'boletos': [], 'total_emails': 0,
-    'despesas_pesquisadas': 0, 'dia_atual': None, 'total_dias': 0,
-    'dias_processados': 0, 'periodo': None,
+    'erro': None, 'avisos': [], 'emails': [], 'total_codigos': 0,
+    'total_emails': 0, 'despesas_pesquisadas': 0, 'dia_atual': None,
+    'total_dias': 0, 'dias_processados': 0, 'periodo': None,
 }
 
 
@@ -483,14 +624,42 @@ def _parece_fatura(assunto: str) -> bool:
     return any(tem_palavra(alvo, kw) for kw in ASSUNTO_FATURA_KEYWORDS)
 
 
-def _texto_completo(token: str, m: dict) -> str:
+def _e_pdf(att: dict) -> bool:
+    """O anexo é um PDF?
+
+    Não basta `contentType == 'application/pdf'`: emissor que manda o carnê
+    como `application/octet-stream` (ou com o tipo em branco) tinha o anexo
+    **ignorado sem aviso** — o email aparecia na busca sem código nenhum e
+    parecia problema de extração. Nome e bytes mágicos resolvem sem confiar no
+    cabeçalho declarado.
+    """
+    tipo = (att.get('contentType') or '').lower()
+    nome = (att.get('name') or '').lower()
+    if 'pdf' in tipo or nome.endswith('.pdf'):
+        return True
+    bruto = att.get('contentBytes')
+    if bruto:
+        try:
+            return base64.b64decode(bruto[:12])[:5] == b'%PDF-'
+        except Exception:
+            return False
+    return False
+
+
+def _texto_completo(token: str, m: dict):
     """Texto do corpo + PDFs anexados de uma mensagem — busca o corpo sob
-    demanda (só é chamada pra quem já passou na classificação/filtro)."""
+    demanda (só é chamada pra quem já passou na classificação/filtro).
+
+    Devolve `(texto, notas)`. As notas existem porque "não achei código" tem
+    causas muito diferentes (anexo não baixou, PDF não abriu, PDF é imagem) e
+    a tela precisa dizer qual foi — princípio 4, nada silencioso.
+    """
     headers = {'Authorization': f'Bearer {token}'}
     remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
     # a senha só existe para remetente liberado; ela é também a permissão para
     # seguir link deste email
     senha = _senha_do_remetente(remetente)
+    notas = []
 
     texto, html = '', ''
     try:
@@ -501,16 +670,28 @@ def _texto_completo(token: str, m: dict) -> str:
         texto = _extrair_texto_html(html)
     except Exception as e:
         print(f'[email_busca] falha ao buscar corpo de {m["id"]}: {e}')
+        notas.append('não consegui baixar o corpo do email')
 
     if m.get('hasAttachments'):
         try:
-            att_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}/attachments', headers=headers, timeout=30)
+            att_resp = requests.get(f'{GRAPH}/me/messages/{m["id"]}/attachments', headers=headers, timeout=60)
             att_resp.raise_for_status()
             for att in att_resp.json().get('value', []):
-                if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
-                    texto += '\n' + _extrair_pdf(att['contentBytes'], senha)
+                if not _e_pdf(att) or not att.get('contentBytes'):
+                    continue
+                extraido = _extrair_pdf(att['contentBytes'], senha)
+                if extraido.strip():
+                    texto += '\n' + extraido
+                elif senha:
+                    notas.append(f'o PDF "{att.get("name")}" não abriu — senha '
+                                 'cadastrada não serviu, ou é imagem escaneada')
+                else:
+                    notas.append(f'o PDF "{att.get("name")}" não rendeu texto — '
+                                 'pode estar protegido por senha (cadastre em '
+                                 'config.senhas_fatura) ou ser imagem escaneada')
         except Exception as e:
             print(f'[email_busca] falha ao buscar anexos de {m["id"]}: {e}')
+            notas.append('não consegui baixar os anexos deste email')
 
     # Fatura atrás de link (SulAmérica): só quando o remetente está liberado e
     # ainda **não há boleto**.
@@ -532,7 +713,7 @@ def _texto_completo(token: str, m: dict) -> str:
                 if achou:
                     break
 
-    return texto
+    return texto, notas
 
 
 def _extrair_codigo_regex(texto: str):
@@ -653,9 +834,42 @@ def _gemini_extrair(client, texto: str, despesas_nomes: list) -> dict:
         return {}
 
 
-def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras, client):
+def _marcar_ja_associado(codigo: dict, associados: dict) -> dict:
+    """Esse código já foi associado numa busca anterior?
+
+    Rodar a busca de novo no mesmo período é normal (e "Repetir mês anterior"
+    faz isso de propósito). Sem essa checagem, tudo que já está gravado volta
+    pedindo associação outra vez, e no carnê do Safra isso significa reconferir
+    dezenas de parcelas já resolvidas. `valor_bate` separa "já resolvido,
+    ignore" de "estava associado mas o valor mudou" — este segundo caso precisa
+    de atenção, não de silêncio.
+    """
+    ja = associados.get(codigo['chave'])
+    if not ja:
+        return None
+    valor_novo = codigo.get('valor_num')
+    esperado = ja['valor_esperado']
+    if valor_novo is None or not esperado:
+        bate = None          # sem valor dos dois lados não há o que comparar
+    else:
+        bate = abs(valor_novo - esperado) < 0.01
+    return {
+        'despesa_id': ja['despesa_id'],
+        'despesa_nome': ja['despesa_nome'],
+        'mes_ref': ja['mes_ref'],
+        'valor_esperado': esperado,
+        'valor_bate': bate,
+    }
+
+
+def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras,
+                client, associados, dia_corte):
     """Busca e classifica os emails de um único dia. Retorna
-    (boletos_do_dia, total_emails_do_dia, lotes_de_classificacao_com_falha)."""
+    (emails_do_dia, total_emails_do_dia, lotes_de_classificacao_com_falha).
+
+    Cada email achado carrega **todos** os códigos de pagamento que tem — um
+    carnê de financiamento traz o cronograma inteiro num PDF só.
+    """
     mensagens = _mensagens_no_periodo(token, dia, dia)
 
     lotes_com_falha = 0
@@ -664,84 +878,96 @@ def _buscar_dia(token, dia, despesas, despesas_por_nome, despesas_por_id, regras
     else:
         ids_fatura = None
 
-    boletos = []
+    achados = []
     for m in mensagens:
         assunto = m.get('subject') or ''
         remetente = (m.get('from') or {}).get('emailAddress', {}).get('address') or ''
+        recebido = (m.get('receivedDateTime') or '')[:10]
         # remetente já associado antes por você — entra na lista e vem
         # pré-preenchido, sem depender de bater de novo por assunto/IA
         despesa_conhecida = despesas_por_id.get(regras.get(remetente))
 
-        origem_sugestao = None
+        # ---- passa pelo filtro? (as duas portas de entrada de antes) ----
         if client:
             if m['id'] not in ids_fatura and not despesa_conhecida:
                 continue
-            texto = _texto_completo(token, m)
-            info = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
-            despesa_ia = despesas_por_nome.get(info.get('despesa_sugerida') or '')
-            despesa = despesa_conhecida or despesa_ia
-            origem_sugestao = 'regra' if despesa_conhecida else ('ia' if despesa_ia else None)
-            valor_num = info.get('valor')
-            valor = f'{valor_num:.2f}'.replace('.', ',') if isinstance(valor_num, (int, float)) else None
-            linha_digitavel = info.get('linha_digitavel')
-            tipo_codigo = info.get('tipo_codigo') if info.get('tipo_codigo') in ('boleto', 'pix') else None
-            # o Gemini pode "alucinar" um código plausível em vez de dizer
-            # que não achou — só aceita se tiver o formato certo (boleto:
-            # 47/48 dígitos; pix: estrutura 0002...6304XXXX) E se aparecer
-            # de fato, literalmente, no texto extraído do email
-            valido = (
-                (tipo_codigo == 'boleto' and _linha_digitavel_valida(linha_digitavel)) or
-                (tipo_codigo == 'pix' and _codigo_pix_valido(linha_digitavel))
-            )
-            if valido:
-                if tipo_codigo == 'boleto':
-                    achado = re.sub(r'\D', '', linha_digitavel) in re.sub(r'\D', '', texto)
-                else:
-                    achado = re.sub(r'\s+', '', linha_digitavel) in re.sub(r'\s+', '', texto)
-                if not achado:
-                    valido = False
-            if not valido:
-                # O Gemini pode não achar o que a regex acha — mais provável
-                # agora que o texto pode vir de um PDF baixado por link, cuja
-                # extração quebra linha em lugar estranho. Já que o download foi
-                # feito, vale tentar a estrutura fixa antes de desistir.
-                linha_digitavel, tipo_codigo, _ = _extrair_codigo_regex(texto)
-
-            # Remetente cujo boleto foi buscado atrás de link: o boleto ganha.
-            # A SulAmérica põe um Pix no corpo e o boleto só dentro do PDF; o
-            # Gemini lê os dois no mesmo texto e costuma devolver o Pix, que
-            # aparece primeiro. Ir atrás do PDF e ainda assim mostrar o Pix
-            # desperdiça exatamente o trabalho que este caminho existe para fazer.
-            if _senha_do_remetente(remetente) and tipo_codigo != 'boleto':
-                achado_boleto = RE_LINHA_DIGITAVEL.search(texto)
-                if achado_boleto:
-                    linha_digitavel = re.sub(r'\s+', ' ', achado_boleto.group()).strip()
-                    tipo_codigo = 'boleto'
+            sugerida_kw = None
         else:
-            sugerida = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
-            origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida else None)
-            if not sugerida and not _parece_fatura(assunto):
+            sugerida_kw = despesa_conhecida or _despesa_sugerida(assunto, remetente, despesas)
+            if not sugerida_kw and not _parece_fatura(assunto):
                 continue
-            texto = _texto_completo(token, m)
-            linha_digitavel, tipo_codigo, valor = _extrair_codigo_regex(texto)
-            if not sugerida and not linha_digitavel and not valor:
-                continue
-            despesa = sugerida
 
-        boletos.append({
+        texto, notas = _texto_completo(token, m)
+
+        # ---- todos os códigos, do próprio texto ----
+        try:
+            referencia = datetime.date.fromisoformat(recebido)
+        except ValueError:
+            referencia = datetime.date.today()
+        codigos = _todos_os_codigos(texto, referencia)
+
+        # ---- despesa sugerida ----
+        valor_ia = None
+        if client:
+            # O Gemini fica para quando ele é de fato necessário: sem regra de
+            # remetente, ou sem nenhum boleto com valor próprio. É a chamada que
+            # domina o tempo da busca (uma por email candidato), e num carnê com
+            # 60 parcelas ela não tem nada a acrescentar — valor e vencimento
+            # saem da linha digitável, que não alucina.
+            tem_valor_proprio = any(c['tipo_codigo'] == 'boleto' and c['valor_num'] for c in codigos)
+            if despesa_conhecida and tem_valor_proprio:
+                despesa, origem_sugestao = despesa_conhecida, 'regra'
+            else:
+                info = _gemini_extrair(client, texto, list(despesas_por_nome.keys()))
+                despesa_ia = despesas_por_nome.get(info.get('despesa_sugerida') or '')
+                despesa = despesa_conhecida or despesa_ia
+                origem_sugestao = 'regra' if despesa_conhecida else ('ia' if despesa_ia else None)
+                bruto = info.get('valor')
+                valor_ia = _fmt_valor(bruto) if isinstance(bruto, (int, float)) else None
+        else:
+            despesa = sugerida_kw
+            origem_sugestao = 'regra' if despesa_conhecida else ('palavra_chave' if sugerida_kw else None)
+            if not despesa and not codigos:
+                continue
+            _, _, valor_ia = _extrair_codigo_regex(texto)
+
+        # Pix e boleto sem valor no código herdam o valor lido do texto — é o
+        # único que existe nesses casos. Com vários códigos no mesmo email não
+        # dá para saber de qual parcela esse valor é, então só vale quando há
+        # um código sozinho.
+        if valor_ia and len(codigos) == 1 and not codigos[0]['valor']:
+            codigos[0]['valor'] = valor_ia
+
+        mes_email = competencia_da_data(recebido, dia_corte) if len(recebido) == 10 else None
+
+        for c in codigos:
+            # O mês vem do **vencimento do próprio boleto**, não da data do
+            # email: num carnê todas as parcelas chegam no mesmo email e cairiam
+            # todas no mesmo mês. Sem vencimento (Pix), vale a competência do
+            # email, como antes.
+            c['mes_ref_sugerido'] = (competencia_da_data(c['vencimento'], dia_corte)
+                                     if c.get('vencimento') else mes_email)
+            c['ja_associado'] = _marcar_ja_associado(c, associados)
+            c.pop('valor_num', None)
+
+        if not codigos and not notas:
+            notas.append('nenhum boleto ou Pix no corpo nem nos anexos — '
+                         'abra o email manualmente')
+
+        achados.append({
             'id': m['id'],
             'assunto': assunto,
             'remetente': remetente,
             'data': m.get('receivedDateTime'),
-            'valor_encontrado': valor,
-            'linha_digitavel': linha_digitavel,
-            'tipo_codigo': tipo_codigo,
+            'mes_ref_sugerido': mes_email,
             'despesa_sugerida_id': despesa['id'] if despesa else None,
             'despesa_sugerida_nome': despesa['nome'] if despesa else None,
             'origem_sugestao': origem_sugestao,
+            'codigos': codigos,
+            'notas': notas,
         })
 
-    return boletos, len(mensagens), lotes_com_falha
+    return achados, len(mensagens), lotes_com_falha
 
 
 def _rodar_busca(token, dias):
@@ -754,6 +980,22 @@ def _rodar_busca(token, dias):
     conn = get_db()
     despesas = conn.execute("SELECT * FROM despesa WHERE ativo=1 ORDER BY nome").fetchall()
     regras = {r['remetente']: r['despesa_id'] for r in conn.execute('SELECT remetente, despesa_id FROM email_despesa_regra').fetchall()}
+    # Códigos já gravados, para a busca repetida não pedir de novo o que já está
+    # resolvido. A chave é o código **sem pontuação**: o mesmo boleto gravado
+    # como '03399.80740 ...' e reextraído com outro espaçamento tem de casar.
+    associados = {}
+    for r in conn.execute(
+        'SELECT l.despesa_id, l.mes_ref, l.valor_esperado, l.linha_digitavel, '
+        '       l.tipo_codigo, d.nome AS despesa_nome '
+        '  FROM lancamento l JOIN despesa d ON d.id = l.despesa_id '
+        " WHERE l.linha_digitavel IS NOT NULL AND l.linha_digitavel <> ''"
+    ).fetchall():
+        bruto = r['linha_digitavel']
+        chave = _so_digitos(bruto) if r['tipo_codigo'] != 'pix' else re.sub(r'\s+', '', bruto)
+        associados[chave] = {
+            'despesa_id': r['despesa_id'], 'despesa_nome': r['despesa_nome'],
+            'mes_ref': r['mes_ref'], 'valor_esperado': r['valor_esperado'],
+        }
     # O mês de destino da associação é competência, não mês de calendário — e
     # essa regra mora no servidor. A tela derivava o mês do fim do período
     # pesquisado, o que arquivava um boleto de outubro em setembro quando a
@@ -774,8 +1016,9 @@ def _rodar_busca(token, dias):
             _busca_job['dia_atual'] = dia
 
         try:
-            boletos_dia, total_dia, falha_dia = _buscar_dia(
-                token, dia, despesas, despesas_por_nome, despesas_por_id, regras, client
+            emails_dia, total_dia, falha_dia = _buscar_dia(
+                token, dia, despesas, despesas_por_nome, despesas_por_id, regras,
+                client, associados, dia_corte
             )
         except requests.HTTPError as e:
             with _lock:
@@ -786,17 +1029,10 @@ def _rodar_busca(token, dias):
                 _busca_job['erro'] = f'Falha inesperada ao buscar {dia}: {e}'
             break
 
-        # Competência sugerida de cada achado, pela regra do servidor. É
-        # sugestão: a tela ainda deixa trocar, mas o padrão deixa de ser um
-        # recorte de calendário feito no cliente.
-        for b in boletos_dia:
-            recebido = (b.get('data') or '')[:10]
-            b['mes_ref_sugerido'] = (competencia_da_data(recebido, dia_corte)
-                                     if len(recebido) == 10 else None)
-
         with _lock:
-            _busca_job['boletos'].extend(boletos_dia)
-            _busca_job['boletos'].sort(key=lambda b: b['data'] or '', reverse=True)
+            _busca_job['emails'].extend(emails_dia)
+            _busca_job['emails'].sort(key=lambda e: e['data'] or '', reverse=True)
+            _busca_job['total_codigos'] += sum(len(e['codigos']) for e in emails_dia)
             _busca_job['total_emails'] += total_dia
             _busca_job['dias_processados'] += 1
             if falha_dia:
@@ -855,11 +1091,16 @@ def diagnostico():
             item['erro_corpo'] = str(e)[:200]
 
         texto_corpo = _extrair_texto_html(html)
+        try:
+            ref = datetime.date.fromisoformat(item['recebido'])
+        except ValueError:
+            ref = datetime.date.today()
         achado_corpo = RE_LINHA_DIGITAVEL.search(texto_corpo)
         item['corpo'] = {
             'tem_boleto': bool(achado_corpo),
             'boleto': re.sub(r'\s+', ' ', achado_corpo.group()).strip() if achado_corpo else None,
             'tem_pix': bool(RE_PIX.search(texto_corpo)),
+            'codigos': _todos_os_codigos(texto_corpo, ref),
         }
 
         # Anexos: a Porto manda a fatura como PDF anexado e cifrado, sem link
@@ -872,17 +1113,25 @@ def diagnostico():
                                   headers=headers, timeout=60)
                 for att in ar.json().get('value', []):
                     a_item = {'nome': att.get('name'), 'tipo': att.get('contentType'),
-                              'bytes': att.get('size')}
-                    if att.get('contentType') == 'application/pdf' and att.get('contentBytes'):
+                              'bytes': att.get('size'), 'reconhecido_como_pdf': _e_pdf(att)}
+                    # `_e_pdf` em vez de comparar contentType: emissor que manda
+                    # o carnê como octet-stream tinha o anexo ignorado, e o
+                    # diagnóstico precisa mostrar justamente essa diferença
+                    if _e_pdf(att) and att.get('contentBytes'):
                         bruto = base64.b64decode(att['contentBytes'])
-                        a_item['abriu_sem_senha'] = bool(_texto_de_pdf(bruto))
-                        if senha:
-                            txt = _texto_de_pdf(bruto, senha)
-                            a_item['abriu_com_senha'] = bool(txt)
-                            ach = RE_LINHA_DIGITAVEL.search(txt)
-                            a_item['tem_boleto'] = bool(ach)
-                            if ach:
-                                item['BOLETO'] = re.sub(r'\s+', ' ', ach.group()).strip()
+                        texto_anexo = _texto_de_pdf(bruto)
+                        a_item['abriu_sem_senha'] = bool(texto_anexo)
+                        if senha and not texto_anexo:
+                            texto_anexo = _texto_de_pdf(bruto, senha)
+                            a_item['abriu_com_senha'] = bool(texto_anexo)
+                        a_item['chars_extraidos'] = len(texto_anexo)
+                        # TODOS os códigos do anexo: é o ponto do carnê de
+                        # financiamento, que traz dezenas de parcelas num PDF só
+                        codigos = _todos_os_codigos(texto_anexo, ref)
+                        a_item['qtd_codigos'] = len(codigos)
+                        a_item['codigos'] = codigos
+                        if codigos:
+                            item['BOLETO'] = codigos[0]['codigo']
                     item['anexos'].append(a_item)
             except Exception as e:
                 item['erro_anexos'] = str(e)[:200]
@@ -957,9 +1206,10 @@ def buscar_iniciar():
             return jsonify({'ok': False, 'msg': 'Já existe uma busca em andamento — aguarde ou cancele antes de iniciar outra.'}), 409
         _busca_job.update({
             'rodando': True, 'cancelar': False, 'cancelado': False, 'concluido': False,
-            'erro': None, 'avisos': [], 'boletos': [], 'total_emails': 0,
-            'despesas_pesquisadas': 0, 'dia_atual': dias[0], 'total_dias': len(dias),
-            'dias_processados': 0, 'periodo': {'ini': ini, 'fim': fim},
+            'erro': None, 'avisos': [], 'emails': [], 'total_codigos': 0,
+            'total_emails': 0, 'despesas_pesquisadas': 0, 'dia_atual': dias[0],
+            'total_dias': len(dias), 'dias_processados': 0,
+            'periodo': {'ini': ini, 'fim': fim},
         })
 
     threading.Thread(target=_rodar_busca, args=(token, dias), daemon=True).start()
@@ -1001,6 +1251,23 @@ def _aplicar_associacao(conn, item: dict):
     if not (despesa_id and mes_ref):
         raise ValueError('despesa_id e mes_ref são obrigatórios')
 
+    # Uma despesa só tem um código por competência (UNIQUE(mes_ref, despesa_id)).
+    # Associar um carnê inteiro de uma vez põe dezenas de parcelas na mesma
+    # despesa, e duas caindo na mesma competência fariam a segunda sobrescrever
+    # a primeira sem ninguém ver. Trabalho já confirmado não se perde calado
+    # (princípio 2): o item é recusado e volta como conflito para a tela.
+    atual = conn.execute(
+        'SELECT linha_digitavel FROM lancamento WHERE despesa_id=? AND mes_ref=?',
+        (despesa_id, mes_ref)
+    ).fetchone()
+    if (atual and atual['linha_digitavel'] and linha_digitavel
+            and _so_digitos(atual['linha_digitavel']) != _so_digitos(linha_digitavel)
+            and not item.get('substituir')):
+        return {
+            'conflito': True, 'mes_ref': mes_ref, 'despesa_id': despesa_id,
+            'codigo_atual': atual['linha_digitavel'], 'codigo_novo': linha_digitavel,
+        }
+
     conn.execute(
         'INSERT OR IGNORE INTO lancamento (mes_ref, despesa_id, valor_esperado, status) VALUES (?,?,?,\'nao_encontrado\')',
         (mes_ref, despesa_id, valor or 0)
@@ -1028,6 +1295,8 @@ def _aplicar_associacao(conn, item: dict):
         if nova and despesa:
             _registrar_regra_email(remetente, despesa['nome'])
 
+    return None
+
 
 @bp.route('/email/associar/lote', methods=['POST'])
 def associar_lote():
@@ -1040,16 +1309,23 @@ def associar_lote():
         return jsonify({'ok': False, 'msg': 'Nenhuma associação para confirmar'}), 400
 
     conn = get_db()
+    conflitos, aplicadas = [], 0
     try:
         for item in itens:
-            _aplicar_associacao(conn, item)
+            conflito = _aplicar_associacao(conn, item)
+            if conflito:
+                conflitos.append(conflito)
+            else:
+                aplicadas += 1
     except ValueError as e:
         conn.close()
         return jsonify({'ok': False, 'msg': str(e)}), 400
 
     conn.commit()
     conn.close()
-    return jsonify({'ok': True, 'aplicadas': len(itens)})
+    # Conflito não é erro da requisição: o que deu para gravar foi gravado, e o
+    # que foi recusado volta nomeado para a tela poder dizer qual mês e por quê.
+    return jsonify({'ok': True, 'aplicadas': aplicadas, 'conflitos': conflitos})
 
 
 def _registrar_regra_email(remetente: str, despesa_nome: str):
