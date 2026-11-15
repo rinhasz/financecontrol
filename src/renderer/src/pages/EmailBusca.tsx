@@ -3,35 +3,53 @@ import { api } from '../lib/api'
 import { cn, currentMesRef, mesRefLabel } from '../lib/utils'
 import { DespesaPicker } from '../components/DespesaPicker'
 
-interface Boleto {
+/** Um código de pagamento. Um email pode ter **vários**: o carnê de um
+ *  financiamento traz o cronograma inteiro num PDF só, e a versão anterior
+ *  desta tela mostrava um código por email — as outras parcelas eram
+ *  descartadas sem ninguém ver. */
+interface Codigo {
+  /** o código sem pontuação — identidade estável entre buscas */
+  chave: string
+  codigo: string
+  tipo_codigo: 'boleto' | 'pix'
+  /** do próprio código, quando boleto (não é chute de IA) */
+  valor: string | null
+  vencimento: string | null
+  /** os 4 dígitos verificadores conferem? */
+  dv_ok: boolean
+  /** competência do **vencimento** da parcela, não da data do email */
+  mes_ref_sugerido: string | null
+  ja_associado: {
+    despesa_id: number
+    despesa_nome: string
+    mes_ref: string
+    valor_esperado: number
+    /** null quando não há valor dos dois lados para comparar */
+    valor_bate: boolean | null
+  } | null
+}
+
+interface EmailAchado {
   id: string
   assunto: string
   remetente: string
   data: string | null
-  valor_encontrado: string | null
-  linha_digitavel: string | null
-  tipo_codigo: 'boleto' | 'pix' | null
-  /** Competência sugerida pelo servidor, pela regra do dia de corte. A tela
-   *  não recalcula isso: derivar do calendário aqui já arquivou boleto no mês
-   *  errado. */
-  mes_ref_sugerido?: string | null
+  mes_ref_sugerido: string | null
   despesa_sugerida_id: number | null
   despesa_sugerida_nome: string | null
   origem_sugestao: 'regra' | 'ia' | 'palavra_chave' | null
+  codigos: Codigo[]
+  /** por que não saiu código, quando não saiu — nada silencioso */
+  notas: string[]
 }
 
 interface Despesa { id: number; nome: string }
 
-interface Pendente {
-  boletoId: string
-  despesaId: number
-  despesaNome: string
-  mesRef: string
-  linhaDigitavel: string | null
-  tipoCodigo: string | null
-  valor: string | null
-  remetente: string
-  origem: 'manual' | 'regra'
+interface Conflito {
+  mes_ref: string
+  despesa_id: number
+  codigo_atual: string
+  codigo_novo: string
 }
 
 interface BuscaStatus {
@@ -40,7 +58,8 @@ interface BuscaStatus {
   concluido: boolean
   erro: string | null
   avisos: string[]
-  boletos: Boleto[]
+  emails: EmailAchado[]
+  total_codigos: number
   total_emails: number
   despesas_pesquisadas: number
   dia_atual: string | null
@@ -58,6 +77,10 @@ function addMonths(dateStr: string, n: number): string {
   return isoDate(d)
 }
 
+function dataBR(iso: string | null): string {
+  return iso ? new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('pt-BR') : ''
+}
+
 const POLL_MS = 1200
 const ULTIMA_BUSCA_KEY = 'financecontrol:ultimaBuscaEmailAssociada'
 
@@ -72,7 +95,8 @@ export function EmailBusca({ active }: { active: boolean }) {
   const [buscando, setBuscando] = useState(false)
   const [cancelando, setCancelando] = useState(false)
   const [buscaIniciada, setBuscaIniciada] = useState(false)
-  const [boletos, setBoletos] = useState<Boleto[]>([])
+  const [emails, setEmails] = useState<EmailAchado[]>([])
+  const [totalCodigos, setTotalCodigos] = useState(0)
   const [pesquisadas, setPesquisadas] = useState(0)
   const [totalEmails, setTotalEmails] = useState(0)
   const [totalDias, setTotalDias] = useState(0)
@@ -85,22 +109,19 @@ export function EmailBusca({ active }: { active: boolean }) {
   const [despesas, setDespesas] = useState<Despesa[]>([])
   const pollRef = useRef<number | null>(null)
 
-  const [associando, setAssociando] = useState<string | null>(null)
-  const [despesaEscolhida, setDespesaEscolhida] = useState('')
-  const [novaDespesaNome, setNovaDespesaNome] = useState('')
-  const [mesEscolhido, setMesEscolhido] = useState(currentMesRef())
+  // Escolhas da tela. A despesa é por **email** (todas as parcelas de um carnê
+  // são da mesma despesa) e o mês é por **código** (cada parcela tem o seu).
+  // Guardadas por id, não sincronizadas por efeito: o polling troca a lista a
+  // cada 1,2s e um efeito de sincronia apagaria o que você acabou de escolher.
+  const [despesaPorEmail, setDespesaPorEmail] = useState<Record<string, string>>({})
+  const [novaDespesaPorEmail, setNovaDespesaPorEmail] = useState<Record<string, string>>({})
+  const [mesPorCodigo, setMesPorCodigo] = useState<Record<string, string>>({})
 
-  // associações represadas em tela — nada é gravado até "Confirmar tudo"
-  const [pendentes, setPendentes] = useState<Pendente[]>([])
-  const [confirmados, setConfirmados] = useState<Set<string>>(new Set())
-  const confirmadosRef = useRef<Set<string>>(new Set())
-  const [confirmando, setConfirmando] = useState(false)
+  // Gravado nesta sessão — some da fila sem precisar refazer a busca.
+  const [gravados, setGravados] = useState<Record<string, { despesaNome: string; mesRef: string }>>({})
+  const [conflitos, setConflitos] = useState<Record<string, Conflito>>({})
+  const [gravando, setGravando] = useState<string | null>(null)
 
-  // "Repetir mês anterior": enquanto ativo, boletos com sugestão vinda de
-  // regra já conhecida entram sozinhos em pendentes (ver aplicarStatus)
-  const [repetindo, setRepetindo] = useState(false)
-  const repetindoRef = useRef(false)
-  const mesAlvoRepeticaoRef = useRef(currentMesRef())
   const [ultimaBusca, setUltimaBusca] = useState<{ ini: string; fim: string } | null>(null)
 
   const [codigoDispositivo, setCodigoDispositivo] = useState<{ verification_uri: string; user_code: string } | null>(null)
@@ -127,17 +148,9 @@ export function EmailBusca({ active }: { active: boolean }) {
     }
   }
 
-  function marcarConfirmados(ids: string[]) {
-    setConfirmados(prev => {
-      const next = new Set(prev)
-      ids.forEach(id => next.add(id))
-      confirmadosRef.current = next
-      return next
-    })
-  }
-
   function aplicarStatus(s: BuscaStatus) {
-    setBoletos(s.boletos)
+    setEmails(s.emails || [])
+    setTotalCodigos(s.total_codigos || 0)
     setTotalEmails(s.total_emails)
     setPesquisadas(s.despesas_pesquisadas)
     setTotalDias(s.total_dias)
@@ -146,29 +159,6 @@ export function EmailBusca({ active }: { active: boolean }) {
     setAvisos(s.avisos || [])
     setBuscaCancelada(s.cancelado)
     if (s.erro) setErro(s.erro)
-
-    if (repetindoRef.current) {
-      setPendentes(prev => {
-        const jaTem = new Set(prev.map(p => p.boletoId))
-        const novos = s.boletos.filter(b =>
-          b.origem_sugestao === 'regra' && b.despesa_sugerida_id != null &&
-          !jaTem.has(b.id) && !confirmadosRef.current.has(b.id)
-        )
-        if (novos.length === 0) return prev
-        return [...prev, ...novos.map(b => ({
-          boletoId: b.id,
-          despesaId: b.despesa_sugerida_id as number,
-          despesaNome: b.despesa_sugerida_nome || '',
-          // competência do servidor primeiro; o alvo da repetição é só reserva
-          mesRef: b.mes_ref_sugerido || mesAlvoRepeticaoRef.current,
-          linhaDigitavel: b.linha_digitavel,
-          tipoCodigo: b.tipo_codigo,
-          valor: b.valor_encontrado,
-          remetente: b.remetente,
-          origem: 'regra' as const,
-        }))]
-      })
-    }
 
     if (!s.rodando) {
       setBuscando(false)
@@ -236,20 +226,21 @@ export function EmailBusca({ active }: { active: boolean }) {
     }
   }
 
-  async function buscar(iniParam?: string, fimParam?: string, repetir = false) {
+  async function buscar(iniParam?: string, fimParam?: string) {
     const ini = iniParam ?? dataIni
     const fim = fimParam ?? dataFim
     setErro('')
     setAvisos([])
-    setBoletos([])
+    setEmails([])
+    setTotalCodigos(0)
     setTotalEmails(0)
     setDiasProcessados(0)
     setBuscaCancelada(false)
-    setPendentes([])
-    setConfirmados(new Set())
-    confirmadosRef.current = new Set()
-    setRepetindo(repetir)
-    repetindoRef.current = repetir
+    setDespesaPorEmail({})
+    setNovaDespesaPorEmail({})
+    setMesPorCodigo({})
+    setGravados({})
+    setConflitos({})
     setBuscando(true)
     setBuscaIniciada(true)
     try {
@@ -273,11 +264,7 @@ export function EmailBusca({ active }: { active: boolean }) {
     const novaFim = addMonths(ultimaBusca.fim, 1)
     setDataIni(novaIni)
     setDataFim(novaFim)
-    // Reserva, não fonte: o mês de cada boleto vem de `mes_ref_sugerido`, pela
-    // regra de competência do servidor. Recortar o fim do período em YYYY-MM
-    // ignora o dia de corte e arquivava boleto de outubro em setembro.
-    mesAlvoRepeticaoRef.current = novaFim.slice(0, 7)
-    buscar(novaIni, novaFim, true)
+    buscar(novaIni, novaFim)
   }
 
   async function cancelar() {
@@ -296,180 +283,292 @@ export function EmailBusca({ active }: { active: boolean }) {
     setTimeout(() => setCopiado(null), 1500)
   }
 
-  function abrirAssociacao(b: Boleto) {
-    setAssociando(associando === b.id ? null : b.id)
-    setDespesaEscolhida(b.despesa_sugerida_id ? String(b.despesa_sugerida_id) : '')
-    setNovaDespesaNome('')
-    setMesEscolhido(currentMesRef())
+  // ---------------------------------------------------------------- escolhas
+
+  function despesaDoEmail(e: EmailAchado): string {
+    const escolhido = despesaPorEmail[e.id]
+    if (escolhido !== undefined) return escolhido
+    return e.despesa_sugerida_id ? String(e.despesa_sugerida_id) : ''
   }
 
-  function adicionarPendente(b: Boleto, despesaId: number, mesRef: string, origem: 'manual' | 'regra', despesaNomeOverride?: string) {
-    const despesa = despesas.find(d => d.id === despesaId)
-    setPendentes(prev => {
-      if (prev.some(p => p.boletoId === b.id)) return prev
-      return [...prev, {
-        boletoId: b.id,
-        despesaId,
-        despesaNome: despesaNomeOverride || despesa?.nome || b.despesa_sugerida_nome || '',
-        mesRef,
-        linhaDigitavel: b.linha_digitavel,
-        tipoCodigo: b.tipo_codigo,
-        valor: b.valor_encontrado,
-        remetente: b.remetente,
-        origem,
-      }]
+  function mesDoCodigo(e: EmailAchado, c: Codigo): string {
+    const escolhido = mesPorCodigo[c.chave]
+    if (escolhido !== undefined) return escolhido
+    // o vencimento do próprio boleto manda; a data do email é só reserva
+    return c.mes_ref_sugerido || e.mes_ref_sugerido || currentMesRef()
+  }
+
+  function nomeDaDespesa(id: string): string {
+    return despesas.find(d => String(d.id) === id)?.nome || ''
+  }
+
+  /** Códigos que ainda faltam confirmar neste email. */
+  function pendentesDo(e: EmailAchado): Codigo[] {
+    return e.codigos.filter(c => !c.ja_associado && !gravados[c.chave])
+  }
+
+  // ---------------------------------------------------------------- gravação
+
+  /** Cria a despesa nova quando o email está marcado como "nova despesa",
+   *  devolvendo o id. Feito uma vez por email, não por parcela. */
+  async function resolverDespesaId(e: EmailAchado): Promise<number | null> {
+    const sel = despesaDoEmail(e)
+    if (sel !== 'nova') return sel ? Number(sel) : null
+
+    const nome = (novaDespesaPorEmail[e.id] || '').trim()
+    if (!nome) return null
+    const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+    const primeiro = e.codigos.find(c => c.valor)
+    const valorPadrao = primeiro?.valor
+      ? Number(primeiro.valor.replace(/\./g, '').replace(',', '.'))
+      : undefined
+    const res = await api.catalogo.upsert({
+      nome,
+      tipo_valor: 'variavel',
+      padrao_variabilidade: 'variavel_nao_sazonal',
+      valor_padrao: valorPadrao,
+      regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
     })
+    setDespesas(ds => [...ds, { id: res.id, nome }])
+    setDespesaPorEmail(prev => ({ ...prev, [e.id]: String(res.id) }))
+    return res.id
   }
 
-  async function aplicarAssociacao(b: Boleto) {
-    if (despesaEscolhida === 'nova') {
-      const nome = novaDespesaNome.trim()
-      if (!nome) return
-      const keywords = nome.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
-      const valorPadrao = b.valor_encontrado
-        ? Number(b.valor_encontrado.replace(/\./g, '').replace(',', '.'))
-        : undefined
-      const res = await api.catalogo.upsert({
-        nome,
-        tipo_valor: 'variavel',
-        padrao_variabilidade: 'variavel_nao_sazonal',
-        valor_padrao: valorPadrao,
-        regras_match: JSON.stringify({ palavras_chave: keywords, faixa_valor: null, janela_dias: 5, banco: null })
-      })
-      setDespesas(ds => [...ds, { id: res.id, nome }])
-      adicionarPendente(b, res.id, mesEscolhido, 'manual', nome)
-    } else {
-      if (!despesaEscolhida) return
-      adicionarPendente(b, Number(despesaEscolhida), mesEscolhido, 'manual')
-    }
-    setAssociando(null)
-  }
-
-  function desfazerPendente(boletoId: string) {
-    setPendentes(prev => prev.filter(p => p.boletoId !== boletoId))
-  }
-
-  function cancelarTudo() {
-    setPendentes([])
-  }
-
-  async function confirmarTudo() {
-    if (pendentes.length === 0) return
-    setConfirmando(true)
+  /** Grava um conjunto de códigos de um mesmo email. É o único caminho que
+   *  persiste: até clicar aqui, a busca é só leitura. */
+  async function confirmar(e: EmailAchado, alvos: Codigo[], rotulo: string, substituir = false) {
+    if (alvos.length === 0) return
+    setErro('')
+    setGravando(rotulo)
     try {
-      const itens = pendentes.map(p => ({
-        despesa_id: p.despesaId,
-        mes_ref: p.mesRef,
-        linha_digitavel: p.linhaDigitavel,
-        tipo_codigo: p.tipoCodigo,
-        valor: p.valor,
-        remetente: p.remetente,
+      const despesaId = await resolverDespesaId(e)
+      if (!despesaId) {
+        setErro('Escolha a despesa antes de confirmar.')
+        return
+      }
+      const itens = alvos.map(c => ({
+        despesa_id: despesaId,
+        mes_ref: mesDoCodigo(e, c),
+        linha_digitavel: c.codigo,
+        tipo_codigo: c.tipo_codigo,
+        valor: c.valor,
+        remetente: e.remetente,
+        substituir,
       }))
       const res = await api.email.associarLote(itens)
       if (!res.ok) {
-        setErro(res.msg || 'Erro ao confirmar associações')
+        setErro(res.msg || 'Erro ao confirmar')
         return
       }
-      marcarConfirmados(pendentes.map(p => p.boletoId))
-      setPendentes([])
+
+      // o backend recusa trocar código já gravado — o que voltou como
+      // conflito não foi gravado e precisa aparecer nomeado na tela
+      const recusados = new Map<string, Conflito>()
+      for (const cf of (res.conflitos || []) as Conflito[]) {
+        const alvo = alvos.find(c => c.chave === cf.codigo_novo.replace(/\D/g, ''))
+        if (alvo) recusados.set(alvo.chave, cf)
+      }
+      const nome = nomeDaDespesa(String(despesaId))
+      setGravados(prev => {
+        const next = { ...prev }
+        for (const c of alvos) {
+          if (recusados.has(c.chave)) continue
+          next[c.chave] = { despesaNome: nome, mesRef: mesDoCodigo(e, c) }
+        }
+        return next
+      })
+      // conflito resolvido (ou que não se repetiu) sai da tela; o que voltou
+      // recusado entra/permanece, com o botão "Substituir"
+      setConflitos(prev => {
+        const next = { ...prev }
+        for (const c of alvos) {
+          const cf = recusados.get(c.chave)
+          if (cf) next[c.chave] = cf
+          else delete next[c.chave]
+        }
+        return next
+      })
+
       const periodo = { ini: dataIni, fim: dataFim }
       localStorage.setItem(ULTIMA_BUSCA_KEY, JSON.stringify(periodo))
       setUltimaBusca(periodo)
-    } catch (e) {
-      setErro(String(e))
+    } catch (err) {
+      setErro(String(err))
     } finally {
-      setConfirmando(false)
+      setGravando(null)
     }
   }
 
-  const pendentePorBoleto = new Map(pendentes.map(p => [p.boletoId, p]))
-  const temGrupos = pendentes.length > 0 || confirmados.size > 0
-  const associadosOuPendentes = boletos.filter(b => pendentePorBoleto.has(b.id) || confirmados.has(b.id))
-  const naoAssociados = boletos.filter(b => !pendentePorBoleto.has(b.id) && !confirmados.has(b.id))
+  /** Tudo que tem despesa sugerida e ainda não está gravado, de todos os
+   *  emails. Existe para o caso volumoso (carnê com dezenas de parcelas). */
+  async function confirmarTodosSugeridos() {
+    for (const e of emails) {
+      if (!despesaDoEmail(e) || despesaDoEmail(e) === 'nova') continue
+      const alvos = pendentesDo(e).filter(c => !conflitos[c.chave])
+      if (alvos.length) await confirmar(e, alvos, 'tudo')
+    }
+  }
 
-  function renderBoleto(b: Boleto) {
-    const pendente = pendentePorBoleto.get(b.id)
-    const confirmado = confirmados.has(b.id)
+  const totalPendentes = emails.reduce((n, e) => n + pendentesDo(e).length, 0)
+  const prontosParaConfirmar = emails.reduce((n, e) => {
+    const sel = despesaDoEmail(e)
+    if (!sel || sel === 'nova') return n
+    return n + pendentesDo(e).filter(c => !conflitos[c.chave]).length
+  }, 0)
+  const totalGravados = Object.keys(gravados).length
+
+  // ------------------------------------------------------------------ render
+
+  function renderCodigo(e: EmailAchado, c: Codigo) {
+    const ja = c.ja_associado
+    const gravado = gravados[c.chave]
+    const conflito = conflitos[c.chave]
+    const mes = mesDoCodigo(e, c)
+    const rotulo = `${e.id}:${c.chave}`
+
     return (
-      <div key={b.id} className="px-4 py-3 text-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-zinc-300 truncate">{b.assunto}</p>
-            <p className="text-zinc-600 text-xs truncate">
-              {b.remetente} — {b.data ? new Date(b.data).toLocaleDateString('pt-BR') : ''}
-              {b.despesa_sugerida_nome && !pendente && !confirmado && (
-                <> — sugestão{b.origem_sugestao === 'regra' ? ' (associação anterior)' : b.origem_sugestao === 'ia' ? ' (IA)' : ''}:{' '}
-                  <span className="text-zinc-400">{b.despesa_sugerida_nome}</span></>
-              )}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-none">
-            {b.valor_encontrado && (
-              <span className="text-emerald-400 font-medium tabular-nums whitespace-nowrap">R$ {b.valor_encontrado}</span>
-            )}
-            {confirmado ? (
-              <span className="text-xs text-emerald-400 whitespace-nowrap">Associado ✓</span>
-            ) : pendente ? (
-              <button onClick={() => desfazerPendente(b.id)}
-                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-red-600 hover:text-red-400 transition-colors whitespace-nowrap">
-                Desfazer
+      <div key={c.chave} className="px-4 py-2.5 text-sm">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wide text-zinc-500 flex-none w-10">
+            {c.tipo_codigo === 'pix' ? 'Pix' : 'Boleto'}
+          </span>
+
+          {c.vencimento && (
+            <span className="text-xs text-zinc-400 tabular-nums flex-none" title="vencimento lido do próprio código">
+              vence {dataBR(c.vencimento)}
+            </span>
+          )}
+
+          {c.valor && (
+            <span className="text-emerald-400 font-medium tabular-nums flex-none">R$ {c.valor}</span>
+          )}
+
+          <code className="text-xs text-zinc-400 bg-zinc-900/60 px-2 py-1 rounded flex-1 min-w-[12rem] truncate">
+            {c.codigo}
+          </code>
+
+          <button onClick={() => copiar(c.codigo)}
+            className={cn('text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap flex-none',
+              copiado === c.codigo ? 'border-emerald-700 text-emerald-400' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+            {copiado === c.codigo ? 'Copiado!' : 'Copiar'}
+          </button>
+
+          {/* Já associado numa busca anterior: só a indicação, sem pedir
+              confirmação de novo — é o que torna repetir a busca indolor. */}
+          {ja && !gravado ? (
+            <span className={cn('text-xs whitespace-nowrap flex-none',
+              ja.valor_bate === false ? 'text-amber-400' : 'text-zinc-500')}>
+              {ja.valor_bate === false
+                ? `⚠ associado em ${ja.despesa_nome} / ${mesRefLabel(ja.mes_ref)}, mas o valor gravado é R$ ${ja.valor_esperado.toFixed(2).replace('.', ',')}`
+                : `já associado — ${ja.despesa_nome} / ${mesRefLabel(ja.mes_ref)} ✓`}
+            </span>
+          ) : gravado ? (
+            <span className="text-xs text-emerald-400 whitespace-nowrap flex-none">
+              gravado em {gravado.despesaNome} / {mesRefLabel(gravado.mesRef)} ✓
+            </span>
+          ) : (
+            <>
+              <input type="month" value={mes}
+                onChange={ev => setMesPorCodigo(prev => ({ ...prev, [c.chave]: ev.target.value }))}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 outline-none focus:border-emerald-500 flex-none" />
+              <button onClick={() => confirmar(e, [c], rotulo)}
+                disabled={gravando !== null || !despesaDoEmail(e)}
+                className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors whitespace-nowrap flex-none">
+                {gravando === rotulo ? 'Gravando...' : 'Confirmar'}
               </button>
-            ) : (
-              <button onClick={() => abrirAssociacao(b)}
-                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-emerald-600 hover:text-emerald-400 transition-colors whitespace-nowrap">
-                Associar
-              </button>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
-        {pendente && (
-          <p className="mt-1 text-xs text-zinc-500">
-            Pendente: <span className="text-zinc-300">{pendente.despesaNome}</span> em {mesRefLabel(pendente.mesRef)}
-            {pendente.origem === 'regra' && <span className="text-zinc-600"> (associação anterior)</span>}
+        {!c.dv_ok && (
+          <p className="mt-1 text-xs text-amber-500/90">
+            ⚠ Dígito verificador não confere — a extração do PDF pode ter trocado um dígito.
+            Confira contra o email antes de pagar.
           </p>
         )}
 
-        {b.linha_digitavel ? (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-zinc-500 flex-none">
-              {b.tipo_codigo === 'pix' ? 'Pix' : 'Boleto'}
+        {conflito && (
+          <div className="mt-1.5 flex items-center gap-2 flex-wrap text-xs text-amber-300 bg-amber-950/20 border border-amber-800/40 rounded px-2 py-1.5">
+            <span className="flex-1">
+              {mesRefLabel(conflito.mes_ref)} já tem outro código gravado
+              (<code className="text-amber-200/80">{conflito.codigo_atual}</code>) — nada foi alterado.
             </span>
-            <code className="text-xs text-zinc-400 bg-zinc-900/60 px-2 py-1 rounded flex-1 truncate">
-              {b.linha_digitavel}
-            </code>
-            <button onClick={() => copiar(b.linha_digitavel!)}
-              className={cn('text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap',
-                copiado === b.linha_digitavel
-                  ? 'border-emerald-700 text-emerald-400'
-                  : 'border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
-              {copiado === b.linha_digitavel ? 'Copiado!' : (b.tipo_codigo === 'pix' ? 'Copiar Pix' : 'Copiar linha digitável')}
+            <button onClick={() => confirmar(e, [c], rotulo, true)} disabled={gravando !== null}
+              className="px-2 py-1 rounded border border-amber-700 text-amber-300 hover:bg-amber-900/30 transition-colors whitespace-nowrap disabled:opacity-40">
+              Substituir
             </button>
           </div>
-        ) : (
-          <p className="mt-1 text-xs text-zinc-700">Código de pagamento não encontrado — abra o email manualmente.</p>
+        )}
+      </div>
+    )
+  }
+
+  function renderEmail(e: EmailAchado) {
+    const sel = despesaDoEmail(e)
+    const pendentes = pendentesDo(e)
+    const jaAssociados = e.codigos.filter(c => c.ja_associado && !gravados[c.chave]).length
+
+    return (
+      <div key={e.id} className="rounded-lg border border-zinc-800/60 overflow-hidden">
+        <div className="px-4 py-3 bg-zinc-900/40">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm text-zinc-200 truncate">{e.assunto}</p>
+              <p className="text-zinc-600 text-xs truncate">
+                {e.remetente} — {dataBR(e.data)}
+                {e.codigos.length > 0 && (
+                  <> — {e.codigos.length} código{e.codigos.length > 1 ? 's' : ''} de pagamento
+                    {jaAssociados > 0 && <span className="text-zinc-500"> ({jaAssociados} já associado{jaAssociados > 1 ? 's' : ''})</span>}
+                  </>
+                )}
+              </p>
+            </div>
+            {pendentes.length > 1 && (
+              <button onClick={() => confirmar(e, pendentes.filter(c => !conflitos[c.chave]), e.id)}
+                disabled={gravando !== null || !sel}
+                className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors whitespace-nowrap flex-none">
+                {gravando === e.id ? 'Gravando...' : `Confirmar os ${pendentes.length}`}
+              </button>
+            )}
+          </div>
+
+          {/* Despesa por email: todas as parcelas de um carnê são da mesma
+              despesa. O mês é que varia, e fica em cada linha. */}
+          {pendentes.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-zinc-500">Associar a</span>
+              <DespesaPicker despesas={despesas} value={sel}
+                onChange={v => setDespesaPorEmail(prev => ({ ...prev, [e.id]: v }))}
+                placeholder="Digite pra buscar a despesa..." allowNova
+                onSelectNova={q => {
+                  setDespesaPorEmail(prev => ({ ...prev, [e.id]: 'nova' }))
+                  setNovaDespesaPorEmail(prev => ({ ...prev, [e.id]: q }))
+                }}
+                className="w-56" />
+              {sel === 'nova' && (
+                <input value={novaDespesaPorEmail[e.id] || ''}
+                  onChange={ev => setNovaDespesaPorEmail(prev => ({ ...prev, [e.id]: ev.target.value }))}
+                  placeholder="Nome da nova despesa" autoFocus
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
+              )}
+              {e.despesa_sugerida_nome && (
+                <span className="text-xs text-zinc-600">
+                  sugestão{e.origem_sugestao === 'regra' ? ' (associação anterior)' : e.origem_sugestao === 'ia' ? ' (IA)' : ''}: {e.despesa_sugerida_nome}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {e.codigos.length > 0 && (
+          <div className="divide-y divide-zinc-800/40">
+            {e.codigos.map(c => renderCodigo(e, c))}
+          </div>
         )}
 
-        {associando === b.id && !pendente && !confirmado && (
-          <div className="mt-3 flex items-center gap-2 flex-wrap bg-zinc-900/60 rounded p-3">
-            <DespesaPicker despesas={despesas} value={despesaEscolhida} onChange={setDespesaEscolhida}
-              placeholder="Digite pra buscar a despesa..." allowNova
-              onSelectNova={q => { setDespesaEscolhida('nova'); setNovaDespesaNome(q) }}
-              className="w-56" />
-            {despesaEscolhida === 'nova' && (
-              <input value={novaDespesaNome} onChange={e => setNovaDespesaNome(e.target.value)}
-                placeholder="Nome da nova despesa" autoFocus
-                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
-            )}
-            <input type="month" value={mesEscolhido} onChange={e => setMesEscolhido(e.target.value)}
-              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 outline-none focus:border-emerald-500" />
-            <button onClick={() => aplicarAssociacao(b)}
-              disabled={!despesaEscolhida || (despesaEscolhida === 'nova' && !novaDespesaNome.trim())}
-              className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-emerald-500 transition-colors">
-              Adicionar
-            </button>
-          </div>
-        )}
+        {e.notas.map((n, i) => (
+          <p key={i} className="px-4 py-2 text-xs text-amber-500/80 border-t border-zinc-800/40">⚠ {n}</p>
+        ))}
       </div>
     )
   }
@@ -479,13 +578,13 @@ export function EmailBusca({ active }: { active: boolean }) {
       <div className="px-6 pb-4 flex-none">
         <h1 className="text-xl font-semibold text-zinc-100">Procurar em Emails</h1>
         <p className="text-sm text-zinc-500 mt-0.5">
-          Busca boletos, Pix e faturas (cartão, seguro saúde, etc.) no período escolhido — associe o que encontrar
-          a uma despesa e mês. Nada é gravado na hora: as associações ficam pendentes pra revisão e só valem
-          depois de "Confirmar tudo". Cada confirmação também vira uma regra: da próxima vez, o mesmo remetente já
-          vem pré-preenchido.
+          Busca boletos, Pix e faturas no período escolhido. Cada email aparece com <strong className="text-zinc-400">todos</strong> os
+          códigos de pagamento que tem — um carnê de financiamento traz o cronograma inteiro num PDF só. Escolha a
+          despesa do email, confira o mês de cada parcela e confirme. <strong className="text-zinc-400">Confirmar grava</strong>;
+          até clicar, a busca não altera nada. Código já associado numa busca anterior aparece só como indicação.
         </p>
         <p className="text-xs text-amber-500/80 mt-1">
-          A extração de valor/código de pagamento é automática (por IA) — confira sempre contra o email
+          Valor e vencimento de boleto são lidos do próprio código. Mesmo assim, confira contra o email
           original antes de pagar.
         </p>
       </div>
@@ -588,7 +687,7 @@ export function EmailBusca({ active }: { active: boolean }) {
             <p className="text-xs text-zinc-500">
               {cancelando
                 ? 'Parando após o dia atual...'
-                : `Buscando dia ${Math.min(diasProcessados + 1, totalDias)} de ${totalDias}${diaAtual ? ` (${new Date(diaAtual + 'T12:00:00').toLocaleDateString('pt-BR')})` : ''} — ${boletos.length} encontrado(s) até agora`}
+                : `Buscando dia ${Math.min(diasProcessados + 1, totalDias)} de ${totalDias}${diaAtual ? ` (${dataBR(diaAtual)})` : ''} — ${totalCodigos} código(s) em ${emails.length} email(s) até agora`}
             </p>
           </div>
         )}
@@ -608,46 +707,28 @@ export function EmailBusca({ active }: { active: boolean }) {
         {buscaIniciada && (
           <div className="space-y-4">
             <p className="text-sm text-zinc-500">
-              {totalEmails} emails {buscando ? 'verificados até agora' : 'no período'}, {pesquisadas} despesas no catálogo — {boletos.length} boletos/faturas encontrados.
+              {totalEmails} emails {buscando ? 'verificados até agora' : 'no período'}, {pesquisadas} despesas no
+              catálogo — {emails.length} email(s) com cobrança, {totalCodigos} código(s) de pagamento.
+              {totalGravados > 0 && <span className="text-emerald-400"> {totalGravados} gravado(s) nesta sessão.</span>}
             </p>
 
-            {pendentes.length > 0 && (
+            {prontosParaConfirmar > 1 && (
               <div className="sticky top-0 z-10 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 shadow-lg">
                 <p className="text-sm text-zinc-300 flex-1">
-                  {pendentes.length} associaç{pendentes.length === 1 ? 'ão pendente' : 'ões pendentes'} — nada foi salvo ainda.
+                  {totalPendentes} código(s) por confirmar — {prontosParaConfirmar} já com despesa definida.
                 </p>
-                <button onClick={cancelarTudo} disabled={confirmando}
-                  className="px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 text-sm hover:border-red-600 hover:text-red-400 transition-colors disabled:opacity-40">
-                  Cancelar tudo
-                </button>
-                <button onClick={confirmarTudo} disabled={confirmando}
+                <button onClick={confirmarTodosSugeridos} disabled={gravando !== null}
                   className="px-4 py-1.5 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 transition-colors disabled:opacity-40">
-                  {confirmando ? 'Confirmando...' : `Confirmar tudo (${pendentes.length})`}
+                  {gravando === 'tudo' ? 'Gravando...' : `Confirmar todos (${prontosParaConfirmar})`}
                 </button>
               </div>
             )}
 
-            {!buscando && boletos.length === 0 && (
+            {!buscando && emails.length === 0 && (
               <p className="text-sm text-zinc-600">Nada encontrado nesse período (de {totalEmails} emails verificados) — tente um intervalo maior ou confira se o email não está em outra pasta.</p>
             )}
 
-            {associadosOuPendentes.length > 0 && (
-              <div>
-                <p className="text-xs uppercase tracking-wide text-zinc-600 mb-2">Associados / pendentes</p>
-                <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
-                  {associadosOuPendentes.map(renderBoleto)}
-                </div>
-              </div>
-            )}
-
-            {naoAssociados.length > 0 && (
-              <div>
-                {temGrupos && <p className="text-xs uppercase tracking-wide text-zinc-600 mb-2">Não associados</p>}
-                <div className="rounded-lg overflow-hidden border border-zinc-800/60 divide-y divide-zinc-800/40">
-                  {naoAssociados.map(renderBoleto)}
-                </div>
-              </div>
-            )}
+            {emails.map(renderEmail)}
           </div>
         )}
       </div>

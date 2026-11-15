@@ -208,9 +208,13 @@ export const api = {
     buscarIniciar: (dataIni: string, dataFim: string) => post('/api/email/buscar/iniciar', { data_ini: dataIni, data_fim: dataFim }),
     buscarStatus: () => get('/api/email/buscar/status'),
     buscarCancelar: () => post('/api/email/buscar/cancelar'),
+    // `substituir` só vai quando o usuário resolveu um conflito na tela: sem
+    // ele, o backend recusa trocar um código já gravado em outro mês/despesa.
+    // Timeout maior que o padrão: um carnê confirmado de uma vez grava dezenas
+    // de lançamentos numa requisição só.
     associarLote: (itens: {
       despesa_id: number; mes_ref: string; linha_digitavel: string | null; tipo_codigo: string | null
-      valor: string | null; remetente: string
-    }[]) => post('/api/email/associar/lote', { itens })
+      valor: string | null; remetente: string; substituir?: boolean
+    }[]) => post('/api/email/associar/lote', { itens }, 60_000)
   }
 }
